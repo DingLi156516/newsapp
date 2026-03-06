@@ -1,0 +1,90 @@
+/**
+ * app/admin/review/page.tsx — Admin review queue page.
+ *
+ * Protected by useRequireAuth + useAdmin. Non-admin authenticated users
+ * see an access denied message.
+ */
+'use client'
+
+import { useRouter } from 'next/navigation'
+import { ArrowLeft, ShieldCheck } from 'lucide-react'
+import { useRequireAuth } from '@/lib/hooks/use-require-auth'
+import { useAdmin } from '@/lib/hooks/use-admin'
+import { UserMenu } from '@/components/organisms/UserMenu'
+import { ReviewQueue } from '@/components/organisms/ReviewQueue'
+import { Skeleton } from '@/components/atoms/Skeleton'
+
+export default function AdminReviewPage() {
+  const router = useRouter()
+  useRequireAuth()
+  const { isAdmin, isLoading } = useAdmin()
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen mesh-gradient">
+        <div className="mx-auto max-w-6xl px-4 py-6 space-y-6">
+          <Skeleton className="h-10 w-40" />
+          <Skeleton className="h-64 w-full rounded-[24px]" />
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen mesh-gradient">
+        <div className="mx-auto max-w-3xl px-4 py-6 space-y-6">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => router.push('/')}
+              className="glass-pill flex items-center gap-1.5 px-3 py-2 text-sm text-white/80 hover:text-white transition-colors"
+            >
+              <ArrowLeft size={14} />
+              Feed
+            </button>
+            <UserMenu />
+          </div>
+          <div className="glass flex flex-col items-center justify-center py-16 text-center space-y-3">
+            <ShieldCheck size={32} className="text-red-400" />
+            <p className="text-white/80 text-sm">
+              Access denied. Admin privileges required.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen mesh-gradient">
+      <div className="mx-auto max-w-6xl px-4 py-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push('/')}
+              className="glass-pill flex items-center gap-1.5 px-3 py-2 text-sm text-white/80 hover:text-white transition-colors"
+            >
+              <ArrowLeft size={14} />
+              Feed
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center justify-center w-8 h-8 rounded-full bg-white/10 border border-white/10">
+                <ShieldCheck size={16} className="text-white/80" />
+              </div>
+              <h1
+                className="text-xl font-bold text-white"
+                style={{ fontFamily: 'DM Serif Display, Georgia, serif' }}
+              >
+                Review Queue
+              </h1>
+            </div>
+          </div>
+          <UserMenu />
+        </div>
+
+        <ReviewQueue />
+      </div>
+    </div>
+  )
+}
