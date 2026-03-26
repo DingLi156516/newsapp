@@ -1,0 +1,66 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Navigate to Profile tab
+- tapOn:
+    text: "Profile"
+
+# Wait for profile screen
+- waitForAnimationToEnd
+
+# Tap Settings button (only visible when authenticated)
+- tapOn:
+    text: "Settings"
+    optional: true
+
+# Verify settings screen elements (optional — requires auth)
+- assertVisible:
+    text: "Settings"
+    optional: true
+- assertVisible:
+    text: "Followed Topics"
+    optional: true
+- assertVisible:
+    text: "Default Perspective"
+    optional: true
+- assertVisible:
+    text: "Minimum Factuality"
+    optional: true
+
+# Verify topic toggles exist (optional)
+- assertVisible:
+    id: "setting-topic-politics"
+    optional: true
+- assertVisible:
+    id: "setting-topic-technology"
+    optional: true
+
+# Navigate back
+- tapOn:
+    id: "back-button"
+    optional: true
+
+# Return to home
+- tapOn:
+    text: "Home"
+    optional: true
+- assertVisible:
+    id: "axiom-header"

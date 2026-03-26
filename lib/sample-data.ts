@@ -22,21 +22,21 @@ import type { NewsArticle, NewsSource } from './types'
  * (e.g., sampleSources[0] is The Guardian), so don't re-order.
  */
 export const sampleSources: NewsSource[] = [
-  { id: 's1', name: 'The Guardian', bias: 'left', factuality: 'high', ownership: 'non-profit', url: 'theguardian.com' },
-  { id: 's2', name: 'BBC News', bias: 'center', factuality: 'very-high', ownership: 'state-funded', url: 'bbc.com' },
-  { id: 's3', name: 'Reuters', bias: 'center', factuality: 'very-high', ownership: 'corporate', url: 'reuters.com' },
-  { id: 's4', name: 'Fox News', bias: 'right', factuality: 'mixed', ownership: 'corporate', url: 'foxnews.com' },
-  { id: 's5', name: 'MSNBC', bias: 'left', factuality: 'mixed', ownership: 'corporate', url: 'msnbc.com' },
-  { id: 's6', name: 'Wall Street Journal', bias: 'lean-right', factuality: 'high', ownership: 'corporate', url: 'wsj.com' },
-  { id: 's7', name: 'New York Times', bias: 'lean-left', factuality: 'high', ownership: 'corporate', url: 'nytimes.com' },
-  { id: 's8', name: 'AP News', bias: 'center', factuality: 'very-high', ownership: 'non-profit', url: 'apnews.com' },
-  { id: 's9', name: 'Jacobin', bias: 'far-left', factuality: 'mixed', ownership: 'independent', url: 'jacobin.com' },
-  { id: 's10', name: 'Breitbart', bias: 'far-right', factuality: 'low', ownership: 'independent', url: 'breitbart.com' },
-  { id: 's11', name: 'NPR', bias: 'lean-left', factuality: 'very-high', ownership: 'non-profit', url: 'npr.org' },
-  { id: 's12', name: 'The Economist', bias: 'lean-right', factuality: 'very-high', ownership: 'corporate', url: 'economist.com' },
-  { id: 's13', name: 'Al Jazeera', bias: 'lean-left', factuality: 'high', ownership: 'state-funded', url: 'aljazeera.com' },
-  { id: 's14', name: 'Washington Post', bias: 'lean-left', factuality: 'high', ownership: 'corporate', url: 'washingtonpost.com' },
-  { id: 's15', name: 'National Review', bias: 'right', factuality: 'mixed', ownership: 'independent', url: 'nationalreview.com' },
+  { id: 's1', slug: 'the-guardian', name: 'The Guardian', bias: 'left', factuality: 'high', ownership: 'non-profit', region: 'uk', url: 'theguardian.com' },
+  { id: 's2', slug: 'bbc-news', name: 'BBC News', bias: 'center', factuality: 'very-high', ownership: 'state-funded', region: 'uk', url: 'bbc.com' },
+  { id: 's3', slug: 'reuters', name: 'Reuters', bias: 'center', factuality: 'very-high', ownership: 'corporate', region: 'international', url: 'reuters.com' },
+  { id: 's4', slug: 'fox-news', name: 'Fox News', bias: 'right', factuality: 'mixed', ownership: 'corporate', region: 'us', url: 'foxnews.com' },
+  { id: 's5', slug: 'msnbc', name: 'MSNBC', bias: 'left', factuality: 'mixed', ownership: 'corporate', region: 'us', url: 'msnbc.com' },
+  { id: 's6', slug: 'wall-street-journal', name: 'Wall Street Journal', bias: 'lean-right', factuality: 'high', ownership: 'corporate', region: 'us', url: 'wsj.com' },
+  { id: 's7', slug: 'new-york-times', name: 'New York Times', bias: 'lean-left', factuality: 'high', ownership: 'corporate', region: 'us', url: 'nytimes.com' },
+  { id: 's8', slug: 'ap-news', name: 'AP News', bias: 'center', factuality: 'very-high', ownership: 'non-profit', region: 'us', url: 'apnews.com' },
+  { id: 's9', slug: 'jacobin', name: 'Jacobin', bias: 'far-left', factuality: 'mixed', ownership: 'independent', region: 'us', url: 'jacobin.com' },
+  { id: 's10', slug: 'breitbart', name: 'Breitbart', bias: 'far-right', factuality: 'low', ownership: 'independent', region: 'us', url: 'breitbart.com' },
+  { id: 's11', slug: 'npr', name: 'NPR', bias: 'lean-left', factuality: 'very-high', ownership: 'non-profit', region: 'us', url: 'npr.org' },
+  { id: 's12', slug: 'the-economist', name: 'The Economist', bias: 'lean-right', factuality: 'very-high', ownership: 'corporate', region: 'uk', url: 'economist.com' },
+  { id: 's13', slug: 'al-jazeera', name: 'Al Jazeera', bias: 'lean-left', factuality: 'high', ownership: 'state-funded', region: 'international', url: 'aljazeera.com' },
+  { id: 's14', slug: 'washington-post', name: 'Washington Post', bias: 'lean-left', factuality: 'high', ownership: 'corporate', region: 'us', url: 'washingtonpost.com' },
+  { id: 's15', slug: 'national-review', name: 'National Review', bias: 'right', factuality: 'mixed', ownership: 'independent', region: 'us', url: 'nationalreview.com' },
 ]
 
 /**

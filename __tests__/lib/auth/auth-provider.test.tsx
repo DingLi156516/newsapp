@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act, waitFor } from '@testing-library/react'
 import { AuthProvider, AuthContext } from '@/lib/auth/auth-provider'
+import type { AuthContextValue } from '@/lib/auth/types'
 import { useContext } from 'react'
 
 // Mock the Supabase browser client
@@ -143,7 +144,7 @@ describe('AuthProvider', () => {
       error: { message: 'Invalid credentials' },
     })
 
-    let contextValue: ReturnType<typeof useContext<typeof AuthContext>> = null
+    let contextValue: AuthContextValue | null = null
 
     function Grabber() {
       contextValue = useContext(AuthContext)
@@ -171,7 +172,7 @@ describe('AuthProvider', () => {
   it('signUpWithEmail calls supabase', async () => {
     mockSignUp.mockResolvedValue({ data: {}, error: null })
 
-    let contextValue: ReturnType<typeof useContext<typeof AuthContext>> = null
+    let contextValue: AuthContextValue | null = null
 
     function Grabber() {
       contextValue = useContext(AuthContext)

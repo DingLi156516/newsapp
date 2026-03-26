@@ -24,7 +24,8 @@ import { ChevronDown, ExternalLink } from 'lucide-react'
 import type { NewsSource } from '@/lib/types'
 import { OWNERSHIP_LABELS } from '@/lib/types'
 import { BiasTag } from '@/components/atoms/BiasTag'
-import { FactualityDots } from '@/components/atoms/FactualityDots'
+import { FactualityBar } from '@/components/atoms/FactualityBar'
+import { SourceLogo } from '@/components/atoms/SourceLogo'
 
 interface Props {
   sources: NewsSource[]
@@ -93,10 +94,9 @@ export function SourceList({
                   key={source.id}
                   className="flex items-center gap-2.5 py-1"
                 >
-                  {/* Bias dot colored by source.bias */}
+                  <SourceLogo domain={source.url} name={source.name} bias={source.bias} size={20} />
                   <BiasTag bias={source.bias} size="xs" />
-                  {/* 1–5 factuality dots */}
-                  <FactualityDots level={source.factuality} />
+                  <FactualityBar size="compact" level={source.factuality} />
                   <span className="flex-1 text-sm text-white/70 truncate">
                     {source.name}
                   </span>
@@ -104,15 +104,14 @@ export function SourceList({
                   <span className="text-xs text-white/60 whitespace-nowrap hidden sm:block">
                     {OWNERSHIP_LABELS[source.ownership]}
                   </span>
-                  {/* External link — only shown if the source has a URL */}
-                  {source.url && (
+                  {/* External link — links to specific article if available, falls back to source domain */}
+                  {(source.articleUrl || source.url) && (
                     <a
-                      href={`https://${source.url}`}
-                      target="_blank"          // Opens in new tab
-                      rel="noopener noreferrer" // Security: prevents new tab from accessing window.opener
+                      href={source.articleUrl ?? `https://${source.url}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="flex-shrink-0 text-white/60 hover:text-white/70 transition-colors"
-                      aria-label={`Visit ${source.name}`}
-                      // Stop click from bubbling up (e.g., to a parent card click handler)
+                      aria-label={source.articleUrl ? `Read article on ${source.name}` : `Visit ${source.name}`}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <ExternalLink size={12} />

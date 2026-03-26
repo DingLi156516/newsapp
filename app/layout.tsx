@@ -28,6 +28,7 @@ export const metadata: Metadata = {
   title: 'Axiom News — See the Full Spectrum',
   description:
     'A high-fidelity news aggregator that dismantles echo chambers through bias visualization, story clustering, and cross-spectrum AI summaries.',
+  manifest: '/manifest.json',
 }
 
 /**
@@ -54,6 +55,11 @@ export default function RootLayout({
       */}
       <body className="bg-black text-white antialiased min-h-screen">
         <AuthProvider>{children}</AuthProvider>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/service-worker.js')}`,
+          }}
+        />
       </body>
     </html>
   )

@@ -1,4 +1,4 @@
-import { transformSource, transformStory, transformStoryList } from '@/lib/api/transformers'
+import { transformSource, transformStory, transformStoryList, transformTag } from '@/lib/api/transformers'
 import type { DbSource } from '@/lib/supabase/types'
 
 const mockSource: DbSource = {
@@ -12,6 +12,11 @@ const mockSource: DbSource = {
   rss_url: 'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml',
   region: 'us',
   is_active: true,
+  last_fetch_at: null,
+  last_fetch_status: 'success',
+  last_fetch_error: null,
+  consecutive_failures: 0,
+  total_articles_ingested: 0,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
 }
@@ -45,11 +50,14 @@ describe('transformSource', () => {
     const result = transformSource(mockSource)
     expect(result).toEqual({
       id: 'src-1',
+      slug: 'nytimes',
       name: 'New York Times',
       bias: 'lean-left',
       factuality: 'high',
       ownership: 'corporate',
+      region: 'us',
       url: 'nytimes.com',
+      totalArticlesIngested: 0,
     })
   })
 
@@ -99,5 +107,50 @@ describe('transformStoryList', () => {
     const result = transformStoryList(mockStory)
     expect(result.sources).toEqual([])
     expect(result.headline).toBe('Test Headline')
+  })
+})
+
+describe('transformTag', () => {
+  it('maps tag row fields correctly', () => {
+    const result = transformTag({
+      slug: 'iran',
+      label: 'Iran',
+      tag_type: 'location',
+      story_count: 50,
+      description: 'Country in the Middle East',
+      relevance: 0.95,
+    })
+
+    expect(result).toEqual({
+      slug: 'iran',
+      label: 'Iran',
+      type: 'location',
+      relevance: 0.95,
+      storyCount: 50,
+      description: 'Country in the Middle East',
+    })
+  })
+
+  it('defaults relevance to 1 when not provided', () => {
+    const result = transformTag({
+      slug: 'nato',
+      label: 'NATO',
+      tag_type: 'organization',
+      story_count: 30,
+    })
+
+    expect(result.relevance).toBe(1)
+  })
+
+  it('omits description when null', () => {
+    const result = transformTag({
+      slug: 'nato',
+      label: 'NATO',
+      tag_type: 'organization',
+      story_count: 30,
+      description: null,
+    })
+
+    expect(result.description).toBeUndefined()
   })
 })

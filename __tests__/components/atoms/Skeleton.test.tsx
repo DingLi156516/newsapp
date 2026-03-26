@@ -6,7 +6,7 @@ describe('Skeleton', () => {
     render(<Skeleton />)
     const el = screen.getByRole('status')
     expect(el).toBeInTheDocument()
-    expect(el).toHaveClass('animate-pulse')
+    expect(el).toHaveClass('animate-shimmer')
   })
 
   it('applies custom className', () => {

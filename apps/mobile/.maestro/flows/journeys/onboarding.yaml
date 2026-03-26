@@ -1,0 +1,75 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Verify home feed loads
+- assertVisible:
+    id: "axiom-header"
+
+# Navigate to Profile
+- tapOn:
+    text: "Profile"
+
+# Wait for profile screen
+- waitForAnimationToEnd
+
+# If not logged in, we see the sign-in prompt
+- tapOn:
+    id: "sign-in-button"
+    optional: true
+
+# If login modal opened, skip it
+- tapOn:
+    id: "skip-button"
+    optional: true
+
+# Navigate to Profile again (may have been dismissed)
+- tapOn:
+    text: "Profile"
+
+# Check for profile content (auth-dependent)
+- assertVisible:
+    text: "Your Profile"
+    optional: true
+- assertVisible:
+    text: "Dashboard"
+    optional: true
+
+# Navigate to Settings if available
+- tapOn:
+    text: "Settings"
+    optional: true
+
+# Verify settings loaded (optional)
+- assertVisible:
+    text: "Followed Topics"
+    optional: true
+
+# Go back if we navigated to settings
+- tapOn:
+    id: "back-button"
+    optional: true
+
+# Return to home
+- tapOn:
+    text: "Home"
+    optional: true
+- assertVisible:
+    id: "axiom-header"

@@ -1,6 +1,6 @@
 # Axiom News — Project Guide
 
-**Project Obsidian / Axiom News** — Next.js news aggregation app surfacing political bias, factuality, and coverage distribution. Phase 5 personalization features added (bookmarks, reading history, preferences, dashboard).
+**Project Obsidian / Axiom News** — Next.js news aggregation app surfacing political bias, factuality, and coverage distribution. Through Phase 7: personalization, blindspot digest email (Resend), region classification, and offline PWA.
 
 ## Tech Stack
 
@@ -8,7 +8,7 @@
 |-------|-----------|
 | Framework | Next.js 15 (App Router), React 19, TypeScript (strict) |
 | Styling | Tailwind CSS v3 + custom plugin, Framer Motion v11 |
-| Data | Supabase (PostgreSQL), SWR v2, Zod v4 |
+| Data | Supabase (PostgreSQL), SWR v2, Zod v4, Resend (email) |
 | AI/RSS | Google Gemini (REST), rss-parser |
 | Auth | Supabase Auth (@supabase/ssr) |
 | Testing | Vitest + @testing-library/react |
@@ -33,7 +33,11 @@ npm run test:e2e       # Playwright E2E tests
 | `docs/architecture.md` | Import conventions, client components, backend modules, API routes |
 | `docs/testing.md` | Vitest framework, mocks, test file locations, coverage target |
 | `docs/types.md` | TypeScript types, label/class maps, sample data, DB schema types |
+| `docs/pipeline.md` | Pipeline architecture — stages, process runner loop, claims, concurrency |
 | `docs/operations.md` | Operational runbook — pipeline, curl commands, env vars, reprocessing |
+| `docs/mobile-architecture.md` | Mobile app screens, navigation, hooks, auth flow, API integration |
+| `docs/mobile-components.md` | Mobile component inventory — atoms, molecules, organisms with props |
+| `docs/mobile-testing.md` | Mobile Jest + Maestro E2E setup, test files, testID conventions |
 | `TRACKER.md` | Feature & phase implementation status tracker |
 
 ## Critical Rules (always in context)
@@ -56,6 +60,23 @@ npm run test:e2e       # Playwright E2E tests
 
 ### Integration Tests
 - **Always** run `npm run test:e2e` after major/impactful changes (queries, API routes, middleware, data models, auth)
+
+### Codex Auto-Review
+
+When a session is about to end, evaluate whether the changes warrant external review via Codex.
+
+**Trigger (any one):**
+- Added or modified ≥3 business files (excluding tests, config, docs)
+- Touched API routes, DB migrations, auth logic, or other critical paths
+- Introduced new architectural patterns or significant refactoring
+
+**Skip:**
+- Pure docs, config, or test-only changes
+- Single-file small bug fixes
+- Conversational Q&A with no code changes
+
+**How to invoke:**
+Use `/codex:review` (standard review) or `/codex:adversarial-review` (challenges design decisions). Supports `--base <ref>` for branch diff and `--background` for async execution.
 
 ## Feature Development Workflow
 

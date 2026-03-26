@@ -73,14 +73,37 @@ describe('MonochromeSpectrumBar', () => {
     expect(bar.parentElement).toHaveClass('spectrum-track')
   })
 
-  it('showLabels=true: renders left and right percentage labels', () => {
+  it('showLabels=true: renders Left, Center, Right percentage labels', () => {
     render(<MonochromeSpectrumBar segments={labelSegments} showLabels />)
-    const labels = screen.getAllByText('40%')
-    expect(labels).toHaveLength(2)
+    expect(screen.getByText('Left 40%')).toBeInTheDocument()
+    expect(screen.getByText('Center 20%')).toBeInTheDocument()
+    expect(screen.getByText('Right 40%')).toBeInTheDocument()
+  })
+
+  it('showLabels=true: omits center label when center is 0%', () => {
+    render(<MonochromeSpectrumBar segments={segmentsWithZero} showLabels />)
+    expect(screen.getByText('Left 50%')).toBeInTheDocument()
+    expect(screen.getByText('Right 50%')).toBeInTheDocument()
+    expect(screen.queryByText(/^Center /)).not.toBeInTheDocument()
   })
 
   it('showLabels=false (default): no percentage labels', () => {
     render(<MonochromeSpectrumBar segments={segments} />)
-    expect(screen.queryByText('30%')).not.toBeInTheDocument()
+    expect(screen.queryByText(/^(Left|Center|Right) /)).not.toBeInTheDocument()
+  })
+
+  it('showLabels=true: rounding always sums to 100%', () => {
+    const roundingSegments: SpectrumSegment[] = [
+      { bias: 'left', percentage: 33.4 },
+      { bias: 'center', percentage: 33.3 },
+      { bias: 'right', percentage: 33.3 },
+    ]
+    render(<MonochromeSpectrumBar segments={roundingSegments} showLabels />)
+    const labels = screen.getAllByText(/^(Left|Center|Right) \d+%$/)
+    const total = labels.reduce((sum, el) => {
+      const match = el.textContent!.match(/(\d+)%/)
+      return sum + Number(match![1])
+    }, 0)
+    expect(total).toBe(100)
   })
 })

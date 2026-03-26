@@ -15,11 +15,16 @@ interface Props {
 }
 
 export function CoverageCount({ count }: Props) {
+  const isSingle = count === 1
+
   return (
-    <span className="glass-pill inline-flex items-center gap-1 px-2.5 py-1 text-xs text-white/80">
-      {/* Lucide is an icon library — Newspaper renders as an SVG icon */}
+    <span className={
+      isSingle
+        ? 'glass-pill inline-flex items-center gap-1 px-2.5 py-1 text-xs text-amber-300/90 ring-1 ring-amber-400/20'
+        : 'glass-pill inline-flex items-center gap-1 px-2.5 py-1 text-xs text-white/80'
+    }>
       <Newspaper size={11} strokeWidth={1.5} />
-      <span>{count} sources</span>
+      <span>{isSingle ? 'Single Source' : `${count} sources`}</span>
     </span>
   )
 }

@@ -1,0 +1,60 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Navigate to Profile tab
+- tapOn:
+    text: "Profile"
+
+# If unauthenticated, tap Sign In to open login modal
+- tapOn:
+    id: "sign-in-button"
+    optional: true
+
+# Wait for login form to appear
+- waitForAnimationToEnd
+
+# Navigate to signup via Sign Up link
+- tapOn:
+    text: "Sign Up"
+
+# Wait for signup form
+- waitForAnimationToEnd
+
+# Verify signup form elements
+- assertVisible:
+    text: "Create your account"
+    optional: true
+- assertVisible:
+    id: "email-input"
+- assertVisible:
+    id: "password-input"
+- assertVisible:
+    id: "confirm-password-input"
+- assertVisible:
+    id: "create-account-button"
+- assertVisible:
+    text: "Already have an account?"
+    optional: true
+
+# Dismiss signup modal
+- tapOn:
+    id: "close-button"
+    optional: true

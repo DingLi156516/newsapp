@@ -43,7 +43,7 @@ describe('FeedTabs', () => {
   })
 
   it('savedCount=0: no badge on Saved tab', () => {
-    const { container } = render(
+    render(
       <FeedTabs value="trending" onChange={vi.fn()} savedCount={0} />,
     )
     // No badge spans should exist for 0 counts

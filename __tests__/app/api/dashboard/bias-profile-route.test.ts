@@ -27,36 +27,6 @@ function mockUnauthenticated() {
   })
 }
 
-function createMockSupabase(overrides: Record<string, unknown> = {}) {
-  const defaultChain = {
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    neq: vi.fn().mockReturnThis(),
-    in: vi.fn().mockReturnThis(),
-    data: null,
-    error: null,
-    ...overrides,
-  }
-
-  // Make chainable methods resolve to { data, error }
-  const createChain = (finalData: unknown, finalError: unknown) => {
-    const chain: Record<string, unknown> = {}
-    chain.select = vi.fn().mockReturnValue(chain)
-    chain.eq = vi.fn().mockReturnValue(chain)
-    chain.neq = vi.fn().mockReturnValue(chain)
-    chain.in = vi.fn().mockReturnValue(chain)
-    // Simulate thenable/await by making the chain itself hold data/error
-    chain.then = (resolve: (val: unknown) => void) =>
-      resolve({ data: finalData, error: finalError })
-    return chain
-  }
-
-  return {
-    from: vi.fn(),
-    _createChain: createChain,
-  }
-}
-
 describe('GET /api/dashboard/bias-profile', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -99,7 +69,7 @@ describe('GET /api/dashboard/bias-profile', () => {
     // all stories query chain
     const allStoriesChain = {
       select: vi.fn().mockReturnThis(),
-      neq: vi.fn().mockResolvedValue({
+      eq: vi.fn().mockResolvedValue({
         data: [{ spectrum_segments: [{ bias: 'center', percentage: 100 }] }],
         error: null,
       }),
@@ -162,7 +132,7 @@ describe('GET /api/dashboard/bias-profile', () => {
     // all stories query
     const allStoriesChain = {
       select: vi.fn().mockReturnThis(),
-      neq: vi.fn().mockResolvedValue({
+      eq: vi.fn().mockResolvedValue({
         data: [
           { spectrum_segments: [{ bias: 'center', percentage: 100 }] },
         ],

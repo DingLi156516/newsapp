@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { mockBookmarks } from '@/e2e/helpers/mock-bookmarks'
 
 test.describe('Bookmarks', () => {
   test.beforeEach(async ({ page }) => {
@@ -20,6 +21,8 @@ test.describe('Bookmarks', () => {
       }
       return route.continue()
     })
+
+    await mockBookmarks(page)
   })
 
   test('bookmark button toggles on story detail', async ({ page }) => {
@@ -85,6 +88,7 @@ test.describe('Bookmarks', () => {
     await expect(page).toHaveURL(/\/story\//)
 
     const bookmarkBtn = page.getByTestId('bookmark-button').first()
+    await expect(bookmarkBtn).toBeVisible({ timeout: 10_000 })
 
     // Ensure bookmarked
     const currentState = await bookmarkBtn.getAttribute('aria-pressed')
@@ -107,6 +111,7 @@ test.describe('Bookmarks', () => {
 
     // Bookmark it
     const bookmarkBtn = page.getByTestId('bookmark-button').first()
+    await expect(bookmarkBtn).toBeVisible({ timeout: 10_000 })
     const savedBefore = await bookmarkBtn.getAttribute('aria-pressed')
     if (savedBefore === 'false') {
       await Promise.all([

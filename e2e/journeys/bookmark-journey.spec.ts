@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { mockBookmarks } from '@/e2e/helpers/mock-bookmarks'
 
 test.describe('Bookmark Journey', () => {
   test.beforeEach(async ({ page }) => {
@@ -20,6 +21,8 @@ test.describe('Bookmark Journey', () => {
       }
       return route.continue()
     })
+
+    await mockBookmarks(page)
   })
 
   test('home → bookmark story → saved tab → click saved → unbookmark → saved empty', async ({ page }) => {

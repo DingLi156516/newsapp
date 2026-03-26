@@ -10,11 +10,13 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { AnimatePresence, motion } from 'framer-motion'
-import { LogOut, Settings, Clock, BarChart3 } from 'lucide-react'
+import { LogOut, Settings, Clock, BarChart3, ShieldCheck, Activity } from 'lucide-react'
 import { useAuth } from '@/lib/hooks/use-auth'
+import { useAdmin } from '@/lib/hooks/use-admin'
 
 export function UserMenu() {
   const { user, isLoading, signOut } = useAuth()
+  const { isAdmin, isLoading: isAdminLoading } = useAdmin()
   const router = useRouter()
   const [isOpen, setIsOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -41,7 +43,7 @@ export function UserMenu() {
   // Loading state: pulsing skeleton circle
   if (isLoading) {
     return (
-      <div className="w-8 h-8 rounded-full bg-white/10 animate-pulse" />
+      <div className="w-8 h-8 rounded-full bg-white/10 animate-shimmer" />
     )
   }
 
@@ -118,6 +120,26 @@ export function UserMenu() {
               <Settings size={14} />
               Settings
             </button>
+            {isAdmin && !isAdminLoading && (
+              <>
+                <div className="h-px bg-white/10 my-1" />
+                <p className="px-3 py-1 text-xs text-white/30">Admin</p>
+                <button
+                  onClick={() => { setIsOpen(false); router.push('/admin/review') }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                >
+                  <ShieldCheck size={14} />
+                  Review Queue
+                </button>
+                <button
+                  onClick={() => { setIsOpen(false); router.push('/admin/pipeline') }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                >
+                  <Activity size={14} />
+                  Pipeline
+                </button>
+              </>
+            )}
             <div className="h-px bg-white/10 my-1" />
             <button
               onClick={handleSignOut}

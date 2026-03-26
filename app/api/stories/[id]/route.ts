@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
-import { queryStoryById, querySourcesForStory } from '@/lib/api/query-helpers'
+import { queryStoryById, querySourcesForStory, queryTagsForStory } from '@/lib/api/query-helpers'
 import { transformStory } from '@/lib/api/transformers'
 import type { DbSource } from '@/lib/supabase/types'
 
@@ -43,8 +43,14 @@ export async function GET(
       )
     }
 
-    const sourceRows = await querySourcesForStory(client, id)
-    const transformed = transformStory(story, sourceRows as DbSource[])
+    const { sources: sourceRows, articleUrlMap } = await querySourcesForStory(client, id)
+    let tagRows: Array<{ slug: string; label: string; tag_type: string; story_count: number; description?: string | null; relevance?: number }> = []
+    try {
+      tagRows = await queryTagsForStory(client, id)
+    } catch (tagErr) {
+      console.error(`[stories/${id}] Tag fetch failed:`, tagErr instanceof Error ? tagErr.message : String(tagErr))
+    }
+    const transformed = transformStory(story, sourceRows as DbSource[], articleUrlMap, tagRows)
 
     return NextResponse.json({
       success: true,

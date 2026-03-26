@@ -30,6 +30,7 @@ export async function queryReadingHistory(
     .eq('user_id', userId)
     .eq('is_read', true)
     .order('read_at', { ascending: false })
+    .order('story_id', { ascending: false })
     .range(offset, offset + limit - 1)
 
   if (error) {

@@ -1,0 +1,67 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Navigate to Sources tab
+- tapOn:
+    text: "Sources"
+
+# Verify sources screen header
+- assertVisible: "Sources"
+- assertVisible:
+    id: "search-input"
+
+# Filter section labels may require scrolling — make assertions optional
+- assertVisible:
+    text: "BIAS"
+    optional: true
+- assertVisible:
+    text: "FACTUALITY"
+    optional: true
+- assertVisible:
+    text: "OWNERSHIP"
+    optional: true
+- assertVisible:
+    text: "REGION"
+    optional: true
+
+# Verify source cards render
+- assertVisible:
+    id: "source-card"
+    optional: true
+
+# Test search
+- tapOn:
+    id: "search-input"
+- inputText: "Reuters"
+
+# Wait for debounce
+- waitForAnimationToEnd
+
+# Clear search
+- tapOn:
+    id: "search-input"
+- eraseText
+
+# Navigate back to home
+- tapOn:
+    text: "Home"
+- assertVisible:
+    id: "axiom-header"

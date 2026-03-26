@@ -50,16 +50,18 @@ test.describe('For You — Authenticated', () => {
     await expect(page.getByTestId('hero-card')).toBeVisible({ timeout: 10_000 })
 
     await page.getByTestId('feed-tab-for-you').click()
+    await expect(page.getByTestId('feed-tab-for-you')).toHaveAttribute('aria-selected', 'true')
 
     // CTA should NOT be visible for authenticated users
     await expect(page.getByTestId('for-you-cta')).not.toBeVisible()
-
-    // Should show stories or an empty state — but NOT the CTA
-    const stories = page.getByTestId('nexus-card').or(page.getByTestId('hero-card'))
-    const emptyState = page.getByText('No stories match your filters')
-    const hasStories = await stories.first().isVisible({ timeout: 10_000 }).catch(() => false)
-    const hasEmpty = await emptyState.isVisible({ timeout: 10_000 }).catch(() => false)
-    expect(hasStories || hasEmpty).toBe(true)
+    await expect
+      .poll(async () => {
+        const hasEmpty = await page.getByText('No stories match your filters.').isVisible().catch(() => false)
+        const hasHero = await page.getByTestId('hero-card').isVisible().catch(() => false)
+        const hasGrid = await page.getByTestId('nexus-card').first().isVisible().catch(() => false)
+        return hasEmpty || hasHero || hasGrid
+      })
+      .toBe(true)
   })
 
   test('switching tabs preserves for-you state', async ({ page }) => {

@@ -1,5 +1,3 @@
-import { getSupabaseBrowserClient } from '@/lib/supabase/client'
-
 vi.mock('@supabase/supabase-js', () => ({
   createClient: vi.fn(() => ({
     from: vi.fn(),

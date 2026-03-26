@@ -6,20 +6,49 @@ All types live in `@/lib/types`:
 - `FactualityLevel`: `'very-high' | 'high' | 'mixed' | 'low' | 'very-low'`
 - `OwnershipType`: `'independent' | 'corporate' | 'private-equity' | 'state-funded' | 'telecom' | 'government' | 'non-profit' | 'other'`
 - `Topic`: 9 values (`'politics' | 'world' | 'technology' | ...`)
-- `Region`: `'us' | 'international' | 'uk' | 'canada' | 'europe'` (used by DB types; UI region filter removed — see F-08 in PRD)
+- `Region`: `'us' | 'international' | 'uk' | 'canada' | 'europe'` (used by DB types and UI region filter in SearchFilters)
 - `FeedTab`: `'for-you' | 'trending' | 'latest' | 'blindspot' | 'saved'`
 - `PerspectiveFilter`: `'all' | 'left' | 'center' | 'right'` (UI-only — drives `biasRange` param, not sent to API directly)
 - `DatePreset`: `'24h' | '7d' | '30d' | 'all'`
 - `ReviewStatus`: `'pending' | 'approved' | 'rejected'`
+- `DbAssemblyStatus`: `'pending' | 'processing' | 'completed' | 'failed'`
+- `DbPublicationStatus`: `'draft' | 'needs_review' | 'published' | 'rejected'`
+- `StoryKind`: `'standard'`
 
 Label/class maps: `BIAS_LABELS`, `BIAS_CSS_CLASS`, `FACTUALITY_LABELS`, `OWNERSHIP_LABELS`, `TOPIC_LABELS`, `DATE_PRESET_LABELS`
 
-Constants: `FACTUALITY_RANK` — factuality level ordering for min threshold filtering; `PERSPECTIVE_BIASES` — maps PerspectiveFilter values to BiasCategory arrays for client-side bias range conversion; `REVIEW_STATUS_LABELS` — maps ReviewStatus to display labels (e.g., `'pending'` → `'Pending Review'`)
+Constants: `FACTUALITY_RANK` — factuality level ordering for min threshold filtering; `PERSPECTIVE_BIASES` — maps PerspectiveFilter values to BiasCategory arrays for client-side bias range conversion; `REVIEW_STATUS_LABELS` — maps ReviewStatus to display labels (e.g., `'pending'` → `'Pending Review'`); `REGION_LABELS` — maps Region to display labels (e.g., `'us'` → `'United States'`); `ALL_REGIONS` — all Region values as array
 
 Sample data: `sampleArticles` (6 items), `sampleSources` (15 items) in `@/lib/sample-data`
 
+## Source Profile Types
+
+- `NewsSource`: source card/list model; now includes optional `slug` for linking directory cards to source detail pages
+- `SourceProfileSource`: `NewsSource` plus `isActive` and optional `rssUrl`
+- `SourceProfileStory`: recent clustered story summary for a source profile (`id`, `headline`, `topic`, `region`, `timestamp`, `isBlindspot`, optional `articleUrl`)
+- `SourceTopicBreakdownItem`: `{ topic, count }`
+- `SourceProfile`: `{ source, recentStories, topicBreakdown, blindspotCount }`
+
+## Source Comparison Types
+
+- `SourceComparisonTopicCount`: `{ topic, leftCount, rightCount }`
+- `SourceComparisonStats`: `{ sharedStoryCount, leftExclusiveCount, rightExclusiveCount, leftBlindspotCount, rightBlindspotCount, overlappingTopics, topicImbalances }`
+- `SourceComparison`: `{ leftSource, rightSource, sharedStories, leftExclusiveStories, rightExclusiveStories, stats }`
+
 DB schema types (`DbSource`, `DbStory`, `DbArticle`, and their `Insert` variants) live in
 `@/lib/supabase/types` and are re-exported from `@/lib/types` for convenience.
+
+Pipeline-specific DB fields:
+- `DbStory`: `assembly_status`, `publication_status`, `review_reasons`, `confidence_score`, `processing_error`, `assembled_at`, `published_at`, `assembly_claimed_at`
+- `DbArticle`: `canonical_url`, `title_fingerprint`, `embedding_claimed_at`, `clustering_claimed_at`
+
+Story-kind semantics:
+- `standard` — clustered story with multi-source comparative treatment (only kind; unclustered singletons expire after 7 days)
+
+Claim timestamp semantics:
+- `assembly_claimed_at`, `embedding_claimed_at`, and `clustering_claimed_at` are in-flight lease markers, not readiness flags
+- `null` means "currently unclaimed"
+- eligibility still comes from `assembly_status`, `is_embedded`, and `story_id`
 
 ## Timeline Types
 
@@ -44,7 +73,7 @@ DB schema types (`DbSource`, `DbStory`, `DbArticle`, and their `Insert` variants
 
 - `DbBookmark` / `DbBookmarkInsert`: user_id, story_id, created_at
 - `DbReadingHistory` / `DbReadingHistoryInsert`: user_id, story_id, read_at, is_read
-- `DbUserPreferences` / `DbUserPreferencesInsert`: user_id, followed_topics, default_region, default_perspective, factuality_minimum
+- `DbUserPreferences` / `DbUserPreferencesInsert`: user_id, followed_topics, default_region, default_perspective, factuality_minimum, blindspot_digest_enabled
 - `DbAdminUser`: user_id, role, created_at
 
 ## Review Types (`@/lib/api/review-validation`, `@/lib/api/review-queries`)
@@ -52,3 +81,8 @@ DB schema types (`DbSource`, `DbStory`, `DbArticle`, and their `Insert` variants
 - `ReviewStatus`: `'pending' | 'approved' | 'rejected'`
 - `ReviewAction`: `{ status: ReviewStatus, reason?: string }` (from `reviewActionSchema`)
 - `ReviewStats`: `{ pending: number, approved: number, rejected: number, total: number }`
+
+## Pipeline Decision Types
+
+- `PublicationDecision`: `{ reviewStatus, publicationStatus, confidenceScore, reviewReasons }`
+- `LegacyStoryState`: backfill result mapping legacy review rows into explicit assembly/publication states

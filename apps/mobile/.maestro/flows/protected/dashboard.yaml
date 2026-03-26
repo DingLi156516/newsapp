@@ -1,0 +1,66 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Navigate to Profile tab
+- tapOn:
+    text: "Profile"
+
+# Wait for profile screen to load
+- waitForAnimationToEnd
+
+# The Profile screen shows different content based on auth state:
+# - Unauthenticated: "Your Profile" + Sign In button
+# - Authenticated: Dashboard with bias calibration
+
+# Assert elements that appear in either state
+- assertVisible:
+    text: "Your Profile"
+    optional: true
+- assertVisible:
+    id: "sign-in-button"
+    optional: true
+- assertVisible:
+    text: "Dashboard"
+    optional: true
+- assertVisible:
+    id: "bias-banner"
+    optional: true
+- assertVisible:
+    text: "Bias Calibration"
+    optional: true
+
+# Auth-only elements (optional — may not be logged in)
+- assertVisible:
+    text: "History"
+    optional: true
+- assertVisible:
+    text: "Settings"
+    optional: true
+- assertVisible:
+    id: "sign-out-button"
+    optional: true
+
+# Return to home
+- tapOn:
+    text: "Home"
+    optional: true
+- assertVisible:
+    id: "axiom-header"

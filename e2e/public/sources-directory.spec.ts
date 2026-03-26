@@ -2,11 +2,11 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Sources Directory', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/sources')
+    await page.goto('/?view=sources')
   })
 
   test('page loads with source cards grid', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Source Directory' })).toBeVisible()
+    await expect(page.getByTestId('view-tab-sources')).toHaveAttribute('aria-selected', 'true')
     // Wait for sources to load
     await expect(page.getByText(/\d+ sources?/)).toBeVisible({ timeout: 10_000 })
   })
@@ -87,5 +87,40 @@ test.describe('Sources Directory', () => {
     const externalLinks = page.locator('a[target="_blank"]')
     const count = await externalLinks.count()
     expect(count).toBeGreaterThanOrEqual(0) // May not have links in test data
+  })
+
+  test('source card navigates to a source profile page', async ({ page }) => {
+    await expect(page.getByText(/\d+ sources?/)).toBeVisible({ timeout: 10_000 })
+
+    const profileLink = page.getByRole('link', { name: /View .* profile/ }).first()
+    await expect(profileLink).toBeVisible()
+    await profileLink.click()
+
+    await expect(page).toHaveURL(/\/sources\/[^/]+$/)
+    await expect(page.getByText('Snapshot', { exact: true })).toBeVisible()
+    await expect(page.getByText('Recent Coverage', { exact: true })).toBeVisible()
+    await expect(page.getByText('Coverage Tendencies', { exact: true })).toBeVisible()
+    await expect(page.getByText('Methodology', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Back to directory' }).click()
+    await expect(page).toHaveURL('/?view=sources')
+  })
+
+  test('source profile compare flow renders comparison results', async ({ page }) => {
+    await expect(page.getByText(/\d+ sources?/)).toBeVisible({ timeout: 10_000 })
+
+    await page.getByRole('link', { name: /View .* profile/ }).first().click()
+    await expect(page).toHaveURL(/\/sources\/[^/]+$/)
+
+    await page.getByRole('link', { name: /Compare / }).click()
+    await expect(page).toHaveURL(/\/sources\/compare\?left=/)
+    await expect(page.getByText('Choose a second source')).toBeVisible()
+
+    await page.getByLabel('Compare against').selectOption({ index: 1 })
+
+    await expect(page).toHaveURL(/left=.*&right=/)
+    await expect(page.getByText('Side-by-Side Snapshot', { exact: true })).toBeVisible()
+    await expect(page.getByText('Shared Coverage', { exact: true })).toBeVisible()
+    await expect(page.getByText('Coverage Gaps', { exact: true })).toBeVisible()
+    await expect(page.getByText('Methodology', { exact: true })).toBeVisible()
   })
 })

@@ -14,6 +14,7 @@ export async function queryBookmarks(
     .select('story_id')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
+    .order('story_id', { ascending: false })
 
   if (error) {
     throw new Error(`Failed to query bookmarks: ${error.message}`)

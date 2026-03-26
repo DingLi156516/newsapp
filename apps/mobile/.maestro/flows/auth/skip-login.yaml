@@ -1,0 +1,44 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Navigate to Profile tab
+- tapOn:
+    text: "Profile"
+
+# If unauthenticated, tap Sign In to open login modal
+- tapOn:
+    id: "sign-in-button"
+    optional: true
+
+# Wait for login form
+- waitForAnimationToEnd
+
+# Tap Skip for now
+- tapOn:
+    id: "skip-button"
+    optional: true
+
+# Return to home
+- tapOn:
+    text: "Home"
+    optional: true
+- assertVisible:
+    id: "axiom-header"

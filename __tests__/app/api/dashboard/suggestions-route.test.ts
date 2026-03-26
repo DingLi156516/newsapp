@@ -65,7 +65,7 @@ describe('GET /api/dashboard/suggestions', () => {
     // all stories query
     const allStoriesChain = {
       select: vi.fn().mockReturnThis(),
-      neq: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
       order: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue({
         data: [
@@ -130,7 +130,7 @@ describe('GET /api/dashboard/suggestions', () => {
     // all stories — includes unread story-2 with 50% right bias
     const allStoriesChain = {
       select: vi.fn().mockReturnThis(),
-      neq: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
       order: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue({
         data: [
@@ -202,7 +202,7 @@ describe('GET /api/dashboard/suggestions', () => {
 
     const allStoriesChain = {
       select: vi.fn().mockReturnThis(),
-      neq: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
       order: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue({
         data: [

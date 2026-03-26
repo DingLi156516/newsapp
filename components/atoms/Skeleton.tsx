@@ -12,7 +12,7 @@ interface SkeletonProps {
 export function Skeleton({ className = '' }: SkeletonProps) {
   return (
     <div
-      className={`animate-pulse rounded-lg bg-white/[0.06] ${className}`}
+      className={`rounded-lg bg-gradient-to-r from-white/[0.04] via-white/[0.10] to-white/[0.04] bg-[length:200%_100%] animate-shimmer ${className}`}
       role="status"
       aria-label="Loading"
     />

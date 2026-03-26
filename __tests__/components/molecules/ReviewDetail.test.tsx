@@ -22,6 +22,10 @@ const mockStory = {
     leftFraming: 'Left framing text',
     rightFraming: 'Right framing text',
   },
+  publication_status: 'needs_review',
+  review_reasons: ['blindspot', 'low_factuality'],
+  confidence_score: 0.48,
+  processing_error: 'legacy_data_repair',
   review_status: 'pending',
   reviewed_by: null,
   reviewed_at: null,
@@ -53,6 +57,14 @@ describe('ReviewDetail', () => {
     expect(screen.getByText('Left Perspective')).toBeInTheDocument()
     expect(screen.getByText('Right Perspective')).toBeInTheDocument()
     expect(screen.getByText('Common ground text')).toBeInTheDocument()
+  })
+
+  it('renders confidence and review reasons', () => {
+    render(<ReviewDetail {...defaultProps} />)
+    expect(screen.getByText('48% confidence')).toBeInTheDocument()
+    expect(screen.getByText('blindspot')).toBeInTheDocument()
+    expect(screen.getByText('low_factuality')).toBeInTheDocument()
+    expect(screen.getByText('legacy_data_repair')).toBeInTheDocument()
   })
 
   it('renders action buttons', () => {

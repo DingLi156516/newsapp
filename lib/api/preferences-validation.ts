@@ -18,6 +18,7 @@ export const preferencesUpdateSchema = z.object({
   followed_topics: z.array(z.enum(TOPICS)).optional(),
   default_perspective: z.enum(PERSPECTIVES).optional(),
   factuality_minimum: z.enum(FACTUALITIES).optional(),
+  blindspot_digest_enabled: z.boolean().optional(),
 })
 
 export type PreferencesUpdate = z.infer<typeof preferencesUpdateSchema>

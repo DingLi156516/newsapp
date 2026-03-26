@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { fetcher } from '@/lib/hooks/fetcher'
 import { useAuth } from '@/lib/hooks/use-auth'
+import { cacheStory, uncacheStory } from '@/lib/offline/cache-manager'
 
 interface BookmarksApiResponse {
   readonly success: boolean
@@ -76,6 +77,13 @@ export function useBookmarks() {
 
         if (!res.ok) {
           throw new Error(`Bookmark ${currentlyBookmarked ? 'remove' : 'save'} failed: ${res.status}`)
+        }
+
+        // Fire-and-forget: cache or uncache story for offline access
+        if (currentlyBookmarked) {
+          uncacheStory(storyId)
+        } else {
+          cacheStory(storyId)
         }
 
         await mutate()

@@ -27,9 +27,15 @@ vi.mock('@/lib/hooks/use-auth', () => ({
   useAuth: () => mockUseAuth(),
 }))
 
+const mockUseAdmin = vi.fn<() => { isAdmin: boolean; isLoading: boolean }>()
+vi.mock('@/lib/hooks/use-admin', () => ({
+  useAdmin: () => mockUseAdmin(),
+}))
+
 describe('UserMenu', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockUseAdmin.mockReturnValue({ isAdmin: false, isLoading: false })
   })
 
   it('shows loading skeleton when auth is loading', () => {
@@ -37,7 +43,7 @@ describe('UserMenu', () => {
 
     render(<UserMenu />)
 
-    const skeleton = document.querySelector('.animate-pulse')
+    const skeleton = document.querySelector('.animate-shimmer')
     expect(skeleton).toBeInTheDocument()
   })
 
@@ -108,6 +114,47 @@ describe('UserMenu', () => {
       expect(mockSignOut).toHaveBeenCalledOnce()
       expect(mockRefresh).toHaveBeenCalledOnce()
     })
+  })
+
+  it('shows admin links when user is admin', async () => {
+    const user = userEvent.setup()
+    mockUseAuth.mockReturnValue({
+      user: { email: 'admin@example.com', user_metadata: {} } as AuthContextValue['user'],
+      isLoading: false,
+      signOut: vi.fn(),
+    })
+    mockUseAdmin.mockReturnValue({ isAdmin: true, isLoading: false })
+
+    render(<UserMenu />)
+
+    await user.click(screen.getByLabelText('User menu'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Admin')).toBeInTheDocument()
+      expect(screen.getByText('Review Queue')).toBeInTheDocument()
+      expect(screen.getByText('Pipeline')).toBeInTheDocument()
+    })
+  })
+
+  it('does not show admin links when user is not admin', async () => {
+    const user = userEvent.setup()
+    mockUseAuth.mockReturnValue({
+      user: { email: 'user@example.com', user_metadata: {} } as AuthContextValue['user'],
+      isLoading: false,
+      signOut: vi.fn(),
+    })
+    mockUseAdmin.mockReturnValue({ isAdmin: false, isLoading: false })
+
+    render(<UserMenu />)
+
+    await user.click(screen.getByLabelText('User menu'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Sign Out')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Admin')).not.toBeInTheDocument()
+    expect(screen.queryByText('Review Queue')).not.toBeInTheDocument()
+    expect(screen.queryByText('Pipeline')).not.toBeInTheDocument()
   })
 
   it('closes dropdown on outside click', async () => {

@@ -20,7 +20,9 @@ npm run test:coverage # Coverage report (target ≥80%)
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-side service client (bypasses RLS) |
 | `GEMINI_API_KEY` | Yes | Gemini REST client (`lib/ai/gemini-client.ts`) |
 | `CRON_SECRET` | Yes | Auth header for cron endpoints |
-
+| `RESEND_API_KEY` | For digest | Resend email API key (`lib/email/resend-client.ts`) |
+| `RESEND_FROM_EMAIL` | No | Sender address for digest emails (defaults to `onboarding@resend.dev`) |
+| `NEXT_PUBLIC_APP_URL` | No | App base URL for email links (defaults to `http://localhost:3000`) |
 Copy `.env.example` to `.env.local` and fill in values. Never commit `.env.local`.
 
 ## Data Pipeline Flow
@@ -30,25 +32,79 @@ RSS Feeds
     │
     ▼
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│   Ingest     │───▶│   Embed      │───▶│   Cluster    │───▶│   Assemble   │───▶│ Review Gate  │
-│              │    │              │    │              │    │              │    │              │
-│ fetch → parse│    │ article text │    │ group by     │    │ headline     │    │ pending →    │
-│ → dedup →    │    │ → Gemini     │    │ embedding    │    │ summary      │    │ approved /   │
-│ insert       │    │ embeddings   │    │ similarity   │    │ spectrum     │    │ rejected     │
-└──────────────┘    └──────────────┘    └──────────────┘    │ topic        │    └──────────────┘
-                                                            │ blindspot    │
+│   Ingest     │───▶│   Embed      │───▶│   Cluster    │───▶│   Assemble   │───▶│  Publish /   │
+│              │    │              │    │              │    │              │    │    Review    │
+│ fetch → parse│    │ article text │    │ group by     │    │ headline     │    │              │
+│ → normalize  │    │ → Gemini     │    │ embedding    │    │ summary      │    │ published or │
+│ → dedup →    │    │ embeddings   │    │ similarity   │    │ spectrum     │    │ needs_review │
+│ insert       │    │              │    │              │    │ topic        │    │ by risk      │
+└──────────────┘    └──────────────┘    └──────────────┘    │ blindspot    │    └──────────────┘
+                                                            │ region       │
   /api/cron/ingest         /api/cron/process                └──────────────┘    /admin/review
 ```
 
 **Ingest** (`/api/cron/ingest`): Fetches all RSS feeds from the registry, parses articles,
-deduplicates by URL hash, and inserts new articles into the `articles` table.
+normalizes URLs, deduplicates by canonical URL, fingerprints titles, and inserts new articles into the `articles` table.
 
-**Process** (`/api/cron/process`): Runs three sequential steps:
-1. **Embed** — generates Gemini vector embeddings for unembedded articles
-2. **Cluster** — groups articles into story clusters by cosine similarity
-3. **Assemble** — for each cluster, generates headline, summary, spectrum, topic, and blindspot flag
+Article identity rules:
+- `url` = original feed URL exactly as received
+- `canonical_url` = normalized dedup key used to collapse tracking/noise variants
+- migration `011_articles_canonical_url_cutover.sql` removes the legacy raw-URL uniqueness constraint so ingest can rely on canonical identity without breaking older rows
+- migration `012_pipeline_backfill_hardening.sql` backfills `title_fingerprint` and clears stale/non-terminal claim timestamps on existing rows
 
-New stories default to `review_status = 'pending'`. Only `approved` stories appear in the public feed. Admins review via `/admin/review`.
+**Process** (`/api/cron/process`): Orchestrates three bounded stages and returns backlog counts before and after the run:
+1. **Assemble** — claims a limited batch of pending stories and generates headline, summary, spectrum, topic, region, blindspot flag, and entity tags
+2. **Cluster** — claims a limited batch of embedded, unassigned articles and groups them into story clusters by cosine similarity
+3. **Embed** — claims a limited batch of unembedded articles and generates Gemini vector embeddings
+
+The process runner is backlog-aware, multi-pass, and downstream-first:
+- embed target per invocation defaults to `1500` articles
+- cluster target per invocation defaults to `1500` articles
+- assemble target per invocation defaults to `100` stories
+- default batch sizes are intentionally biased toward downstream completion: embed `50`, cluster `75`, assemble `25`
+- each invocation works in rounds, refreshing backlog between rounds so newly clustered stories can be assembled before more embedding work is started
+- embed work is skipped when the remaining budget is reserved for downstream cluster/assembly work
+- stage summaries now include `passes`, `skipped`, and `skipReason` so operators can tell whether a stage had no backlog, no progress, or was held back to protect downstream work
+- env overrides: `PIPELINE_PROCESS_EMBED_TARGET`, `PIPELINE_PROCESS_CLUSTER_TARGET`, `PIPELINE_PROCESS_ASSEMBLE_TARGET`, `PIPELINE_PROCESS_EMBED_BATCH_SIZE`, `PIPELINE_PROCESS_CLUSTER_BATCH_SIZE`, `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`, `PIPELINE_PROCESS_TIME_BUDGET_MS`, `PIPELINE_PROCESS_CLUSTER_RESERVE_MS`, `PIPELINE_PROCESS_ASSEMBLE_RESERVE_MS`
+
+Claim timestamp rules:
+- `embedding_claimed_at` and `clustering_claimed_at` are 30 minute leases
+- `assembly_claimed_at` is a 60 minute lease
+- claim timestamps are operational markers only; readiness still comes from `is_embedded`, `story_id`, and `assembly_status`
+
+Stories now use explicit pipeline/publication state:
+- `assembly_status`: `pending | processing | completed | failed`
+- `publication_status`: `draft | needs_review | published | rejected`
+- `story_kind`: always `'standard'` (constrained by migration 016)
+
+The public feed only serves `publication_status = 'published'`.
+
+The pipeline processes all pending articles regardless of age. Clustering handles unmatchable articles via attempt counting (3 attempts → singleton promotion).
+
+Time budget: the process runner defaults to no time budget (`Infinity`) so local and admin-triggered runs drain the queue completely. The cron route (`/api/cron/process`) passes an explicit 100-second budget to fit within Vercel's 120-second serverless timeout. Override via `PIPELINE_PROCESS_TIME_BUDGET_MS` env var.
+
+Publishing is conservative:
+- most stories auto-publish (including blindspots and mixed-factuality sources)
+- sparse coverage (<2 articles or <2 sources), AI fallbacks, and failed assembly runs go to `needs_review`
+- admins review `needs_review` stories via `/admin/review`
+- factuality and blindspot status are shown in the UI for user filtering, not used as publication gates
+
+### Backfill Entity Tags
+
+For existing published stories that predate entity extraction, run the backfill script:
+
+```bash
+# Dry run — preview what would be tagged
+npx tsx scripts/backfill-tags.ts --dry-run
+
+# Run for real (default batch size 25, 500ms delay between batches)
+npx tsx scripts/backfill-tags.ts
+
+# Custom batch size
+npx tsx scripts/backfill-tags.ts --batch-size 10
+```
+
+The script queries published stories with zero `story_tags` rows, runs `extractEntities` on their articles, and calls `upsertStoryTags`. A `.backfill-empty-ids` skip file tracks stories that yielded no entities so repeated runs skip them.
 
 ## Running the Pipeline Locally
 
@@ -93,9 +149,49 @@ Expected response:
 {
   "success": true,
   "data": {
-    "embeddings": { "totalProcessed": 42, "errors": [] },
-    "clustering": { "newStories": 2, "updatedStories": 1, "assignedArticles": 15, "errors": [] },
-    "assembly": { "storiesProcessed": 2, "errors": [] }
+    "backlog": {
+      "before": {
+        "unembeddedArticles": 42,
+        "unclusteredArticles": 15,
+        "pendingAssemblyStories": 2,
+        "reviewQueueStories": 3
+      },
+      "after": {
+        "unembeddedArticles": 0,
+        "unclusteredArticles": 0,
+        "pendingAssemblyStories": 0,
+        "reviewQueueStories": 4
+      }
+    },
+    "embeddings": {
+      "totalProcessed": 42,
+      "claimedArticles": 42,
+      "errors": [],
+      "passes": 2,
+      "skipped": false,
+      "skipReason": null
+    },
+    "clustering": {
+      "newStories": 2,
+      "updatedStories": 1,
+      "assignedArticles": 15,
+      "unmatchedSingletons": 4,
+      "expiredArticles": 0,
+      "errors": [],
+      "passes": 2,
+      "skipped": false,
+      "skipReason": null
+    },
+    "assembly": {
+      "storiesProcessed": 2,
+      "claimedStories": 2,
+      "autoPublished": 1,
+      "sentToReview": 1,
+      "errors": [],
+      "passes": 1,
+      "skipped": false,
+      "skipReason": null
+    }
   }
 }
 ```
@@ -125,9 +221,16 @@ Expected response:
 }
 ```
 
+### 6. Trigger blindspot digest email
+
+```bash
+curl -s -X POST http://localhost:3000/api/cron/digest \
+  -H "Authorization: Bearer $CRON_SECRET" | jq .
+```
+
 ## Manual Reprocessing
 
-If stories have missing or broken headlines/summaries, you can reset and re-run assembly:
+If stories have missing or broken headlines/summaries, reset them back to draft/pending and re-run assembly:
 
 ### Reset a story's AI-generated fields via Supabase REST
 
@@ -135,13 +238,25 @@ If stories have missing or broken headlines/summaries, you can reset and re-run 
 # Find the story ID in the Supabase dashboard or via API
 STORY_ID="your-story-uuid"
 
-# PATCH the story to clear AI fields, forcing re-assembly
+# PATCH the story to clear AI fields and reset pipeline state
 curl -X PATCH \
   "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/stories?id=eq.$STORY_ID" \
   -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
   -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"headline": null, "summary": null}'
+  -d '{
+    "headline": "Pending headline generation",
+    "ai_summary": null,
+    "assembly_status": "pending",
+    "publication_status": "draft",
+    "review_status": "pending",
+    "review_reasons": [],
+    "confidence_score": null,
+    "processing_error": null,
+    "assembled_at": null,
+    "published_at": null,
+    "assembly_claimed_at": null
+  }'
 ```
 
 Then re-trigger processing:
@@ -151,15 +266,27 @@ curl -s http://localhost:3000/api/cron/process \
   -H "Authorization: Bearer $CRON_SECRET" | jq .
 ```
 
-### Bulk reset (all stories)
+### Bulk reset (all draftable stories)
 
 ```bash
 curl -X PATCH \
-  "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/stories?headline=not.is.null" \
+  "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/stories?assembly_status=neq.pending&publication_status=neq.rejected" \
   -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
   -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"headline": null, "summary": null}'
+  -d '{
+    "headline": "Pending headline generation",
+    "ai_summary": null,
+    "assembly_status": "pending",
+    "publication_status": "draft",
+    "review_status": "pending",
+    "review_reasons": [],
+    "confidence_score": null,
+    "processing_error": null,
+    "assembled_at": null,
+    "published_at": null,
+    "assembly_claimed_at": null
+  }'
 ```
 
 ## API Reference
@@ -172,6 +299,8 @@ curl -X PATCH \
 | GET | `/api/stories/[id]` | None | Single story detail |
 | GET | `/api/stories/[id]/timeline` | None | Story coverage timeline |
 | GET | `/api/sources` | None | Source directory |
+| GET | `/api/sources/[slug]` | None | Source profile with 30-day coverage rollups |
+| GET | `/api/sources/compare?left=<slug>&right=<slug>` | None | Two-source comparison over a fixed 30-day window |
 
 ### /api/stories Query Parameters
 
@@ -184,7 +313,21 @@ curl -X PATCH \
 | `minFactuality` | string | (all) | Minimum factuality threshold (very-high, high, mixed, low, very-low) |
 | `datePreset` | string | 'all' | Time range: `24h`, `7d`, `30d`, `all` |
 | `page` | number | 1 | Page number (1-indexed) |
+| `region` | string | (all) | Filter by region (us, international, uk, canada, europe) |
 | `limit` | number | 20 | Results per page (max 50) |
+
+### /api/sources/compare Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `left` | string | Yes | Left/source-A slug |
+| `right` | string | Yes | Right/source-B slug |
+
+Example:
+
+```bash
+curl -s "http://localhost:3000/api/sources/compare?left=reuters&right=fox-news" | jq .
+```
 
 ### Protected Endpoints (Cron)
 
@@ -192,6 +335,7 @@ curl -X PATCH \
 |--------|------|------|-------------|
 | GET | `/api/cron/ingest` | `Bearer CRON_SECRET` | Trigger RSS ingestion |
 | GET | `/api/cron/process` | `Bearer CRON_SECRET` | Trigger AI processing |
+| POST | `/api/cron/digest` | `Bearer CRON_SECRET` | Send weekly blindspot digest email |
 
 ### Protected Endpoints (User — Supabase Auth required)
 
@@ -208,7 +352,6 @@ curl -X PATCH \
 | GET | `/api/dashboard/bias-profile` | Computed bias distribution |
 | GET | `/api/dashboard/suggestions` | Bias-aware story recommendations |
 | GET | `/api/stories/for-you` | Personalized "For You" feed |
-
 ### Protected Endpoints (Admin — Supabase Auth + admin_users required)
 
 | Method | Path | Description |
@@ -216,6 +359,10 @@ curl -X PATCH \
 | GET | `/api/admin/review` | Review queue (filterable by status) |
 | PATCH | `/api/admin/review/[id]` | Approve or reject a story |
 | GET | `/api/admin/review/stats` | Review queue statistics |
+| GET | `/api/admin/pipeline` | Pipeline dashboard overview |
+| GET | `/api/admin/pipeline/sources` | Source health data |
+| GET | `/api/admin/pipeline/stats` | Pipeline statistics |
+| GET | `/api/admin/pipeline/trigger` | Trigger pipeline run manually |
 
 #### Admin API Examples
 
@@ -230,7 +377,15 @@ Expected response:
 {
   "success": true,
   "data": [
-    { "id": "...", "headline": "...", "review_status": "pending", "topic": "politics" }
+    {
+      "id": "...",
+      "headline": "...",
+      "review_status": "pending",
+      "publication_status": "needs_review",
+      "confidence_score": 0.48,
+      "review_reasons": ["blindspot_detected"],
+      "topic": "politics"
+    }
   ],
   "meta": { "total": 12, "page": 1, "limit": 20 }
 }
@@ -331,10 +486,10 @@ See `docs/architecture.md` for full parameter and response shapes.
 |-------|---------|
 | `sources` | News sources with bias, factuality, ownership metadata |
 | `articles` | Individual articles fetched from RSS feeds |
-| `stories` | Clustered story groups with AI-generated summaries |
+| `stories` | Clustered story groups with AI-generated summaries and explicit publication state — migration 010 |
 | `bookmarks` | User bookmarks (user_id, story_id) — migration 003 |
 | `reading_history` | User reading history (user_id, story_id, read_at, is_read) — migration 003 |
-| `user_preferences` | User preferences (topics, region, perspective, factuality) — migration 004 |
+| `user_preferences` | User preferences (topics, region, perspective, factuality, digest flag) — migrations 004, 009 |
 | `admin_users` | Admin user registry (user_id, role) — migration 006 |
 
 ### Seeding Sources

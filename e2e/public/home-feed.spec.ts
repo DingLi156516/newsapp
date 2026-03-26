@@ -7,8 +7,30 @@ test.describe('Home Feed', () => {
 
   test('renders page header with title and controls', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Axiom' })).toBeVisible()
+    await expect(page.getByTestId('view-switcher')).toBeVisible()
+    await expect(page.getByTestId('view-tab-feed')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId('view-tab-sources')).toBeVisible()
     await expect(page.getByTestId('search-input')).toBeVisible()
     await expect(page.getByText('Sign In')).toBeVisible()
+  })
+
+  test('view switcher switches between feed and sources inline', async ({ page }) => {
+    await expect(page.getByTestId('view-switcher')).toBeVisible()
+
+    // Default is feed view — feed tabs visible
+    await expect(page.getByTestId('view-tab-feed')).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId('feed-tab-trending')).toBeVisible()
+
+    // Switch to sources — URL updates, filter sections appear, feed tabs gone
+    await page.getByTestId('view-tab-sources').click()
+    await expect(page).toHaveURL('/?view=sources')
+    await expect(page.getByText('Filter by Bias')).toBeVisible()
+    await expect(page.getByTestId('feed-tab-trending')).not.toBeVisible()
+
+    // Switch back to feed
+    await page.getByTestId('view-tab-feed').click()
+    await expect(page).toHaveURL('/')
+    await expect(page.getByTestId('feed-tab-trending')).toBeVisible()
   })
 
   test('renders story cards', async ({ page }) => {
@@ -101,7 +123,7 @@ test.describe('Home Feed', () => {
   test('story card click navigates to detail page', async ({ page }) => {
     const heroCard = page.getByTestId('hero-card')
     await expect(heroCard).toBeVisible({ timeout: 10_000 })
-    await heroCard.click()
+    await heroCard.getByRole('link', { name: /Open story:/ }).click()
 
     await expect(page).toHaveURL(/\/story\//)
   })
@@ -154,8 +176,12 @@ test.describe('Home Feed', () => {
   test('date preset filter changes results', async ({ page }) => {
     await expect(page.getByTestId('hero-card')).toBeVisible({ timeout: 10_000 })
     await page.getByTestId('search-filters-toggle').click()
-    await page.getByTestId('date-preset-24h').click()
-    await expect(page.getByTestId('date-preset-24h')).toHaveAttribute('aria-pressed', 'true')
+    const datePreset = page.getByTestId('date-preset-24h')
+
+    await expect(async () => {
+      await datePreset.click()
+      await expect(datePreset).toHaveAttribute('aria-pressed', 'true')
+    }).toPass()
   })
 
   test('clear filters resets all advanced filters', async ({ page }) => {

@@ -47,7 +47,6 @@ function makeStoryRow(overrides: Record<string, unknown> = {}) {
 function createMockClient(stories: unknown[] = [makeStoryRow()]) {
   const query = {
     select: vi.fn().mockReturnThis(),
-    neq: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockResolvedValue({ data: stories, error: null }),
@@ -75,8 +74,10 @@ describe('queryForYouStories', () => {
       id: 'pref-1',
       user_id: 'user-1',
       followed_topics: ['politics'],
+      default_region: 'us',
       default_perspective: 'all',
       factuality_minimum: 'mixed',
+      blindspot_digest_enabled: false,
       created_at: '',
       updated_at: '',
     })
@@ -95,6 +96,7 @@ describe('queryForYouStories', () => {
       { page: 1, limit: 20 }
     )
 
+    expect(client._query.eq).toHaveBeenCalledWith('publication_status', 'published')
     expect(result.data).toHaveLength(2)
     expect(result.count).toBe(2)
   })
@@ -109,8 +111,10 @@ describe('queryForYouStories', () => {
       id: 'pref-1',
       user_id: 'user-1',
       followed_topics: [],
+      default_region: 'us',
       default_perspective: 'all',
       factuality_minimum: 'mixed',
+      blindspot_digest_enabled: false,
       created_at: '',
       updated_at: '',
     })
@@ -137,8 +141,10 @@ describe('queryForYouStories', () => {
       id: 'pref-1',
       user_id: 'user-1',
       followed_topics: ['sports'],
+      default_region: 'us',
       default_perspective: 'all',
       factuality_minimum: 'mixed',
+      blindspot_digest_enabled: false,
       created_at: '',
       updated_at: '',
     })
@@ -162,8 +168,10 @@ describe('queryForYouStories', () => {
       id: 'pref-1',
       user_id: 'user-1',
       followed_topics: [],
+      default_region: 'us',
       default_perspective: 'all',
       factuality_minimum: 'mixed',
+      blindspot_digest_enabled: false,
       created_at: '',
       updated_at: '',
     })
@@ -188,7 +196,6 @@ describe('queryForYouStories', () => {
   it('throws when candidate query fails', async () => {
     const query = {
       select: vi.fn().mockReturnThis(),
-      neq: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       order: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue({
@@ -202,8 +209,10 @@ describe('queryForYouStories', () => {
       id: 'pref-1',
       user_id: 'user-1',
       followed_topics: [],
+      default_region: 'us',
       default_perspective: 'all',
       factuality_minimum: 'mixed',
+      blindspot_digest_enabled: false,
       created_at: '',
       updated_at: '',
     })

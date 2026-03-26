@@ -12,6 +12,7 @@ function makeSources(n: number): NewsSource[] {
     bias: 'center' as const,
     factuality: 'high' as const,
     ownership: 'corporate' as const,
+    region: 'us' as const,
     url: `source${i}.com`,
   }))
 }
@@ -59,7 +60,6 @@ describe('SourceList', () => {
 
   it('with 8 sources and maxVisible=5: shows "Show 3 more sources" button', async () => {
     const sources = makeSources(8)
-    const user = userEvent.setup()
     render(<SourceList sources={sources} maxVisible={5} defaultExpanded />)
     expect(screen.getByText('Show 3 more sources')).toBeInTheDocument()
     expect(screen.getByText('Source 0')).toBeInTheDocument()
@@ -73,5 +73,53 @@ describe('SourceList', () => {
     await user.click(screen.getByText('Show 3 more sources'))
     expect(screen.getByText('Source 5')).toBeInTheDocument()
     expect(screen.getByText('Source 7')).toBeInTheDocument()
+  })
+
+  it('uses articleUrl when present', () => {
+    const sources: NewsSource[] = [{
+      id: 'src-0',
+      name: 'Source 0',
+      bias: 'center',
+      factuality: 'high',
+      ownership: 'corporate',
+      region: 'us',
+      url: 'source0.com',
+      articleUrl: 'https://source0.com/article/123',
+    }]
+    render(<SourceList sources={sources} defaultExpanded />)
+    const link = screen.getByLabelText('Read article on Source 0')
+    expect(link).toHaveAttribute('href', 'https://source0.com/article/123')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('falls back to source URL when articleUrl not present', () => {
+    const sources: NewsSource[] = [{
+      id: 'src-0',
+      name: 'Source 0',
+      bias: 'center',
+      factuality: 'high',
+      ownership: 'corporate',
+      region: 'us',
+      url: 'source0.com',
+    }]
+    render(<SourceList sources={sources} defaultExpanded />)
+    const link = screen.getByLabelText('Visit Source 0')
+    expect(link).toHaveAttribute('href', 'https://source0.com')
+  })
+
+  it('has correct aria-label for article link', () => {
+    const sources: NewsSource[] = [{
+      id: 'src-0',
+      name: 'Reuters',
+      bias: 'center',
+      factuality: 'high',
+      ownership: 'corporate',
+      region: 'international',
+      url: 'reuters.com',
+      articleUrl: 'https://reuters.com/article/xyz',
+    }]
+    render(<SourceList sources={sources} defaultExpanded />)
+    expect(screen.getByLabelText('Read article on Reuters')).toBeInTheDocument()
   })
 })

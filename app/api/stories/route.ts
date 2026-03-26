@@ -1,7 +1,7 @@
 /**
  * GET /api/stories — Paginated story feed with filtering.
  *
- * Query params: topic, region, perspective, search, blindspot, page, limit
+ * Query params: topic, region, perspective, search, blindspot, sort, page, limit
  * Returns: { stories: NewsArticle[], meta: { total, page, limit } }
  */
 

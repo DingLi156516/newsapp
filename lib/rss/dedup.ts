@@ -8,6 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
 import type { ParsedFeedItem } from '@/lib/rss/parser'
+import { normalizeArticleUrl } from '@/lib/rss/normalization'
 
 const BATCH_SIZE = 20
 
@@ -19,28 +20,52 @@ export async function filterNewArticles(
     return []
   }
 
-  const urls = items.map((item) => item.url)
-  const existingUrls = new Set<string>()
+  const canonicalUrls = items.map((item) => normalizeArticleUrl(item.url))
+  const rawUrls = items.map((item) => item.url)
+  const existingCanonicalUrls = new Set<string>()
+  const existingRawUrls = new Set<string>()
 
-  for (let i = 0; i < urls.length; i += BATCH_SIZE) {
-    const batch = urls.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const canonicalBatch = canonicalUrls.slice(i, i + BATCH_SIZE)
+    const rawBatch = rawUrls.slice(i, i + BATCH_SIZE)
 
-    const { data, error } = await client
+    const { data: canonicalData, error: canonicalError } = await client
       .from('articles')
-      .select('url')
-      .in('url', batch)
-      .returns<Array<{ url: string }>>()
+      .select('canonical_url')
+      .in('canonical_url', canonicalBatch)
+      .returns<Array<{ canonical_url: string | null }>>()
 
-    if (error) {
+    if (canonicalError) {
       throw new Error(
-        `Dedup query failed (batch ${i / BATCH_SIZE + 1}, ${batch.length} urls): ${error.message}`
+        `Dedup query failed (batch ${i / BATCH_SIZE + 1}, canonical urls): ${canonicalError.message}`
       )
     }
 
-    for (const row of data ?? []) {
-      existingUrls.add(row.url)
+    const { data: rawData, error: rawError } = await client
+      .from('articles')
+      .select('url')
+      .in('url', rawBatch)
+      .returns<Array<{ url: string }>>()
+
+    if (rawError) {
+      throw new Error(
+        `Dedup query failed (batch ${i / BATCH_SIZE + 1}, raw urls): ${rawError.message}`
+      )
+    }
+
+    for (const row of canonicalData ?? []) {
+      if (row.canonical_url) {
+        existingCanonicalUrls.add(row.canonical_url)
+      }
+    }
+
+    for (const row of rawData ?? []) {
+      existingRawUrls.add(row.url)
     }
   }
 
-  return items.filter((item) => !existingUrls.has(item.url))
+  return items.filter((item) => {
+    const canonicalUrl = normalizeArticleUrl(item.url)
+    return !existingCanonicalUrls.has(canonicalUrl) && !existingRawUrls.has(item.url)
+  })
 }

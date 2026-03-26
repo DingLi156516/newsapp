@@ -9,8 +9,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
 import type { DbArticleInsert } from '@/lib/supabase/types'
 import { getActiveFeeds, type FeedEntry } from '@/lib/rss/feed-registry'
-import { parseFeed, type ParsedFeedItem } from '@/lib/rss/parser'
+import { parseFeed, categorizeFeedError, type ParsedFeedItem, type FeedErrorType } from '@/lib/rss/parser'
 import { filterNewArticles } from '@/lib/rss/dedup'
+import { createTitleFingerprint, normalizeArticleUrl } from '@/lib/rss/normalization'
 
 export interface IngestionResult {
   readonly totalFeeds: number
@@ -24,10 +25,23 @@ export interface FeedError {
   readonly slug: string
   readonly name: string
   readonly error: string
+  readonly errorType: FeedErrorType
 }
 
 const INSERT_BATCH_SIZE = 50
 const FETCH_CONCURRENCY = 5
+
+function getCanonicalIdentity(url: string): string {
+  return normalizeArticleUrl(url)
+}
+
+function formatArticleInsertError(message: string): string {
+  if (message.includes('articles_url_key')) {
+    return `${message} (legacy raw-url unique constraint still exists; apply migration 011_articles_canonical_url_cutover.sql)`
+  }
+
+  return message
+}
 
 async function processInBatches<T, R>(
   items: readonly T[],
@@ -52,10 +66,10 @@ async function fetchFeed(
     const items = await parseFeed(feed.rssUrl)
     return { items, error: null }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const { type, message } = categorizeFeedError(err)
     return {
       items: [],
-      error: { slug: feed.slug, name: feed.name, error: message },
+      error: { slug: feed.slug, name: feed.name, error: message, errorType: type },
     }
   }
 }
@@ -70,6 +84,8 @@ function toArticleInsert(
     description: item.description,
     content: item.content,
     url: item.url,
+    canonical_url: normalizeArticleUrl(item.url),
+    title_fingerprint: createTitleFingerprint(item.title),
     image_url: item.imageUrl,
     published_at: item.publishedAt,
   }
@@ -94,10 +110,12 @@ export async function ingestFeeds(
     const feed = feeds[i]
 
     if (result.status === 'rejected') {
+      const { type, message } = categorizeFeedError(result.reason)
       errors.push({
         slug: feed.slug,
         name: feed.name,
-        error: String(result.reason),
+        error: message,
+        errorType: type,
       })
       continue
     }
@@ -114,14 +132,15 @@ export async function ingestFeeds(
 
   const parsedItems = allItems.map((entry) => entry.item)
   const newItems = await filterNewArticles(client, parsedItems)
-  const newUrlSet = new Set(newItems.map((item) => item.url))
+  const newCanonicalSet = new Set(newItems.map((item) => getCanonicalIdentity(item.url)))
 
-  const seen = new Set<string>()
+  const seenCanonical = new Set<string>()
   const inserts = allItems
-    .filter((entry) => newUrlSet.has(entry.item.url))
+    .filter((entry) => newCanonicalSet.has(getCanonicalIdentity(entry.item.url)))
     .filter((entry) => {
-      if (seen.has(entry.item.url)) return false
-      seen.add(entry.item.url)
+      const canonicalIdentity = getCanonicalIdentity(entry.item.url)
+      if (seenCanonical.has(canonicalIdentity)) return false
+      seenCanonical.add(canonicalIdentity)
       return true
     })
     .map((entry) => toArticleInsert(entry.item, entry.sourceId))
@@ -133,13 +152,83 @@ export async function ingestFeeds(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (client.from('articles') as any)
-      .upsert(batch, { onConflict: 'url', ignoreDuplicates: true })
+      .upsert(batch, { onConflict: 'canonical_url', ignoreDuplicates: true })
 
     if (error) {
-      throw new Error(`Article insert failed: ${error.message}`)
+      throw new Error(`Article insert failed: ${formatArticleInsertError(error.message)}`)
     }
 
     insertedCount += batch.length
+  }
+
+  // Update source health for each feed
+  for (let i = 0; i < feeds.length; i++) {
+    const feed = feeds[i]
+    const result = feedResults[i]
+
+    if (result.status === 'rejected') {
+      const { type, message } = categorizeFeedError(result.reason)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: sourceData } = await (client.from('sources') as any)
+        .select('consecutive_failures')
+        .eq('id', feed.sourceId)
+        .single()
+
+      const currentFailures = (sourceData?.consecutive_failures as number) ?? 0
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (client.from('sources') as any)
+        .update({
+          last_fetch_at: new Date().toISOString(),
+          last_fetch_status: type,
+          last_fetch_error: message,
+          consecutive_failures: currentFailures + 1,
+        })
+        .eq('id', feed.sourceId)
+      continue
+    }
+
+    const { error: feedError } = result.value
+    if (feedError) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: sourceData } = await (client.from('sources') as any)
+        .select('consecutive_failures')
+        .eq('id', feed.sourceId)
+        .single()
+
+      const currentFailures = (sourceData?.consecutive_failures as number) ?? 0
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (client.from('sources') as any)
+        .update({
+          last_fetch_at: new Date().toISOString(),
+          last_fetch_status: feedError.errorType,
+          last_fetch_error: feedError.error,
+          consecutive_failures: currentFailures + 1,
+        })
+        .eq('id', feed.sourceId)
+    } else {
+      const articlesForSource = inserts.filter((a) => a.source_id === feed.sourceId).length
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: sourceData } = await (client.from('sources') as any)
+        .select('total_articles_ingested')
+        .eq('id', feed.sourceId)
+        .single()
+
+      const currentTotal = (sourceData?.total_articles_ingested as number) ?? 0
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (client.from('sources') as any)
+        .update({
+          last_fetch_at: new Date().toISOString(),
+          last_fetch_status: 'success',
+          last_fetch_error: null,
+          consecutive_failures: 0,
+          total_articles_ingested: currentTotal + articlesForSource,
+        })
+        .eq('id', feed.sourceId)
+    }
   }
 
   return {

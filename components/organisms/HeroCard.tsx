@@ -4,8 +4,9 @@ import Image from 'next/image'
 import { motion } from 'framer-motion'
 import { CoverageCount } from '@/components/atoms/CoverageCount'
 import { BlindspotBadge } from '@/components/atoms/BlindspotBadge'
-import { FactualityDots } from '@/components/atoms/FactualityDots'
+import { FactualityBar } from '@/components/atoms/FactualityBar'
 import { BookmarkButton } from '@/components/atoms/BookmarkButton'
+import { ShareButton } from '@/components/atoms/ShareButton'
 import { MonochromeSpectrumBar } from '@/components/molecules/MonochromeSpectrumBar'
 import { TOPIC_LABELS } from '@/lib/types'
 import type { NewsArticle } from '@/lib/types'
@@ -48,9 +49,10 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: 
             </span>
           )}
           <span className="flex items-center gap-0.5 ml-1">
-            <FactualityDots level={article.factuality} />
+            <FactualityBar level={article.factuality} />
           </span>
-          <span className="ml-auto">
+          <span className="ml-auto flex items-center gap-2">
+            <ShareButton url={`/story/${article.id}`} title={article.headline} />
             <BookmarkButton
               isSaved={isSaved}
               onToggle={() => onSave(article.id)}
@@ -58,9 +60,15 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: 
           </span>
         </div>
 
-        <h2 className={`font-serif text-xl font-semibold leading-snug mb-3 ${isRead ? 'text-white/50' : 'text-white'}`}>
-          {article.headline}
-        </h2>
+        <a
+          href={`/story/${article.id}`}
+          className="block mb-3"
+          aria-label={`Open story: ${article.headline}`}
+        >
+          <h2 className={`font-serif text-xl font-semibold leading-snug ${isRead ? 'text-white/50' : 'text-white'}`}>
+            {article.headline}
+          </h2>
+        </a>
 
         <MonochromeSpectrumBar
           segments={article.spectrumSegments}
@@ -75,7 +83,7 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: 
             src={article.imageUrl}
             alt=""
             fill
-            className="object-cover opacity-40"
+            className="object-cover"
             sizes="160px"
           />
         </div>

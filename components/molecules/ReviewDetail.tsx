@@ -19,6 +19,10 @@ interface ReviewStoryDetail {
   readonly source_count: number
   readonly spectrum_segments: SpectrumSegment[] | unknown
   readonly ai_summary: AISummary | unknown
+  readonly publication_status?: string
+  readonly review_reasons?: string[]
+  readonly confidence_score?: number | null
+  readonly processing_error?: string | null
   readonly review_status: string
   readonly first_published: string
   readonly last_updated: string
@@ -89,6 +93,9 @@ export function ReviewDetail({ story, onApprove, onReject, onReprocess, isLoadin
 
   const summary = parseAISummary(story.ai_summary)
   const spectrum = parseSpectrum(story.spectrum_segments)
+  const confidence = typeof story.confidence_score === 'number'
+    ? `${Math.round(story.confidence_score * 100)}% confidence`
+    : null
 
   return (
     <div className={`glass p-5 space-y-4 ${isEditing ? 'border border-blue-400/30' : ''}`}>
@@ -103,6 +110,28 @@ export function ReviewDetail({ story, onApprove, onReject, onReprocess, isLoadin
           {story.source_count} sources
         </span>
       </div>
+
+      {(confidence || story.review_reasons?.length || story.processing_error) && (
+        <div className="space-y-2">
+          {confidence && (
+            <p className="text-xs text-white/55">{confidence}</p>
+          )}
+          {story.review_reasons && story.review_reasons.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {story.review_reasons.map((reason) => (
+                <span key={reason} className="glass-pill px-2 py-1 text-xs text-amber-300">
+                  {reason}
+                </span>
+              ))}
+            </div>
+          )}
+          {story.processing_error && (
+            <div className="glass-sm px-3 py-2 text-xs text-red-300">
+              {story.processing_error}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Headline */}
       {isEditing ? (

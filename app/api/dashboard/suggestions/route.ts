@@ -55,7 +55,7 @@ export async function GET() {
       .select(
         'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, first_published, last_updated'
       )
-      .neq('headline', 'Pending headline generation')
+      .eq('publication_status', 'published')
       .order('last_updated', { ascending: false })
       .limit(100)
 

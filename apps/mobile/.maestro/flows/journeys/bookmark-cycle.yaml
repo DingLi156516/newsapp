@@ -1,0 +1,84 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Wait for feed to load
+- assertVisible:
+    id: "axiom-header"
+
+# Open a story
+- tapOn:
+    id: "hero-card"
+    optional: true
+- tapOn:
+    id: "story-card"
+    optional: true
+    index: 0
+
+# Wait for story detail
+- waitForAnimationToEnd
+
+# Bookmark it (optional — depends on story loading)
+- tapOn:
+    id: "bookmark-button"
+    optional: true
+
+# Go back
+- tapOn:
+    id: "back-button"
+    optional: true
+
+# Navigate to Saved tab
+- tapOn:
+    id: "feed-tab-saved"
+
+# Verify we're on the saved tab
+- assertVisible:
+    id: "axiom-header"
+
+# Go back to Trending
+- tapOn:
+    id: "feed-tab-trending"
+
+# Open the same story again and unbookmark
+- tapOn:
+    id: "hero-card"
+    optional: true
+- tapOn:
+    id: "story-card"
+    optional: true
+    index: 0
+
+# Wait for story detail
+- waitForAnimationToEnd
+
+# Unbookmark (optional)
+- tapOn:
+    id: "bookmark-button"
+    optional: true
+
+# Go back
+- tapOn:
+    id: "back-button"
+    optional: true
+
+# Verify we're back on home
+- assertVisible:
+    id: "axiom-header"

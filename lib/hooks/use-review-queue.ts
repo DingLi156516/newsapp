@@ -27,6 +27,10 @@ interface ReviewStory {
   readonly ownership: string
   readonly spectrum_segments: unknown
   readonly ai_summary: unknown
+  readonly publication_status: string
+  readonly review_reasons: string[]
+  readonly confidence_score: number | null
+  readonly processing_error: string | null
   readonly review_status: string
   readonly reviewed_by: string | null
   readonly reviewed_at: string | null

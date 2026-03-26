@@ -3,14 +3,16 @@
 import { useState } from 'react'
 import { SlidersHorizontal, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
-import type { BiasCategory, FactualityLevel, DatePreset, PerspectiveFilter, Topic } from '@/lib/types'
+import type { BiasCategory, FactualityLevel, DatePreset, PerspectiveFilter, Topic, Region } from '@/lib/types'
 import {
   ALL_BIASES,
+  ALL_REGIONS,
   BIAS_LABELS,
   BIAS_CSS_CLASS,
   FACTUALITY_LABELS,
   DATE_PRESET_LABELS,
   TOPIC_LABELS,
+  REGION_LABELS,
   PERSPECTIVE_BIASES,
 } from '@/lib/types'
 
@@ -48,6 +50,8 @@ function deriveActivePreset(biasRange: BiasCategory[]): PerspectiveFilter | null
 interface Props {
   readonly topic: Topic | null
   readonly onTopicChange: (v: Topic | null) => void
+  readonly region: Region | null
+  readonly onRegionChange: (v: Region | null) => void
   readonly biasRange: BiasCategory[]
   readonly onBiasRangeChange: (v: BiasCategory[]) => void
   readonly minFactuality: FactualityLevel | null
@@ -58,12 +62,14 @@ interface Props {
 
 function countActiveFilters(
   topic: Topic | null,
+  region: Region | null,
   biasRange: BiasCategory[],
   minFactuality: FactualityLevel | null,
   datePreset: DatePreset
 ): number {
   let count = 0
   if (topic !== null) count += 1
+  if (region !== null) count += 1
   if (biasRange.length < 7) count += 1
   if (minFactuality !== null) count += 1
   if (datePreset !== 'all') count += 1
@@ -73,6 +79,8 @@ function countActiveFilters(
 export function SearchFilters({
   topic,
   onTopicChange,
+  region,
+  onRegionChange,
   biasRange,
   onBiasRangeChange,
   minFactuality,
@@ -81,7 +89,7 @@ export function SearchFilters({
   onDatePresetChange,
 }: Props) {
   const [open, setOpen] = useState(false)
-  const activeCount = countActiveFilters(topic, biasRange, minFactuality, datePreset)
+  const activeCount = countActiveFilters(topic, region, biasRange, minFactuality, datePreset)
   const activePreset = deriveActivePreset(biasRange)
 
   function handlePreset(preset: PerspectiveFilter) {
@@ -100,6 +108,7 @@ export function SearchFilters({
 
   function handleClear() {
     onTopicChange(null)
+    onRegionChange(null)
     onBiasRangeChange(ALL_BIASES)
     onMinFactualityChange(null)
     onDatePresetChange('all')
@@ -168,6 +177,45 @@ export function SearchFilters({
                         }`}
                       >
                         {TOPIC_LABELS[t]}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Region */}
+              <div className="space-y-2">
+                <span className="text-[11px] font-medium uppercase tracking-wider text-white/40">
+                  Region
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    data-testid="region-filter-pill-all"
+                    aria-pressed={region === null}
+                    onClick={() => onRegionChange(null)}
+                    className={`glass-pill px-2.5 py-1 text-xs transition-all ${
+                      region === null
+                        ? 'bg-white/15 text-white ring-1 ring-white/20'
+                        : 'text-white/40 hover:text-white/60'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {ALL_REGIONS.map((r) => {
+                    const isActive = region === r
+                    return (
+                      <button
+                        key={r}
+                        data-testid={`region-filter-pill-${r}`}
+                        aria-pressed={isActive}
+                        onClick={() => onRegionChange(r)}
+                        className={`glass-pill px-2.5 py-1 text-xs transition-all ${
+                          isActive
+                            ? 'bg-white/15 text-white ring-1 ring-white/20'
+                            : 'text-white/40 hover:text-white/60'
+                        }`}
+                      >
+                        {REGION_LABELS[r]}
                       </button>
                     )
                   })}

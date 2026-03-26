@@ -13,6 +13,25 @@ interface Props {
   height?: 'sm' | 'md'
 }
 
+function largestRemainderRound(values: number[]): number[] {
+  const floored = values.map(Math.floor)
+  const remainders = values.map((v, i) => v - floored[i])
+  let remaining = 100 - floored.reduce((a, b) => a + b, 0)
+
+  const indices = remainders
+    .map((r, i) => ({ i, r }))
+    .sort((a, b) => b.r - a.r)
+    .map((x) => x.i)
+
+  const result = [...floored]
+  for (const idx of indices) {
+    if (remaining <= 0) break
+    result[idx] += 1
+    remaining -= 1
+  }
+  return result
+}
+
 const leftBiases: BiasCategory[] = ['far-left', 'left', 'lean-left']
 const rightBiases: BiasCategory[] = ['lean-right', 'right', 'far-right']
 
@@ -29,6 +48,9 @@ export function MonochromeSpectrumBar({
 
   const leftPct = segments
     .filter(s => leftBiases.includes(s.bias))
+    .reduce((sum, s) => sum + s.percentage, 0)
+  const centerPct = segments
+    .filter(s => s.bias === 'center')
     .reduce((sum, s) => sum + s.percentage, 0)
   const rightPct = segments
     .filter(s => rightBiases.includes(s.bias))
@@ -52,19 +74,28 @@ export function MonochromeSpectrumBar({
     </div>
   )
 
+  const [roundedLeft, roundedCenter, roundedRight] = largestRemainderRound([
+    leftPct,
+    centerPct,
+    rightPct,
+  ])
+
   const trackBar = showLabels ? (
-    <div className="flex items-center gap-2.5">
-      <span className="text-xs text-white/50 min-w-[28px] text-right tabular-nums">
-        {Math.round(leftPct)}%
-      </span>
-      <div className="flex-1">
-        <div className="spectrum-track">
-          {bar}
-        </div>
+    <div>
+      <div className="spectrum-track">
+        {bar}
       </div>
-      <span className="text-xs text-white/50 min-w-[28px] tabular-nums">
-        {Math.round(rightPct)}%
-      </span>
+      <div className="flex justify-between mt-1">
+        {roundedLeft > 0 && (
+          <span className="text-xs text-white/50 tabular-nums">Left {roundedLeft}%</span>
+        )}
+        {roundedCenter > 0 && (
+          <span className="text-xs text-white/50 tabular-nums">Center {roundedCenter}%</span>
+        )}
+        {roundedRight > 0 && (
+          <span className="text-xs text-white/50 tabular-nums">Right {roundedRight}%</span>
+        )}
+      </div>
     </div>
   ) : (
     <div className="spectrum-track">

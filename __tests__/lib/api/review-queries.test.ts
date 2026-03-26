@@ -47,6 +47,13 @@ const mockStory = {
   ownership: 'corporate',
   spectrum_segments: [],
   ai_summary: { commonGround: '', leftFraming: '', rightFraming: '' },
+  assembly_status: 'completed',
+  publication_status: 'needs_review',
+  review_reasons: ['blindspot'],
+  confidence_score: 0.48,
+  processing_error: null,
+  assembled_at: '2024-01-01T00:00:00Z',
+  published_at: null,
   review_status: 'pending',
   reviewed_by: null,
   reviewed_at: null,
@@ -75,7 +82,7 @@ describe('queryReviewQueue', () => {
 
     await queryReviewQueue(client, { status: 'pending', page: 1, limit: 20 })
 
-    expect(builder.eq).toHaveBeenCalledWith('review_status', 'pending')
+    expect(builder.eq).toHaveBeenCalledWith('publication_status', 'needs_review')
   })
 
   it('throws on query error', async () => {
@@ -113,7 +120,9 @@ describe('updateReviewStatus', () => {
     expect(builder.update).toHaveBeenCalledWith(
       expect.objectContaining({
         review_status: 'approved',
+        publication_status: 'published',
         reviewed_by: 'admin-user-id',
+        published_at: expect.any(String),
       })
     )
     expect(builder.eq).toHaveBeenCalledWith('id', 'story-1')
@@ -155,6 +164,7 @@ describe('updateReviewStatus', () => {
     expect(builder.update).toHaveBeenCalledWith(
       expect.objectContaining({
         review_status: 'rejected',
+        publication_status: 'rejected',
         reviewed_by: 'admin-user-id',
       })
     )
@@ -171,6 +181,8 @@ describe('updateReviewStatus', () => {
     expect(builder.update).toHaveBeenCalledWith(
       expect.objectContaining({
         review_status: 'pending',
+        publication_status: 'draft',
+        assembly_status: 'pending',
         headline: 'Pending headline generation',
       })
     )

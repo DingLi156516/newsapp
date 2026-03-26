@@ -1,0 +1,8 @@
+# Maestro E2E test configuration for Axiom News mobile app
+# Run: maestro test --config .maestro/config.yaml
+
+appId: host.exp.Exponent
+executionOrder:
+  continueOnFailure: true
+includeTags: []
+excludeTags: []

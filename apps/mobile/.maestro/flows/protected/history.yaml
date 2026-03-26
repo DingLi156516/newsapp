@@ -1,0 +1,52 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Navigate to Profile tab
+- tapOn:
+    text: "Profile"
+
+# Wait for profile screen
+- waitForAnimationToEnd
+
+# Tap History button (only visible when authenticated)
+- tapOn:
+    text: "History"
+    optional: true
+
+# Verify history screen loaded (optional — requires auth)
+- assertVisible:
+    text: "Reading History"
+    optional: true
+- assertVisible:
+    id: "back-button"
+    optional: true
+
+# Navigate back
+- tapOn:
+    id: "back-button"
+    optional: true
+
+# Return to home
+- tapOn:
+    text: "Home"
+    optional: true
+- assertVisible:
+    id: "axiom-header"

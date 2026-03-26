@@ -23,6 +23,11 @@ import type {
 // sources table
 // ---------------------------------------------------------------------------
 
+export type FetchStatus = 'success' | 'timeout' | 'http_error' | 'parse_error' | 'dns_error' | 'unknown'
+export type DbAssemblyStatus = 'pending' | 'processing' | 'completed' | 'failed'
+export type DbPublicationStatus = 'draft' | 'needs_review' | 'published' | 'rejected'
+export type DbStoryKind = 'standard'
+
 export interface DbSource {
   id: string
   slug: string
@@ -34,6 +39,11 @@ export interface DbSource {
   rss_url: string | null
   region: Region
   is_active: boolean
+  last_fetch_at: string | null
+  last_fetch_status: FetchStatus
+  last_fetch_error: string | null
+  consecutive_failures: number
+  total_articles_ingested: number
   created_at: string
   updated_at: string
 }
@@ -57,6 +67,7 @@ export interface DbSourceInsert {
 export interface DbStory {
   id: string
   headline: string
+  story_kind: DbStoryKind
   topic: Topic
   region: string
   source_count: number
@@ -67,6 +78,14 @@ export interface DbStory {
   spectrum_segments: SpectrumSegment[]
   ai_summary: AISummary
   cluster_centroid: number[] | null
+  assembly_status: DbAssemblyStatus
+  publication_status: DbPublicationStatus
+  review_reasons: string[]
+  confidence_score: number | null
+  processing_error: string | null
+  assembled_at: string | null
+  published_at: string | null
+  assembly_claimed_at: string | null
   review_status: 'pending' | 'approved' | 'rejected'
   reviewed_by: string | null
   reviewed_at: string | null
@@ -77,6 +96,7 @@ export interface DbStory {
 
 export interface DbStoryInsert {
   headline: string
+  story_kind?: DbStoryKind
   topic: Topic
   region?: string
   source_count?: number
@@ -87,6 +107,14 @@ export interface DbStoryInsert {
   spectrum_segments?: SpectrumSegment[]
   ai_summary?: AISummary
   cluster_centroid?: number[] | null
+  assembly_status?: DbAssemblyStatus
+  publication_status?: DbPublicationStatus
+  review_reasons?: string[]
+  confidence_score?: number | null
+  processing_error?: string | null
+  assembled_at?: string | null
+  published_at?: string | null
+  assembly_claimed_at?: string | null
   first_published: string
 }
 
@@ -101,12 +129,18 @@ export interface DbArticle {
   description: string | null
   content: string | null
   url: string
+  canonical_url: string | null
+  title_fingerprint: string | null
   image_url: string | null
   published_at: string
   ingested_at: string
   embedding: number[] | null
   is_embedded: boolean
+  embedding_claimed_at: string | null
+  clustering_claimed_at: string | null
   story_id: string | null
+  clustering_attempts: number
+  clustering_status: 'pending' | 'clustered' | 'expired'
   created_at: string
 }
 
@@ -116,11 +150,17 @@ export interface DbArticleInsert {
   description?: string | null
   content?: string | null
   url: string
+  canonical_url?: string | null
+  title_fingerprint?: string | null
   image_url?: string | null
   published_at: string
   embedding?: number[] | null
   is_embedded?: boolean
+  embedding_claimed_at?: string | null
+  clustering_claimed_at?: string | null
   story_id?: string | null
+  clustering_attempts?: number
+  clustering_status?: 'pending' | 'clustered' | 'expired'
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +209,7 @@ export interface DbUserPreferences {
   default_region: string
   default_perspective: string
   factuality_minimum: string
+  blindspot_digest_enabled: boolean
   created_at: string
   updated_at: string
 }
@@ -179,6 +220,39 @@ export interface DbUserPreferencesInsert {
   default_region?: string
   default_perspective?: string
   factuality_minimum?: string
+  blindspot_digest_enabled?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// pipeline_runs table
+// ---------------------------------------------------------------------------
+
+export interface DbPipelineStep {
+  step: string
+  status: 'success' | 'error' | 'skipped'
+  duration_ms: number
+  result?: Record<string, unknown>
+  error?: string
+}
+
+export interface DbPipelineRun {
+  id: string
+  run_type: 'ingest' | 'process' | 'full'
+  triggered_by: string
+  status: 'running' | 'completed' | 'failed'
+  started_at: string
+  completed_at: string | null
+  duration_ms: number | null
+  steps: DbPipelineStep[]
+  summary: Record<string, unknown> | null
+  error: string | null
+  created_at: string
+}
+
+export interface DbPipelineRunInsert {
+  run_type: 'ingest' | 'process' | 'full'
+  triggered_by?: string
+  status?: 'running' | 'completed' | 'failed'
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +263,45 @@ export interface DbAdminUser {
   id: string
   user_id: string
   created_at: string
+}
+
+// ---------------------------------------------------------------------------
+// tags table
+// ---------------------------------------------------------------------------
+
+export type DbTagType = 'person' | 'organization' | 'location' | 'event' | 'topic'
+
+export interface DbTag {
+  id: string
+  slug: string
+  label: string
+  description: string | null
+  tag_type: DbTagType
+  story_count: number
+  created_at: string
+}
+
+export interface DbTagInsert {
+  slug: string
+  label: string
+  description?: string | null
+  tag_type: DbTagType
+}
+
+// ---------------------------------------------------------------------------
+// story_tags join table
+// ---------------------------------------------------------------------------
+
+export interface DbStoryTag {
+  story_id: string
+  tag_id: string
+  relevance: number
+}
+
+export interface DbStoryTagInsert {
+  story_id: string
+  tag_id: string
+  relevance?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +399,54 @@ export interface Database {
         Insert: { user_id: string }
         Update: Partial<{ user_id: string }>
         Relationships: []
+      }
+      pipeline_runs: {
+        Row: DbPipelineRun
+        Insert: DbPipelineRunInsert
+        Update: Partial<DbPipelineRunInsert & {
+          status: 'running' | 'completed' | 'failed'
+          completed_at: string
+          duration_ms: number
+          steps: DbPipelineStep[]
+          summary: Record<string, unknown>
+          error: string
+        }>
+        Relationships: []
+      }
+      tags: {
+        Row: DbTag
+        Insert: DbTagInsert
+        Update: Partial<DbTagInsert>
+        Relationships: [
+          {
+            foreignKeyName: 'story_tags_tag_id_fkey'
+            columns: ['id']
+            isOneToOne: false
+            referencedRelation: 'story_tags'
+            referencedColumns: ['tag_id']
+          },
+        ]
+      }
+      story_tags: {
+        Row: DbStoryTag
+        Insert: DbStoryTagInsert
+        Update: Partial<DbStoryTagInsert>
+        Relationships: [
+          {
+            foreignKeyName: 'story_tags_story_id_fkey'
+            columns: ['story_id']
+            isOneToOne: false
+            referencedRelation: 'stories'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'story_tags_tag_id_fkey'
+            columns: ['tag_id']
+            isOneToOne: false
+            referencedRelation: 'tags'
+            referencedColumns: ['id']
+          },
+        ]
       }
     }
     // eslint-disable-next-line @typescript-eslint/no-empty-object-type

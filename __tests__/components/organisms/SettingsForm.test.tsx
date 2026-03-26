@@ -22,6 +22,7 @@ const DEFAULT_PREFS = {
   followed_topics: [] as string[],
   default_perspective: 'all' as const,
   factuality_minimum: 'mixed' as const,
+  blindspot_digest_enabled: false,
 }
 
 function mockPreferences(overrides: Record<string, unknown> = {}) {
@@ -46,7 +47,7 @@ describe('SettingsForm', () => {
     } as never)
 
     const { container } = render(<SettingsForm />)
-    expect(container.querySelector('.animate-pulse')).toBeInTheDocument()
+    expect(container.querySelector('.animate-shimmer')).toBeInTheDocument()
   })
 
   it('renders topic pills for all 9 topics', () => {
@@ -97,6 +98,29 @@ describe('SettingsForm', () => {
     expect(mockUpdatePreferences).toHaveBeenCalledWith({
       followed_topics: ['politics'],
     })
+  })
+
+  // Email Digest section tests
+  it('renders email digest section', () => {
+    mockPreferences()
+    render(<SettingsForm />)
+    expect(screen.getByTestId('email-digest-section')).toBeInTheDocument()
+    expect(screen.getByText('Email Digest')).toBeInTheDocument()
+  })
+
+  it('renders blindspot digest toggle', () => {
+    mockPreferences()
+    render(<SettingsForm />)
+    expect(screen.getByTestId('blindspot-digest-toggle')).toBeInTheDocument()
+    expect(screen.getByText('Weekly Blindspot Digest')).toBeInTheDocument()
+  })
+
+  it('calls updatePreferences when digest toggle clicked', async () => {
+    mockPreferences()
+    const user = userEvent.setup()
+    render(<SettingsForm />)
+    await user.click(screen.getByTestId('blindspot-digest-toggle'))
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ blindspot_digest_enabled: true })
   })
 
 })

@@ -15,12 +15,14 @@ export interface UserPreferences {
   readonly followed_topics: Topic[]
   readonly default_perspective: PerspectiveFilter
   readonly factuality_minimum: FactualityLevel
+  readonly blindspot_digest_enabled: boolean
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {
   followed_topics: [],
   default_perspective: 'all',
   factuality_minimum: 'mixed',
+  blindspot_digest_enabled: false,
 }
 
 interface PreferencesApiResponse {

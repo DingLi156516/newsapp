@@ -1,0 +1,20 @@
+/** @type {import('jest').Config} */
+module.exports = {
+  preset: 'jest-expo',
+  setupFiles: ['<rootDir>/jest.setup.ts'],
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/$1',
+  },
+  transformIgnorePatterns: [
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|lucide-react-native|@gorhom/bottom-sheet|@supabase/supabase-js|nativewind)',
+  ],
+  collectCoverageFrom: [
+    'components/**/*.{ts,tsx}',
+    'lib/**/*.{ts,tsx}',
+    '!**/*.d.ts',
+    '!**/node_modules/**',
+  ],
+  testMatch: [
+    '**/__tests__/**/*.test.{ts,tsx}',
+  ],
+}

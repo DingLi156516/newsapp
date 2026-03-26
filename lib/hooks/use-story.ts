@@ -26,10 +26,12 @@
  * local development with no backend.
  */
 
+import { useEffect, useState } from 'react'
 import useSWR from 'swr'
 import type { NewsArticle } from '@/lib/types'
 import { sampleArticles } from '@/lib/sample-data'
 import { fetcher } from '@/lib/hooks/fetcher'
+import { getCachedStory } from '@/lib/offline/cache-manager'
 
 interface StoryApiResponse {
   readonly success: boolean
@@ -46,13 +48,26 @@ export function useStory(id: string) {
     }
   )
 
+  const [cachedStory, setCachedStory] = useState<NewsArticle | null>(null)
+
+  // If API fails (offline), try the cache
+  useEffect(() => {
+    if (error && !data) {
+      getCachedStory(id).then((cached) => {
+        if (cached && typeof cached === 'object' && 'data' in (cached as Record<string, unknown>)) {
+          setCachedStory((cached as StoryApiResponse).data)
+        }
+      })
+    }
+  }, [error, data, id])
+
   const fallback = sampleArticles.find((a) => a.id === id) ?? null
-  const story = data?.data ?? fallback
+  const story = data?.data ?? cachedStory ?? fallback
 
   return {
     story,
     isLoading,
-    isError: !!error,
+    isError: !!error && !cachedStory,
     error,
   }
 }

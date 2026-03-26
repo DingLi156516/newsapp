@@ -45,6 +45,74 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `npm run test:e2e` | Playwright E2E tests (headless) |
 | `npm run test:e2e:ui` | Playwright interactive UI mode |
 | `npm run test:e2e:headed` | Playwright with visible browser |
+| `npx tsx scripts/backfill-tags.ts` | Backfill entity tags for existing published stories |
+
+---
+
+## Mobile App
+
+React Native mobile app at `apps/mobile/` built with Expo SDK 54.
+
+### Prerequisites
+
+- **Node.js** 20 LTS (Node 22+ has type stripping issues with Expo)
+- **Expo Go** app on iOS/Android, or iOS Simulator
+- **Maestro** for E2E tests: `brew install maestro`
+
+### Quick Start
+
+```bash
+cd apps/mobile
+npm install
+
+# Start dev server (opens in Expo Go or Simulator)
+npm start
+
+# Or target specific platform
+npm run ios
+npm run android
+```
+
+### Mobile Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm start` | Start Expo dev server |
+| `npm run ios` | Start with iOS Simulator |
+| `npm run android` | Start with Android emulator |
+| `npm test` | Jest unit/integration tests (210 tests) |
+| `npm run test:coverage` | Coverage report (target 80%) |
+| `npm run test:e2e` | Maestro E2E flows (16 flows) |
+
+### Mobile Documentation
+
+| File | Contents |
+|------|----------|
+| `docs/mobile-architecture.md` | Screens, navigation, hooks, auth flow, API integration |
+| `docs/mobile-components.md` | Component inventory with props |
+| `docs/mobile-testing.md` | Jest + Maestro setup, testID conventions |
+| `docs/mobile-app-plan.md` | 5-phase development roadmap |
+
+---
+
+## Pipeline Notes
+
+The ingest/process pipeline now uses explicit story lifecycle state instead of relying on placeholder headlines:
+
+- `assembly_status`: `pending | processing | completed | failed`
+- `publication_status`: `draft | needs_review | published | rejected`
+- `story_kind`: `standard | emerging_single_source`
+
+Public story APIs only serve `published` stories. Assembly applies a conservative risk-based decision:
+- low-risk stories auto-publish
+- blindspots, sparse clusters, AI fallbacks, weak source mixes, and failed assembly runs go to admin review
+
+The processing cron now runs backlog-aware multi-pass embed/cluster/assemble loops and reports backlog counts before and after each run so operators can distinguish ingest, embedding, clustering, assembly, and review backlog.
+
+Embedded singletons no longer retry forever:
+- unmatched single-source articles retry clustering for 24 hours
+- after that they are promoted to `emerging_single_source` stories
+- if an independent outlet later matches the same centroid, the story upgrades back to `standard` and is reassembled
 
 ---
 
@@ -58,7 +126,11 @@ newsapp/
 │   ├── blindspot/
 │   │   └── page.tsx            # Blindspot-filtered feed
 │   ├── sources/
-│   │   └── page.tsx            # Source directory with filters
+│   │   ├── page.tsx            # Source directory with filters
+│   │   ├── compare/
+│   │   │   └── page.tsx        # Source comparison driven by left/right slugs
+│   │   └── [slug]/
+│   │       └── page.tsx        # Source profile detail
 │   ├── story/
 │   │   └── [id]/
 │   │       └── page.tsx        # Story detail (bias breakdown, AI summary)
@@ -88,7 +160,11 @@ newsapp/
 │       │       └── timeline/
 │       │           └── route.ts # GET /api/stories/[id]/timeline
 │       ├── sources/
-│       │   └── route.ts        # GET /api/sources
+│       │   ├── route.ts        # GET /api/sources
+│       │   ├── compare/
+│       │   │   └── route.ts    # GET /api/sources/compare
+│       │   └── [slug]/
+│       │       └── route.ts    # GET /api/sources/[slug]
 │       ├── bookmarks/
 │       │   ├── route.ts        # GET/POST /api/bookmarks
 │       │   └── [storyId]/
@@ -113,7 +189,8 @@ newsapp/
 │       │           └── route.ts # GET /api/admin/review/stats
 │       └── cron/
 │           ├── ingest/route.ts  # GET — RSS ingestion
-│           └── process/route.ts # GET — AI processing
+│           ├── process/route.ts # GET — AI processing
+│           └── digest/route.ts  # POST — blindspot digest email
 ├── components/
 │   ├── atoms/                  # Primitive UI components (no state)
 │   │   ├── BiasTag.tsx
@@ -122,6 +199,7 @@ newsapp/
 │   │   ├── CoverageCount.tsx
 │   │   ├── FactualityDots.tsx
 │   │   ├── ReviewStatusBadge.tsx
+│   │   ├── OfflineIndicator.tsx
 │   │   └── Skeleton.tsx
 │   ├── molecules/              # Composed components (may have local state)
 │   │   ├── BiasLegend.tsx
@@ -144,21 +222,30 @@ newsapp/
 │       ├── AuthForm.tsx
 │       ├── UserMenu.tsx
 │       ├── HeroCard.tsx
+│       ├── ViewSwitcher.tsx
+│       ├── SourcesView.tsx
 │       ├── BiasProfileChart.tsx
 │       ├── SettingsForm.tsx
 │       ├── StickyFilterBar.tsx
 │       ├── SuggestionsList.tsx
 │       └── ReviewQueue.tsx
+│   └── pages/                  # Route-level page shells
+│       ├── SourceProfilePage.tsx
+│       └── SourceComparisonPage.tsx
 ├── lib/
 │   ├── types.ts                # All TypeScript types, enums, label maps
 │   ├── sample-data.ts          # Static fallback data
 │   ├── sample-timeline.ts      # Static timeline fallback data
+│   ├── source-profiles.ts      # Source-profile rollups + sample fallback builder
+│   ├── source-comparison.ts    # Source-comparison rollups + sample fallback builder
 │   ├── hooks/                  # SWR data-fetching hooks
 │   │   ├── fetcher.ts
 │   │   ├── use-stories.ts
 │   │   ├── use-story.ts
 │   │   ├── use-story-timeline.ts
 │   │   ├── use-sources.ts
+│   │   ├── use-source-profile.ts
+│   │   ├── use-source-comparison.ts
 │   │   ├── use-auth.ts
 │   │   ├── use-require-auth.ts
 │   │   ├── use-bookmarks.ts
@@ -170,7 +257,8 @@ newsapp/
 │   │   ├── use-debounce.ts
 │   │   ├── use-admin.ts
 │   │   ├── use-review-queue.ts
-│   │   └── use-review-action.ts
+│   │   ├── use-review-action.ts
+│   │   └── use-online.ts
 │   ├── auth/                   # Authentication
 │   │   ├── types.ts
 │   │   ├── validation.ts
@@ -192,9 +280,19 @@ newsapp/
 │   │   ├── admin-helpers.ts
 │   │   ├── review-validation.ts
 │   │   └── review-queries.ts
+│   ├── email/                   # Email delivery
+│   │   ├── resend-client.ts
+│   │   └── send-digest.ts
+│   ├── offline/                 # PWA / offline support
+│   │   └── cache-manager.ts
+│   ├── pipeline/                # Pipeline state, backlog, run logging
+│   │   ├── backlog.ts
+│   │   ├── logger.ts
+│   │   └── story-state.ts
 │   ├── supabase/               # Database client + schema types
 │   ├── rss/                    # RSS ingestion pipeline
-│   └── ai/                     # AI processing (Gemini, clustering, summaries)
+│   │   ├── normalization.ts    # Canonical URL + title fingerprint helpers
+│   └── ai/                     # AI processing (Gemini, clustering, summaries, region)
 ├── __mocks__/                  # Vitest manual mocks
 │   ├── framer-motion.tsx
 │   ├── @supabase/
@@ -223,6 +321,11 @@ newsapp/
 │   ├── auth/
 │   ├── protected/
 │   └── journeys/
+├── public/
+│   ├── service-worker.js        # PWA service worker (offline cache)
+│   ├── manifest.json            # Web app manifest (PWA)
+│   ├── icon-192.png             # PWA icon (192×192)
+│   └── icon-512.png             # PWA icon (512×512)
 ├── middleware.ts                # Supabase Auth session refresh
 ├── tailwind.config.ts          # Design tokens + custom plugin
 ├── vitest.config.ts            # Vitest configuration
@@ -290,6 +393,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=   # Supabase anonymous key (browser-safe)
 SUPABASE_SERVICE_ROLE_KEY=       # Service role key (server-only, cron routes)
 GEMINI_API_KEY=                  # Google Gemini API key (AI processing)
 CRON_SECRET=                     # Auth header for cron endpoints
+
+# Email (F-04 Blindspot Digest)
+RESEND_API_KEY=                  # Resend email API key
+RESEND_FROM_EMAIL=               # Sender address (optional, defaults to onboarding@resend.dev)
+NEXT_PUBLIC_APP_URL=             # App base URL for email links (optional)
 
 # E2E testing (Playwright)
 E2E_TEST_EMAIL=                  # Test user email for Playwright auth

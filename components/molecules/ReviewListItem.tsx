@@ -14,6 +14,8 @@ interface ReviewStory {
   readonly headline: string
   readonly topic: string
   readonly source_count: number
+  readonly review_reasons?: string[]
+  readonly confidence_score?: number | null
   readonly review_status: string
   readonly first_published: string
 }
@@ -42,6 +44,10 @@ export function ReviewListItem({ story, isSelected, isEditing, onClick }: Props)
       : 'border-l-transparent'
 
   const topicLabel = TOPIC_LABELS[story.topic as Topic] ?? story.topic
+  const leadReason = story.review_reasons?.[0] ?? null
+  const confidence = typeof story.confidence_score === 'number'
+    ? `${Math.round(story.confidence_score * 100)}%`
+    : null
 
   return (
     <button
@@ -61,6 +67,18 @@ export function ReviewListItem({ story, isSelected, isEditing, onClick }: Props)
           {topicLabel}
         </span>
         <span>{story.source_count} sources</span>
+        {leadReason && (
+          <>
+            <span>·</span>
+            <span className="text-amber-300">{leadReason}</span>
+          </>
+        )}
+        {confidence && (
+          <>
+            <span>·</span>
+            <span className="tabular-nums">{confidence}</span>
+          </>
+        )}
         <span>·</span>
         <span>{timeAgo(story.first_published)}</span>
       </div>

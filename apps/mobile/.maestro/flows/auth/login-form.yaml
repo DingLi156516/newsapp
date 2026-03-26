@@ -1,0 +1,55 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Navigate to Profile tab
+- tapOn:
+    text: "Profile"
+
+# If unauthenticated, tap Sign In to open login modal
+- tapOn:
+    id: "sign-in-button"
+    optional: true
+
+# Wait for login form to appear
+- waitForAnimationToEnd
+
+# Verify login form elements render
+- assertVisible: "Axiom"
+- assertVisible:
+    text: "Sign In"
+    optional: true
+- assertVisible:
+    id: "email-input"
+- assertVisible:
+    id: "password-input"
+- assertVisible:
+    id: "google-oauth-button"
+- assertVisible:
+    text: "Sign Up"
+    optional: true
+- assertVisible:
+    text: "Skip for now"
+    optional: true
+
+# Dismiss login modal
+- tapOn:
+    id: "close-button"
+    optional: true

@@ -28,8 +28,13 @@ const OWNERSHIPS = [
 
 const DATE_PRESETS = ['24h', '7d', '30d', 'all'] as const
 
+export const TAG_TYPES = ['person', 'organization', 'location', 'event', 'topic'] as const
+
+const SORT_FIELDS = ['last_updated', 'source_count'] as const
+
 export const storiesQuerySchema = z.object({
   topic: z.enum(TOPICS).optional(),
+  region: z.enum(REGIONS).optional(),
   search: z.string().max(200).regex(/^[\w\s\-'".,!?]*$/u, 'Invalid search characters').optional(),
   blindspot: z.enum(['true', 'false']).optional(),
   biasRange: z.string().max(200).optional().refine(
@@ -38,9 +43,16 @@ export const storiesQuerySchema = z.object({
   ),
   minFactuality: z.enum(FACTUALITIES).optional(),
   datePreset: z.enum(DATE_PRESETS).optional(),
+  sort: z.enum(SORT_FIELDS).optional(),
+  tag: z.string().max(100).optional(),
+  tag_type: z.enum(TAG_TYPES).optional(),
+  ids: z.string().max(2000).optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(50).optional().default(20),
-})
+}).refine(
+  (data) => !data.tag_type || !!data.tag,
+  { message: 'tag_type requires tag to be specified', path: ['tag_type'] }
+)
 
 export type StoriesQuery = z.infer<typeof storiesQuerySchema>
 
@@ -62,6 +74,15 @@ export const forYouQuerySchema = z.object({
 })
 
 export type ForYouQuery = z.infer<typeof forYouQuerySchema>
+
+export const tagsQuerySchema = z.object({
+  type: z.enum(TAG_TYPES).optional(),
+  search: z.string().max(200).optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+})
+
+export type TagsQuery = z.infer<typeof tagsQuerySchema>
 
 export function parseSearchParams(
   searchParams: URLSearchParams,

@@ -71,7 +71,7 @@ export function SettingsForm() {
     return (
       <div className="space-y-6">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="glass p-5 animate-pulse">
+          <div key={i} className="glass p-5 animate-shimmer">
             <div className="h-5 w-32 bg-white/10 rounded mb-4" />
             <div className="h-10 w-full bg-white/10 rounded" />
           </div>
@@ -163,6 +163,27 @@ export function SettingsForm() {
           ))}
         </div>
       </section>
+
+      {/* Email Digest */}
+      <section className="glass p-5 space-y-3" data-testid="email-digest-section">
+        <h3 className="text-sm font-medium text-white/80">Email Digest</h3>
+        <p className="text-xs text-white/50">Receive a weekly email with blindspot stories you may have missed.</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            data-testid="blindspot-digest-toggle"
+            onClick={() => handleChange({ blindspot_digest_enabled: !preferences.blindspot_digest_enabled })}
+            disabled={isSaving}
+            className={`glass-pill px-3 py-1.5 text-xs transition-colors ${
+              preferences.blindspot_digest_enabled
+                ? 'bg-white/20 text-white border border-white/30'
+                : 'text-white/60 hover:text-white/80'
+            }`}
+          >
+            Weekly Blindspot Digest
+          </button>
+        </div>
+      </section>
+
     </div>
   )
 }

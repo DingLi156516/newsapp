@@ -32,6 +32,13 @@ __tests__/
   lib/
     types.test.ts
     sample-data.test.ts
+    story-intelligence.test.ts
+    source-comparison.test.ts
+    pipeline/
+      backlog.test.ts
+      logger.test.ts
+      process-runner.test.ts
+      story-state.test.ts
     hooks/
       fetcher.test.ts
       use-story-timeline.test.ts
@@ -47,6 +54,9 @@ __tests__/
       use-stories.test.ts
       use-review-queue.test.ts
       use-review-action.test.ts
+      use-online.test.ts
+      use-infinite-scroll.test.ts
+      use-pipeline.test.ts
     api/
       query-helpers.test.ts
       transformers.test.ts
@@ -68,12 +78,17 @@ __tests__/
       validation.test.ts
       auth-provider.test.tsx
     rss/
-      parser.test.ts  dedup.test.ts  ingest.test.ts  feed-registry.test.ts
+      parser.test.ts  parser-errors.test.ts  dedup.test.ts  ingest.test.ts  feed-registry.test.ts  normalization.test.ts
     ai/
-      gemini-client.test.ts  clustering.test.ts
+      gemini-client.test.ts  clustering.test.ts  clustering-stage.test.ts
+      embeddings.test.ts
       spectrum-calculator.test.ts  topic-classifier.test.ts
       headline-generator.test.ts  summary-generator.test.ts
-      blindspot-detector.test.ts
+      blindspot-detector.test.ts  region-classifier.test.ts
+    email/
+      send-digest.test.ts
+    offline/
+      cache-manager.test.ts
     supabase/
       client.test.ts  server.test.ts  types.test.ts  seed-sources.test.ts
   app/
@@ -83,16 +98,32 @@ __tests__/
       reading-history/route.test.ts
       reading-history/storyId-route.test.ts
       preferences/route.test.ts
+      sources/source-slug-route.test.ts
+      sources/compare-route.test.ts
       dashboard/bias-profile-route.test.ts
       dashboard/suggestions-route.test.ts
       stories/for-you-route.test.ts
       admin/review-route.test.ts
       admin/review-stats-route.test.ts
+      admin/pipeline/route.test.ts
+      admin/pipeline/sources/route.test.ts
+      admin/pipeline/trigger/route.test.ts
   components/
-    atoms/   (7 test files — includes Skeleton.test.tsx, ReviewStatusBadge.test.tsx)
+    atoms/   (10 test files — includes Skeleton.test.tsx, ReviewStatusBadge.test.tsx, OfflineIndicator.test.tsx, ShareButton.test.tsx, Toast.test.tsx)
     molecules/  (8 test files — adds BiasComparisonBar.test.tsx, StatsRow.test.tsx, ForYouCta.test.tsx, ReviewListItem.test.tsx, ReviewDetail.test.tsx)
-    organisms/  (16 test files — adds HeroCard.test.tsx, BiasProfileChart.test.tsx, SettingsForm.test.tsx, StickyFilterBar.test.tsx, SuggestionsList.test.tsx, SearchFilters.test.tsx, ReviewQueue.test.tsx; PerspectiveSlider.test.tsx and RegionSelector.test.tsx removed)
+    organisms/  (24 test files — adds HeroCard.test.tsx, ViewSwitcher.test.tsx, SourcesView.test.tsx, BiasProfileChart.test.tsx, SettingsForm.test.tsx, StickyFilterBar.test.tsx, SuggestionsList.test.tsx, SearchFilters.test.tsx, ReviewQueue.test.tsx, CoverageIntelligence.test.tsx, SourceDirectoryInsights.test.tsx, PipelineControls.test.tsx, PipelineRunHistory.test.tsx, PipelineSummaryStats.test.tsx, SourceHealthTable.test.tsx; AppNavigation.test.tsx, PerspectiveSlider.test.tsx and RegionSelector.test.tsx removed)
+    pages/
+      SourceProfilePage.test.tsx
+      SourceComparisonPage.test.tsx
 ```
+
+`story-intelligence.test.ts` now covers structured story-analysis output for momentum, coverage gaps, framing delta, and methodology copy. `CoverageIntelligence.test.tsx` verifies the corresponding story-detail analysis cards, and `e2e/public/story-detail.spec.ts` checks that those sections render in the browser.
+
+`source-slug-route.test.ts` verifies the source-profile API response shape, `compare-route.test.ts` verifies the two-source comparison API response shape, `SourceProfilePage.test.tsx` covers snapshot/recent-coverage/not-found rendering plus the compare CTA, `SourceComparisonPage.test.tsx` covers the picker and comparison sections, and `e2e/public/sources-directory.spec.ts` now exercises both source-profile navigation and the source-to-source comparison flow.
+
+`ViewSwitcher.test.tsx` verifies the pill tabs render, aria-selected state, onChange callbacks, and data-testids. `SourcesView.test.tsx` covers filter sections, source card rendering, search input, and multi-select filtering. `e2e/public/home-feed.spec.ts` checks the ViewSwitcher is visible and that clicking Sources switches the view inline (URL → `/?view=sources`, feed tabs hidden). `e2e/public/view-switcher.spec.ts` covers direct URL navigation to `/?view=sources`, `/sources` redirect, browser back button, and feed/sources content toggling.
+
+`tag-upsert.test.ts` covers entity tag upserting including UUID quoting, deduplication, and error handling. `story-state.test.ts` covers the conservative publication-decision rules and legacy-state backfill mapping. `embeddings.test.ts`, `clustering-stage.test.ts`, `process-runner.test.ts`, and `backlog.test.ts` cover bounded stage claiming, stale-claim recovery, downstream-first process orchestration, skip-reason reporting, and backlog reporting for the pipeline. `PipelineRunHistory.test.tsx` verifies that the admin dashboard shows backlog deltas plus per-stage skip/pass diagnostics for process runs.
 
 ## Coverage Target
 
@@ -158,6 +189,7 @@ e2e/
 - Authenticated tests: place in `e2e/protected/`, they auto-use storageState
 - Unauthenticated tests: place in `e2e/public/` or `e2e/auth/`
 - Journey tests: place in `e2e/journeys/` for cross-page flows
+- Public source-intelligence flows now live in `e2e/public/sources-directory.spec.ts`, including source profile and source comparison navigation
 
 ### When to Write E2E Tests
 
@@ -175,8 +207,8 @@ e2e/
 ### Test Count
 | Category | Files | Tests |
 |----------|-------|-------|
-| Public pages | 5 | ~39 |
+| Public pages | 5 | ~40 |
 | Auth pages | 3 | ~19 |
 | Protected pages | 6 | ~36 |
 | Journeys | 4 | ~4 |
-| **Total** | **18** | **~90** |
+| **Total** | **18** | **~100+** |

@@ -37,12 +37,13 @@
  */
 
 import useSWR from 'swr'
-import type { NewsArticle, Topic, BiasCategory, FactualityLevel, DatePreset } from '@/lib/types'
+import type { NewsArticle, Topic, Region, BiasCategory, FactualityLevel, DatePreset } from '@/lib/types'
 import { sampleArticles } from '@/lib/sample-data'
 import { fetcher } from '@/lib/hooks/fetcher'
 
 interface StoriesParams {
   readonly topic?: Topic | null
+  readonly region?: Region | null
   readonly search?: string
   readonly blindspot?: boolean
   readonly biasRange?: BiasCategory[]
@@ -72,6 +73,7 @@ function buildStoriesUrl(params: StoriesParams): string {
   const searchParams = new URLSearchParams()
 
   if (params.topic) searchParams.set('topic', params.topic)
+  if (params.region) searchParams.set('region', params.region)
   if (params.search?.trim()) searchParams.set('search', params.search.trim())
   if (params.blindspot) searchParams.set('blindspot', 'true')
   if (params.biasRange && params.biasRange.length > 0 && params.biasRange.length < 7) {

@@ -1,0 +1,77 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Verify header
+- assertVisible:
+    id: "axiom-header"
+
+# Verify search bar
+- assertVisible:
+    id: "search-input"
+
+# Verify feed tabs
+- assertVisible:
+    id: "feed-tab-trending"
+- assertVisible:
+    id: "feed-tab-latest"
+- assertVisible:
+    id: "feed-tab-blindspot"
+- assertVisible:
+    id: "feed-tab-saved"
+- assertVisible:
+    id: "feed-tab-for-you"
+
+# Verify stats row
+- assertVisible:
+    id: "stats-row"
+    optional: true
+
+# Verify topic pills (All is default)
+- assertVisible:
+    id: "topic-pill-all"
+    optional: true
+- assertVisible:
+    id: "topic-pill-politics"
+    optional: true
+
+# Verify story cards render
+- assertVisible:
+    id: "hero-card"
+    optional: true
+- assertVisible:
+    id: "story-card"
+    optional: true
+
+# Switch tabs
+- tapOn:
+    id: "feed-tab-latest"
+- tapOn:
+    id: "feed-tab-blindspot"
+- tapOn:
+    id: "feed-tab-trending"
+
+# Filter by topic
+- tapOn:
+    id: "topic-pill-politics"
+    optional: true
+- tapOn:
+    id: "topic-pill-all"
+    optional: true

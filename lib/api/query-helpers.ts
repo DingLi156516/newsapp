@@ -7,9 +7,10 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
-import type { StoriesQuery, SourcesQuery } from '@/lib/api/validation'
-import type { FactualityLevel, DatePreset } from '@/lib/types'
+import type { StoriesQuery, SourcesQuery, TagsQuery } from '@/lib/api/validation'
+import type { FactualityLevel, DatePreset, Topic, Region } from '@/lib/types'
 import { ALL_BIASES, FACTUALITY_RANK } from '@/lib/types'
+import { getSourceSlug, normalizeSourceSlug } from '@/lib/source-slugs'
 
 interface StoryRow {
   id: string
@@ -42,34 +43,101 @@ interface SourceRow {
   updated_at: string
 }
 
+interface SourceStoryJoinRow {
+  url: string | null
+  published_at: string | null
+  stories: {
+    id: string
+    headline: string
+    topic: string
+    region: string
+    is_blindspot: boolean
+    first_published: string
+    last_updated: string
+  } | null
+}
+
+interface SourceProfileStoryRow {
+  id: string
+  headline: string
+  topic: Topic
+  region: Region
+  timestamp: string
+  isBlindspot: boolean
+  articleUrl?: string
+}
+
 export async function queryStories(
   client: SupabaseClient<Database>,
   params: StoriesQuery
 ): Promise<{ data: StoryRow[]; count: number }> {
   const {
     topic,
+    region,
     search,
     blindspot,
     biasRange,
     minFactuality,
     datePreset,
+    sort,
+    tag,
+    tag_type,
+    ids,
     page,
     limit,
   } = params
 
   const offset = (page - 1) * limit
 
+  // Resolve tag slug → ID(s) before building the base query (needed for !inner join)
+  let tagIds: readonly string[] = []
+  if (tag) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let tagQuery = (client.from('tags') as any)
+      .select('id')
+      .eq('slug', tag)
+
+    if (tag_type) {
+      tagQuery = tagQuery.eq('tag_type', tag_type)
+    }
+
+    const { data: tagRows, error: tagLookupError } = await tagQuery
+
+    if (tagLookupError) {
+      throw new Error(`Failed to look up tag "${tag}": ${tagLookupError.message}`)
+    }
+    if (!tagRows || tagRows.length === 0) return { data: [], count: 0 }
+    tagIds = (tagRows as Array<{ id: string }>).map(r => r.id)
+  }
+
+  const hasTagFilter = tagIds.length > 0
+  const baseColumns = 'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, first_published, last_updated'
+  const selectStr = hasTagFilter ? `${baseColumns}, story_tags!inner(tag_id)` : baseColumns
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query = (client.from('stories') as any)
-    .select(
-      'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, first_published, last_updated',
-      { count: 'exact' }
-    )
-    .neq('headline', 'Pending headline generation')
-    .eq('review_status', 'approved')
+    .select(selectStr, { count: 'exact' })
+    .eq('publication_status', 'published')
+
+  if (hasTagFilter) {
+    query = tagIds.length === 1
+      ? query.eq('story_tags.tag_id', tagIds[0])
+      : query.in('story_tags.tag_id', [...tagIds])
+  }
+
+  if (ids) {
+    const idList = ids.split(',').filter(Boolean)
+    if (idList.length > 0) {
+      query = query.in('id', idList)
+    }
+  }
 
   if (topic) {
     query = query.eq('topic', topic)
+  }
+
+  if (region) {
+    query = query.eq('region', region)
   }
 
   if (blindspot === 'true') {
@@ -89,9 +157,18 @@ export async function queryStories(
     query = query.gte('first_published', getDateThreshold(datePreset as Exclude<DatePreset, 'all'>))
   }
 
-  query = query
-    .order('last_updated', { ascending: false })
-    .range(offset, offset + limit - 1)
+  if (sort === 'source_count') {
+    query = query
+      .order('source_count', { ascending: false })
+      .order('first_published', { ascending: false })
+      .order('id', { ascending: false })
+  } else {
+    query = query
+      .order('first_published', { ascending: false })
+      .order('id', { ascending: false })
+  }
+
+  query = query.range(offset, offset + limit - 1)
 
   const { data, count, error } = await query
 
@@ -99,7 +176,12 @@ export async function queryStories(
     throw new Error(`Failed to query stories: ${error.message}`)
   }
 
-  let filteredStories = data ?? []
+  // Strip nested story_tags from response when tag filter was used
+  let filteredStories = (data ?? []).map((story: StoryRow & { story_tags?: unknown }) => {
+    if (!hasTagFilter) return story
+    const { story_tags: _st, ...rest } = story
+    return rest
+  })
 
   if (biasRange) {
     const biases = biasRange.split(',').filter(b => (ALL_BIASES as readonly string[]).includes(b))
@@ -111,6 +193,14 @@ export async function queryStories(
       })
     }
   }
+
+  filteredStories = filteredStories.sort((a: StoryRow, b: StoryRow) => {
+    if (sort === 'source_count') {
+      const countDiff = b.source_count - a.source_count
+      if (countDiff !== 0) return countDiff
+    }
+    return new Date(b.first_published).getTime() - new Date(a.first_published).getTime()
+  })
 
   return { data: filteredStories, count: count ?? 0 }
 }
@@ -141,6 +231,7 @@ export async function queryStoryById(
       'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, first_published, last_updated'
     )
     .eq('id', storyId)
+    .eq('publication_status', 'published')
     .single()
 
   if (error) {
@@ -151,27 +242,73 @@ export async function queryStoryById(
   return data
 }
 
+export async function querySourceBySlug(
+  client: SupabaseClient<Database>,
+  slug: string
+): Promise<SourceRow | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client.from('sources') as any)
+    .select('id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, created_at, updated_at')
+    .eq('slug', slug)
+    .single()
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      // Some older source rows may not have a persisted slug yet. Fall back to
+      // deriving one from the source name so profile routes still work.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: sources, error: listError } = await (client.from('sources') as any)
+        .select('id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, created_at, updated_at')
+        .eq('is_active', true)
+
+      if (listError) {
+        throw new Error(`Failed to fetch source: ${listError.message}`)
+      }
+
+      const matchedSource = (sources as SourceRow[] | null)?.find(
+        (row) => normalizeSourceSlug(getSourceSlug(row)) === slug
+      )
+
+      return matchedSource ?? null
+    }
+    throw new Error(`Failed to fetch source: ${error.message}`)
+  }
+
+  return data
+}
+
 interface ArticleSourceJoin {
   source_id: string
+  url: string
 }
 
 export async function querySourcesForStory(
   client: SupabaseClient<Database>,
   storyId: string
-): Promise<SourceRow[]> {
-  // First get source IDs from articles
+): Promise<{ sources: SourceRow[]; articleUrlMap: Map<string, string> }> {
+  // Get source IDs and article URLs from articles
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: articles, error: articleError } = await (client.from('articles') as any)
-    .select('source_id')
+    .select('source_id, url')
     .eq('story_id', storyId)
+    .order('published_at', { ascending: false })
+    .order('id', { ascending: false })
 
   if (articleError) {
     throw new Error(`Failed to fetch articles: ${articleError.message}`)
   }
 
-  if (!articles || articles.length === 0) return []
+  if (!articles || articles.length === 0) return { sources: [], articleUrlMap: new Map() }
 
-  const sourceIds = [...new Set(articles.map((a: ArticleSourceJoin) => a.source_id))]
+  // Build map of source_id → first article URL
+  const articleUrlMap = new Map<string, string>()
+  for (const a of articles as ArticleSourceJoin[]) {
+    if (!articleUrlMap.has(a.source_id) && a.url) {
+      articleUrlMap.set(a.source_id, a.url)
+    }
+  }
+
+  const sourceIds = [...new Set((articles as ArticleSourceJoin[]).map((a) => a.source_id))]
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: sources, error: sourceError } = await (client.from('sources') as any)
@@ -182,7 +319,57 @@ export async function querySourcesForStory(
     throw new Error(`Failed to fetch sources: ${sourceError.message}`)
   }
 
-  return sources ?? []
+  return { sources: sources ?? [], articleUrlMap }
+}
+
+export async function queryRecentStoriesForSource(
+  client: SupabaseClient<Database>,
+  sourceId: string,
+  sinceIso: string
+): Promise<SourceProfileStoryRow[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client.from('articles') as any)
+    .select(`
+      url,
+      published_at,
+      stories!articles_story_id_fkey(
+        id,
+        headline,
+        topic,
+        region,
+        is_blindspot,
+        first_published,
+        last_updated
+      )
+    `)
+    .eq('source_id', sourceId)
+    .gte('published_at', sinceIso)
+    .not('published_at', 'is', null)
+    .order('published_at', { ascending: false })
+    .order('id', { ascending: false })
+
+  if (error) {
+    throw new Error(`Failed to fetch recent stories for source: ${error.message}`)
+  }
+
+  if (!data || data.length === 0) return []
+
+  const storiesById = new Map<string, SourceProfileStoryRow>()
+  for (const row of data as SourceStoryJoinRow[]) {
+    if (!row.stories || !row.published_at || storiesById.has(row.stories.id)) continue
+
+    storiesById.set(row.stories.id, {
+      id: row.stories.id,
+      headline: row.stories.headline,
+      topic: row.stories.topic as Topic,
+      region: row.stories.region as Region,
+      timestamp: row.stories.last_updated ?? row.stories.first_published ?? row.published_at,
+      isBlindspot: row.stories.is_blindspot,
+      ...(row.url ? { articleUrl: row.url } : {}),
+    })
+  }
+
+  return [...storiesById.values()]
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +404,7 @@ export async function queryArticlesWithSourcesForStory(
     .eq('story_id', storyId)
     .not('published_at', 'is', null)
     .order('published_at', { ascending: true })
+    .order('id', { ascending: true })
 
   if (error) {
     throw new Error(`Failed to fetch articles for timeline: ${error.message}`)
@@ -247,7 +435,7 @@ export async function querySources(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query = (client.from('sources') as any)
     .select(
-      'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, created_at, updated_at',
+      'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, created_at, updated_at, total_articles_ingested',
       { count: 'exact' }
     )
     .eq('is_active', true)
@@ -283,4 +471,117 @@ export async function querySources(
   }
 
   return { data: data ?? [], count: count ?? 0 }
+}
+
+// ---------------------------------------------------------------------------
+// Tag queries
+// ---------------------------------------------------------------------------
+
+interface TagRow {
+  id: string
+  slug: string
+  label: string
+  description: string | null
+  tag_type: string
+  story_count: number
+  created_at: string
+}
+
+export async function queryTags(
+  client: SupabaseClient<Database>,
+  params: TagsQuery
+): Promise<{ data: TagRow[]; count: number }> {
+  const { type, search, page, limit } = params
+  const offset = (page - 1) * limit
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let query = (client.from('tags') as any)
+    .select('id, slug, label, description, tag_type, story_count, created_at', { count: 'exact' })
+
+  if (type) {
+    query = query.eq('tag_type', type)
+  }
+
+  if (search) {
+    query = query.ilike('label', `%${search}%`)
+  }
+
+  query = query
+    .order('story_count', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  const { data, count, error } = await query
+
+  if (error) {
+    throw new Error(`Failed to query tags: ${error.message}`)
+  }
+
+  return { data: data ?? [], count: count ?? 0 }
+}
+
+export async function queryTagBySlug(
+  client: SupabaseClient<Database>,
+  slug: string,
+  tagType?: string
+): Promise<TagRow[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let query = (client.from('tags') as any)
+    .select('id, slug, label, description, tag_type, story_count, created_at')
+    .eq('slug', slug)
+
+  if (tagType) {
+    query = query.eq('tag_type', tagType).limit(1)
+  } else {
+    query = query.order('story_count', { ascending: false })
+  }
+
+  const { data, error } = await query
+
+  if (error) {
+    throw new Error(`Failed to fetch tag: ${error.message}`)
+  }
+
+  return (data as TagRow[]) ?? []
+}
+
+export async function queryTagsForStory(
+  client: SupabaseClient<Database>,
+  storyId: string
+): Promise<TagRow[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client.from('story_tags') as any)
+    .select('relevance, tags!story_tags_tag_id_fkey(id, slug, label, description, tag_type, story_count, created_at)')
+    .eq('story_id', storyId)
+    .order('relevance', { ascending: false })
+
+  if (error) {
+    throw new Error(`Failed to fetch tags for story: ${error.message}`)
+  }
+
+  if (!data || data.length === 0) return []
+
+  return (data as Array<{ relevance: number; tags: TagRow | null }>)
+    .filter((row) => row.tags !== null)
+    .map((row) => ({
+      ...row.tags!,
+      relevance: row.relevance,
+    }))
+}
+
+export async function queryRelatedTags(
+  client: SupabaseClient<Database>,
+  tagId: string,
+  limitCount = 15
+): Promise<TagRow[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client as any).rpc('related_tags_by_co_occurrence', {
+    p_tag_id: tagId,
+    p_limit: limitCount,
+  })
+
+  if (error) {
+    throw new Error(`Failed to fetch related tags: ${error.message}`)
+  }
+
+  return (data as TagRow[]) ?? []
 }

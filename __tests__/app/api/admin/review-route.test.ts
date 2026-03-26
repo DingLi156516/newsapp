@@ -15,14 +15,20 @@ vi.mock('@/lib/api/review-queries', () => ({
   updateReviewStatus: vi.fn(),
 }))
 
+vi.mock('@/lib/ai/story-assembler', () => ({
+  assembleSingleStory: vi.fn(),
+}))
+
 import { GET } from '@/app/api/admin/review/route'
 import { PATCH } from '@/app/api/admin/review/[id]/route'
 import { getAdminUser } from '@/lib/api/admin-helpers'
 import { queryReviewQueue, updateReviewStatus } from '@/lib/api/review-queries'
+import { assembleSingleStory } from '@/lib/ai/story-assembler'
 
 const mockGetAdmin = vi.mocked(getAdminUser)
 const mockQueryQueue = vi.mocked(queryReviewQueue)
 const mockUpdateStatus = vi.mocked(updateReviewStatus)
+const mockAssembleSingle = vi.mocked(assembleSingleStory)
 
 function makeGetRequest(params: Record<string, string> = {}): NextRequest {
   const url = new URL('http://localhost/api/admin/review')
@@ -239,5 +245,61 @@ describe('PATCH /api/admin/review/[id]', () => {
       params: Promise.resolve({ id: 'story-1' }),
     })
     expect(res.status).toBe(500)
+  })
+
+  it('calls assembleSingleStory on reprocess action', async () => {
+    mockGetAdmin.mockResolvedValue({
+      user: { id: 'admin-1' } as never,
+      isAdmin: true,
+      error: null,
+      supabase: {} as never,
+    })
+
+    mockUpdateStatus.mockResolvedValue(undefined)
+    mockAssembleSingle.mockResolvedValue({ publicationStatus: 'published' })
+
+    const res = await PATCH(makePatchRequest({ action: 'reprocess' }), {
+      params: Promise.resolve({ id: 'story-1' }),
+    })
+    expect(res.status).toBe(200)
+    expect(mockAssembleSingle).toHaveBeenCalledWith(
+      expect.anything(),
+      'story-1'
+    )
+  })
+
+  it('does not call assembleSingleStory on approve action', async () => {
+    mockGetAdmin.mockResolvedValue({
+      user: { id: 'admin-1' } as never,
+      isAdmin: true,
+      error: null,
+      supabase: {} as never,
+    })
+
+    mockUpdateStatus.mockResolvedValue(undefined)
+
+    await PATCH(makePatchRequest({ action: 'approve' }), {
+      params: Promise.resolve({ id: 'story-1' }),
+    })
+    expect(mockAssembleSingle).not.toHaveBeenCalled()
+  })
+
+  it('returns 500 when assembleSingleStory fails on reprocess', async () => {
+    mockGetAdmin.mockResolvedValue({
+      user: { id: 'admin-1' } as never,
+      isAdmin: true,
+      error: null,
+      supabase: {} as never,
+    })
+
+    mockUpdateStatus.mockResolvedValue(undefined)
+    mockAssembleSingle.mockRejectedValue(new Error('AI pipeline failed'))
+
+    const res = await PATCH(makePatchRequest({ action: 'reprocess' }), {
+      params: Promise.resolve({ id: 'story-1' }),
+    })
+    expect(res.status).toBe(500)
+    const json = await res.json()
+    expect(json.error).toBe('AI pipeline failed')
   })
 })

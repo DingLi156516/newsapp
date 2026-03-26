@@ -1,0 +1,19 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint"],
+  "extends": ["plugin:@typescript-eslint/recommended"],
+  "rules": {
+    "@typescript-eslint/no-require-imports": "off",
+    "react/no-unescaped-entities": "off",
+    "@jsx-a11y/alt-text": "off"
+  },
+  "overrides": [
+    {
+      "files": ["__tests__/**/*.ts", "__tests__/**/*.tsx"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off"
+      }
+    }
+  ]
+}

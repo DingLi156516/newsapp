@@ -3,11 +3,13 @@
  *
  * Called every 15 minutes by Vercel Cron (or manually during development).
  * Authenticates via CRON_SECRET header, then runs the full ingestion pipeline.
+ * Logs run details to pipeline_runs table via PipelineLogger.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase/server'
 import { ingestFeeds } from '@/lib/rss/ingest'
+import { PipelineLogger } from '@/lib/pipeline/logger'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -30,16 +32,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     )
   }
 
+  const client = getSupabaseServiceClient()
+  const logger = new PipelineLogger(client)
+
   try {
-    const client = getSupabaseServiceClient()
-    const result = await ingestFeeds(client)
+    await logger.startRun('ingest', 'cron')
+    const result = await logger.logStep('ingest_feeds', () =>
+      ingestFeeds(client) as unknown as Promise<Record<string, unknown>>
+    )
+    await logger.complete(result)
 
     return NextResponse.json({
       success: true,
-      data: result,
+      data: { runId: logger.getRunId(), ...result },
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    await logger.fail(message).catch(() => {})
     return NextResponse.json(
       { success: false, error: message },
       { status: 500 }

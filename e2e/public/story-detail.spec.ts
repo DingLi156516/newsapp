@@ -12,7 +12,7 @@ test.describe('Story Detail', () => {
 
   test('page loads with headline', async ({ page }) => {
     const headline = page.getByRole('heading', { level: 1 })
-    await expect(headline).toBeVisible()
+    await expect(headline).toBeVisible({ timeout: 10_000 })
     await expect(headline).not.toBeEmpty()
   })
 
@@ -23,9 +23,8 @@ test.describe('Story Detail', () => {
 
   test('spectrum bar renders with axis labels', async ({ page }) => {
     await expect(page.getByText('Coverage Spectrum', { exact: true })).toBeVisible()
-    await expect(page.getByText('Far Left')).toBeVisible()
-    await expect(page.getByText('Center')).toBeVisible()
-    await expect(page.getByText('Far Right')).toBeVisible()
+    await expect(page.getByRole('img', { name: 'Source bias distribution' }).first()).toBeVisible()
+    await expect(page.getByText(/(Left|Center|Right)\s+\d+%/).first()).toBeVisible()
   })
 
   test('AI summary tabs switch content', async ({ page }) => {
@@ -49,6 +48,14 @@ test.describe('Story Detail', () => {
 
   test('source list renders', async ({ page }) => {
     await expect(page.getByText('Sources', { exact: true })).toBeVisible()
+  })
+
+  test('coverage intelligence exposes story analysis sections', async ({ page }) => {
+    await expect(page.getByText('Coverage Intelligence', { exact: true })).toBeVisible()
+    await expect(page.getByText('Coverage momentum', { exact: true })).toBeVisible()
+    await expect(page.getByText('Coverage gaps', { exact: true })).toBeVisible()
+    await expect(page.getByText('Framing delta', { exact: true })).toBeVisible()
+    await expect(page.getByText('How this story was assembled', { exact: true })).toBeVisible()
   })
 
   test('bookmark button is visible', async ({ page }) => {

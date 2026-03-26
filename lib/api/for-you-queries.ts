@@ -115,11 +115,11 @@ async function fetchCandidateStories(
     .select(
       'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, first_published, last_updated'
     )
-    .neq('headline', 'Pending headline generation')
-    .eq('review_status', 'approved')
+    .eq('publication_status', 'published')
 
   query = query
-    .order('last_updated', { ascending: false })
+    .order('first_published', { ascending: false })
+    .order('id', { ascending: false })
     .limit(CANDIDATE_LIMIT)
 
   const { data, error } = await query

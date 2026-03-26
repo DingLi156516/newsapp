@@ -34,9 +34,33 @@ coverage/
 docs/superpowers/
 
 # typescript build cache
-tsconfig.tsbuildinfo
+*.tsbuildinfo
 
 # playwright
 e2e/.auth/
 e2e-results/
 playwright-report/
+
+# expo / react native
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+nativewind-env.d.ts
+.kotlin/
+*.jks
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+.metro-health-check*
+
+# worktrees
+.worktrees/
+
+# backfill script state
+.backfill-empty-ids
+
+# oh my codex
+.omx

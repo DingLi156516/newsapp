@@ -1,0 +1,51 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Wait for feed to load
+- assertVisible:
+    id: "axiom-header"
+
+# Tap a story card
+- tapOn:
+    id: "hero-card"
+    optional: true
+- tapOn:
+    id: "story-card"
+    optional: true
+    index: 0
+
+# Wait for story detail to load
+- waitForAnimationToEnd
+
+# Verify story detail loaded (optional — depends on data)
+- assertVisible:
+    id: "story-headline"
+    optional: true
+- assertVisible:
+    id: "back-button"
+    optional: true
+
+# Go back to feed
+- tapOn:
+    id: "back-button"
+    optional: true
+- assertVisible:
+    id: "axiom-header"

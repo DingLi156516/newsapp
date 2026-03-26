@@ -9,14 +9,17 @@
 import type {
   NewsArticle,
   NewsSource,
+  StoryTag,
   AISummary,
   SpectrumSegment,
   FactualityLevel,
   OwnershipType,
+  TagType,
   Topic,
   Region,
 } from '@/lib/types'
 import type { DbSource } from '@/lib/supabase/types'
+import { getSourceSlug } from '@/lib/source-slugs'
 
 interface StoryWithSources {
   id: string
@@ -74,20 +77,46 @@ function parseSpectrumSegments(raw: unknown): SpectrumSegment[] {
     }))
 }
 
-export function transformSource(row: DbSource): NewsSource {
+export function transformSource(row: DbSource, articleUrl?: string): NewsSource {
   return {
     id: row.id,
+    slug: getSourceSlug(row),
     name: row.name,
     bias: row.bias,
     factuality: row.factuality,
     ownership: row.ownership,
+    region: row.region as Region,
     url: row.url ?? undefined,
+    ...(articleUrl ? { articleUrl } : {}),
+    totalArticlesIngested: row.total_articles_ingested,
+  }
+}
+
+interface TagRow {
+  slug: string
+  label: string
+  tag_type: string
+  story_count: number
+  description?: string | null
+  relevance?: number
+}
+
+export function transformTag(row: TagRow): StoryTag {
+  return {
+    slug: row.slug,
+    label: row.label,
+    type: row.tag_type as TagType,
+    relevance: row.relevance ?? 1,
+    storyCount: row.story_count,
+    ...(row.description ? { description: row.description } : {}),
   }
 }
 
 export function transformStory(
   story: StoryWithSources,
-  sources: readonly DbSource[]
+  sources: readonly DbSource[],
+  articleUrlMap?: Map<string, string>,
+  tags?: readonly TagRow[]
 ): NewsArticle {
   return {
     id: story.id,
@@ -98,11 +127,12 @@ export function transformStory(
     imageUrl: story.image_url ?? null,
     factuality: story.factuality as FactualityLevel,
     ownership: story.ownership as OwnershipType,
-    sources: sources.map(transformSource),
+    sources: sources.map((s) => transformSource(s, articleUrlMap?.get(s.id))),
     spectrumSegments: parseSpectrumSegments(story.spectrum_segments),
     aiSummary: parseAISummary(story.ai_summary),
     timestamp: story.first_published,
     region: story.region as Region,
+    ...(tags && tags.length > 0 ? { tags: tags.map(transformTag) } : {}),
   }
 }
 

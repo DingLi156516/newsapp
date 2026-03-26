@@ -52,7 +52,7 @@ export async function GET() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: allStories, error: allError } = await (supabase.from('stories') as any)
       .select('spectrum_segments')
-      .neq('headline', 'Pending headline generation')
+      .eq('publication_status', 'published')
 
     if (allError) {
       throw new Error(`Failed to fetch all stories: ${allError.message}`)

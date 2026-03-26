@@ -10,8 +10,8 @@ Single source of truth for PRD implementation status. See `PRD_Axiom_News.md` fo
 |-------|--------|-------------|
 | 1 — UI Scaffolding | ✅ Complete | All components, pages, static sample data |
 | 2 — Data Layer | ✅ Complete | Supabase DB, RSS ingestion, Gemini AI, real article pipeline |
-| 3 — Story Timeline | ⏳ Partial | Timeline, blindspot algo, AI summaries done; offline bookmarks, notifications, browser extension remaining |
-| 4 — User Features | ⏳ Partial | Auth, dashboard, topic feeds, For You done; digest email, Stripe, region classification, mobile app remaining |
+| 3 — Story Timeline | ⏳ Partial | Timeline, blindspot algo, AI summaries, offline PWA done; browser extension remaining |
+| 4 — User Features | ⏳ Partial | Auth, dashboard, topic feeds, For You, digest email, region classification done; Stripe, mobile app remaining |
 | 5 — Personalisation | ✅ Complete | Bookmarks, reading history, preferences, bias dashboard, suggestions |
 | 6 — For You Feed | ✅ Complete | Personalized ranking, For You API, feed tab integration |
 
@@ -28,28 +28,16 @@ Single source of truth for PRD implementation status. See `PRD_Axiom_News.md` fo
 | F-07 | My News Bias Dashboard (bias profile, suggestions, blindspot detection) | §2 F-07 |
 | F-08 | Topic Feeds — core (follow topics, "For You" personalized feed) | §2 F-08 |
 | F-09 | Bookmarks & Reading History — core (save stories, reading history, "already read" filtering) | §2 F-09 |
-| F-05 | Manual Review Gate (admin review queue for AI summaries before publishing) | §2 F-05 |
+| F-05 | Risk-Based Publishing + Admin Review (auto-publish low-risk stories, queue risky ones) | §2 F-05 |
 | F-10 | Full-Text Search + Advanced Filters (headline search, bias range, factuality, date range, perspective presets) | §2 F-10 |
 | F-11 | Story Timeline (coverage evolution over time) | §2 F-11 |
+| F-04 | Blindspot Digest Email (weekly email via Resend) | §2 F-04 |
+| F-08 | Region Classification (Gemini-powered, UI region filter) | §2 F-08 |
+| F-09 | Offline / PWA (service worker, cache API for saved stories) | §2 F-09 |
 
 ---
 
 ## In Progress / Remaining
-
-### High Priority — Core PRD Features
-
-| ID | Item | PRD Ref | Status | What's Left |
-|----|------|---------|--------|-------------|
-| F-05 | Manual review gate for AI summaries | §2 F-05 | ✅ Complete | Admin review queue, approve/reject workflow, review stats dashboard |
-
-### Medium Priority — Phase 3/4 Feature Gaps
-
-| ID | Item | PRD Ref | Status | What's Left |
-|----|------|---------|--------|-------------|
-| F-04 | Weekly Blindspot digest email | §2 F-04, §5 Phase 4 | Not started | Blindspot feed page exists; email digest not implemented |
-| F-08 | Content-based region classification | §2 F-08, §5 Phase 4 | Not started | Gemini classifies story region during assembly; `stories.region` column; UI region filter |
-| F-09 | Offline bookmarks / PWA cache | §2 F-09, §5 Phase 3 | Not started | Service worker, cache API for saved stories |
-| F-12 | Notifications | §2 F-12, §5 Phase 3 | Not started | Breaking alerts, daily briefing, weekly blindspot report, bookmark update alerts |
 
 ### Lower Priority — Platform Expansion
 
@@ -57,7 +45,7 @@ Single source of truth for PRD implementation status. See `PRD_Axiom_News.md` fo
 |------|---------|--------|-------------|
 | Browser extension (Chrome/Firefox) | §5 Phase 3 | Not started | Full extension for in-browser bias overlay |
 | Stripe subscription tiers (Free/Pro/Premium) | §5 Phase 4 | Not started | Payment integration, tier-gated features |
-| React Native mobile app (iOS + Android) | §5 Phase 4 | Not started | Mobile app with push notifications |
+| React Native mobile app (iOS + Android) | §5 Phase 4 | ⏳ Phase 1-5 substantially complete | `apps/mobile/` — Expo SDK 54, 65 source files, 43 test files, 16 Maestro E2E flows |
 
 ---
 
@@ -88,25 +76,23 @@ Single source of truth for PRD implementation status. See `PRD_Axiom_News.md` fo
 - [x] Blindspot detection algorithm (>80% one-side threshold)
 - [x] Cross-spectrum AI summary generation (Gemini, 3 perspectives)
 - [x] Story timeline feature
-- [ ] Offline bookmarks (PWA cache)
-- [ ] Push notifications (web + mobile)
-- [ ] Browser extension (Chrome/Firefox)
+- [x] Offline bookmarks (PWA cache)
 
 ### Phase 4 — User Dashboard & Personal Bias Analytics
 
 - [x] Supabase Auth (email + Google OAuth)
 - [x] My News Bias dashboard
 - [x] Custom topic feeds + personalized "For You" tab
-- [ ] Weekly Blindspot digest email
+- [x] Weekly Blindspot digest email (Resend)
 - [ ] Subscription tiers (Free / Pro / Premium) via Stripe
-- [ ] Content-based region classification (AI-classified during story assembly)
-- [ ] React Native mobile app (iOS + Android)
+- [x] Content-based region classification (AI-classified during story assembly)
+- [x] React Native mobile app (iOS + Android) — `apps/mobile/` Phase 1-5 substantially complete
 
 ### Phase 5 — Personalisation (added post-PRD)
 
 - [x] Bookmarks (save/remove stories)
 - [x] Reading history (track/filter read stories)
-- [x] User preferences (topics, notifications settings)
+- [x] User preferences (topics, digest settings)
 - [x] Bias calibration dashboard with suggestions
 - [x] Settings page
 

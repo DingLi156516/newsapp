@@ -1,0 +1,45 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Verify feed loaded
+- assertVisible:
+    id: "axiom-header"
+
+# Tap search and type query
+- tapOn:
+    id: "search-input"
+- inputText: "climate"
+
+# Wait for results to filter (debounce)
+- waitForAnimationToEnd
+
+# Verify search input still visible
+- assertVisible:
+    id: "search-input"
+
+# Clear search
+- tapOn:
+    id: "search-input"
+- eraseText
+
+# Feed should reset
+- assertVisible:
+    id: "axiom-header"

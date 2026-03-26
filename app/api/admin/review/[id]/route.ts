@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminUser } from '@/lib/api/admin-helpers'
 import { updateReviewStatus } from '@/lib/api/review-queries'
 import { reviewActionSchema } from '@/lib/api/review-validation'
+import { assembleSingleStory } from '@/lib/ai/story-assembler'
 
 export async function PATCH(
   request: NextRequest,
@@ -36,6 +37,10 @@ export async function PATCH(
 
     const { id } = await params
     await updateReviewStatus(supabase, id, user.id, parsed.data)
+
+    if (parsed.data.action === 'reprocess') {
+      await assembleSingleStory(supabase, id)
+    }
 
     return NextResponse.json({ success: true })
   } catch (err) {

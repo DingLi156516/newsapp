@@ -68,3 +68,41 @@ export async function parseFeed(url: string): Promise<readonly ParsedFeedItem[]>
       publishedAt: normalizeDate(item.isoDate ?? item.pubDate),
     }))
 }
+
+export type FeedErrorType = 'timeout' | 'http_error' | 'parse_error' | 'dns_error' | 'unknown'
+
+export function categorizeFeedError(err: unknown): { type: FeedErrorType; message: string } {
+  const message = err instanceof Error ? err.message : String(err)
+
+  // Timeout errors
+  if (
+    message.includes('ETIMEDOUT') ||
+    message.includes('ESOCKETTIMEDOUT') ||
+    message.includes('AbortError') ||
+    message.includes('timeout')
+  ) {
+    return { type: 'timeout', message }
+  }
+
+  // DNS errors
+  if (message.includes('ENOTFOUND') || message.includes('EAI_AGAIN')) {
+    return { type: 'dns_error', message }
+  }
+
+  // HTTP errors
+  if (/\b(403|404|429|5\d{2})\b/.test(message) || message.includes('Status code')) {
+    return { type: 'http_error', message }
+  }
+
+  // Parse errors
+  if (
+    message.includes('Non-whitespace before first tag') ||
+    message.includes('Unexpected close tag') ||
+    message.includes('Invalid XML') ||
+    message.includes('not well-formed')
+  ) {
+    return { type: 'parse_error', message }
+  }
+
+  return { type: 'unknown', message }
+}

@@ -1,0 +1,40 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Reset to known state
+
+# Verify feed loaded
+- assertVisible:
+    id: "axiom-header"
+
+# Tap For You tab
+- tapOn:
+    id: "feed-tab-for-you"
+
+# For authenticated users: should show stories, not CTA
+# For unauthenticated: shows ForYouCta — either way the tab works
+- assertNotVisible:
+    text: "Get personalized news"
+    optional: true
+
+# Switch back to Trending
+- tapOn:
+    id: "feed-tab-trending"
+- assertVisible:
+    id: "axiom-header"

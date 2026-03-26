@@ -7,6 +7,8 @@ const mockStory = {
   headline: 'Test Headline for Review',
   topic: 'politics',
   source_count: 5,
+  review_reasons: ['blindspot'],
+  confidence_score: 0.48,
   review_status: 'pending' as const,
   first_published: '2026-03-15T10:00:00Z',
 }
@@ -46,6 +48,19 @@ describe('ReviewListItem', () => {
       />
     )
     expect(screen.getByText('5 sources')).toBeInTheDocument()
+  })
+
+  it('renders review reason and confidence summary', () => {
+    render(
+      <ReviewListItem
+        story={mockStory}
+        isSelected={false}
+        isEditing={false}
+        onClick={vi.fn()}
+      />
+    )
+    expect(screen.getByText('blindspot')).toBeInTheDocument()
+    expect(screen.getByText('48%')).toBeInTheDocument()
   })
 
   it('calls onClick when clicked', () => {

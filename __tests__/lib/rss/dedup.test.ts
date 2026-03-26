@@ -2,7 +2,7 @@ import { filterNewArticles } from '@/lib/rss/dedup'
 import type { ParsedFeedItem } from '@/lib/rss/parser'
 
 function createMockClient(responses: Array<{
-  data?: Array<{ url: string }> | null
+  data?: Array<{ canonical_url?: string | null; url?: string }> | null
   error?: { message: string } | null
 }>) {
   let callIndex = 0
@@ -44,8 +44,21 @@ describe('filterNewArticles', () => {
   })
 
   it('filters out items that already exist in DB', async () => {
-    const client = createMockClient([{ data: [{ url: 'https://a.com' }] }])
-    const items = [makeFeedItem('https://a.com'), makeFeedItem('https://b.com')]
+    const client = createMockClient([{ data: [{ canonical_url: 'https://a.com/path', url: 'https://a.com/path' }] }])
+    const items = [makeFeedItem('https://a.com/path?utm_source=rss'), makeFeedItem('https://b.com')]
+
+    const result = await filterNewArticles(client as never, items)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].url).toBe('https://b.com')
+  })
+
+  it('filters out items that already exist by raw legacy url', async () => {
+    const client = createMockClient([
+      { data: [] },
+      { data: [{ url: 'https://a.com/path?utm_source=rss' }] },
+    ])
+    const items = [makeFeedItem('https://a.com/path?utm_source=rss'), makeFeedItem('https://b.com')]
 
     const result = await filterNewArticles(client as never, items)
 

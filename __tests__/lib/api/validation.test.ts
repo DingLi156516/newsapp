@@ -1,4 +1,4 @@
-import { storiesQuerySchema, sourcesQuerySchema, parseSearchParams } from '@/lib/api/validation'
+import { storiesQuerySchema, sourcesQuerySchema, tagsQuerySchema, parseSearchParams } from '@/lib/api/validation'
 
 describe('storiesQuerySchema', () => {
   it('returns defaults when no params provided', () => {
@@ -112,6 +112,105 @@ describe('storiesQuerySchema advanced filters', () => {
 
   it('rejects invalid datePreset', () => {
     const result = storiesQuerySchema.safeParse({ datePreset: '2w' })
+    expect(result.success).toBe(false)
+  })
+})
+
+describe('storiesQuerySchema tag param', () => {
+  it('parses valid tag slug', () => {
+    const result = storiesQuerySchema.safeParse({ tag: 'iran-war' })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.tag).toBe('iran-war')
+    }
+  })
+
+  it('accepts tag as optional', () => {
+    const result = storiesQuerySchema.safeParse({})
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.tag).toBeUndefined()
+    }
+  })
+
+  it('rejects tag exceeding max length', () => {
+    const result = storiesQuerySchema.safeParse({ tag: 'a'.repeat(101) })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts valid tag_type alongside tag', () => {
+    const result = storiesQuerySchema.safeParse({ tag: 'jordan', tag_type: 'person' })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.tag_type).toBe('person')
+    }
+  })
+
+  it('rejects invalid tag_type value', () => {
+    const result = storiesQuerySchema.safeParse({ tag: 'jordan', tag_type: 'animal' })
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts tag_type as optional', () => {
+    const result = storiesQuerySchema.safeParse({ tag: 'jordan' })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.tag_type).toBeUndefined()
+    }
+  })
+
+  it('rejects tag_type without tag', () => {
+    const result = storiesQuerySchema.safeParse({ tag_type: 'person' })
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe('tag_type requires tag to be specified')
+      expect(result.error.issues[0].path).toContain('tag_type')
+    }
+  })
+})
+
+describe('tagsQuerySchema', () => {
+  it('returns defaults when no params provided', () => {
+    const result = tagsQuerySchema.safeParse({})
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.page).toBe(1)
+      expect(result.data.limit).toBe(50)
+    }
+  })
+
+  it('parses valid type filter', () => {
+    const result = tagsQuerySchema.safeParse({ type: 'person' })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.type).toBe('person')
+    }
+  })
+
+  it('rejects invalid type', () => {
+    const result = tagsQuerySchema.safeParse({ type: 'animal' })
+    expect(result.success).toBe(false)
+  })
+
+  it('parses search query', () => {
+    const result = tagsQuerySchema.safeParse({ search: 'iran' })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.search).toBe('iran')
+    }
+  })
+
+  it('coerces page and limit', () => {
+    const result = tagsQuerySchema.safeParse({ page: '2', limit: '25' })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.page).toBe(2)
+      expect(result.data.limit).toBe(25)
+    }
+  })
+
+  it('rejects limit exceeding maximum', () => {
+    const result = tagsQuerySchema.safeParse({ limit: '200' })
     expect(result.success).toBe(false)
   })
 })

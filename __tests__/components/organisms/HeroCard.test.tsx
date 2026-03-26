@@ -53,8 +53,9 @@ describe('HeroCard', () => {
 
   it('renders spectrum bar with labels', () => {
     render(<HeroCard article={article} onClick={onClick} onSave={onSave} isSaved={false} />)
-    const labels = screen.getAllByText('40%')
-    expect(labels).toHaveLength(2)
+    expect(screen.getByText('Left 40%')).toBeInTheDocument()
+    expect(screen.getByText('Center 20%')).toBeInTheDocument()
+    expect(screen.getByText('Right 40%')).toBeInTheDocument()
   })
 
   it('calls onClick when clicked', async () => {
@@ -62,6 +63,11 @@ describe('HeroCard', () => {
     render(<HeroCard article={article} onClick={onClick} onSave={onSave} isSaved={false} />)
     await user.click(screen.getByRole('article'))
     expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders a headline link to the story detail page', () => {
+    render(<HeroCard article={article} onClick={onClick} onSave={onSave} isSaved={false} />)
+    expect(screen.getByRole('link', { name: 'Open story: Test Hero Headline' })).toHaveAttribute('href', '/story/hero-1')
   })
 
   it('renders without image when imageUrl is null', () => {

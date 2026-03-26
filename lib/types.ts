@@ -78,6 +78,20 @@ export type Region = 'us' | 'international' | 'uk' | 'canada' | 'europe'
  * - saved: articles the user has bookmarked (stored in local React state)
  */
 export type FeedTab = 'for-you' | 'trending' | 'latest' | 'blindspot' | 'saved'
+export type StoryKind = 'standard'
+
+/** Entity tag type for classifying extracted entities. */
+export type TagType = 'person' | 'organization' | 'location' | 'event' | 'topic'
+
+/** An entity tag associated with a story (person, org, location, event, topic). */
+export interface StoryTag {
+  readonly slug: string
+  readonly label: string
+  readonly type: TagType
+  readonly relevance: number
+  readonly storyCount: number
+  readonly description?: string
+}
 
 // ---------------------------------------------------------------------------
 // Data model interfaces
@@ -110,11 +124,68 @@ export interface AISummary {
  */
 export interface NewsSource {
   id: string
+  slug?: string
   name: string
   bias: BiasCategory
   factuality: FactualityLevel
   ownership: OwnershipType
-  url?: string   // Root domain without protocol, e.g. "bbc.com"
+  region: Region
+  url?: string        // Root domain without protocol, e.g. "bbc.com"
+  articleUrl?: string  // Direct URL to the specific article on this source
+  totalArticlesIngested?: number
+}
+
+export interface SourceProfileSource extends NewsSource {
+  slug: string
+  rssUrl?: string
+  isActive: boolean
+}
+
+export interface SourceProfileStory {
+  id: string
+  headline: string
+  topic: Topic
+  region: Region
+  timestamp: string
+  isBlindspot: boolean
+  articleUrl?: string
+}
+
+export interface SourceTopicBreakdownItem {
+  topic: Topic
+  count: number
+}
+
+export interface SourceProfile {
+  source: SourceProfileSource
+  recentStories: SourceProfileStory[]
+  topicBreakdown: SourceTopicBreakdownItem[]
+  blindspotCount: number
+}
+
+export interface SourceComparisonTopicCount {
+  topic: Topic
+  leftCount: number
+  rightCount: number
+}
+
+export interface SourceComparisonStats {
+  sharedStoryCount: number
+  leftExclusiveCount: number
+  rightExclusiveCount: number
+  leftBlindspotCount: number
+  rightBlindspotCount: number
+  overlappingTopics: SourceComparisonTopicCount[]
+  topicImbalances: SourceComparisonTopicCount[]
+}
+
+export interface SourceComparison {
+  leftSource: SourceProfileSource
+  rightSource: SourceProfileSource
+  sharedStories: SourceProfileStory[]
+  leftExclusiveStories: SourceProfileStory[]
+  rightExclusiveStories: SourceProfileStory[]
+  stats: SourceComparisonStats
 }
 
 /**
@@ -141,6 +212,21 @@ export interface NewsArticle {
   aiSummary: AISummary
   timestamp: string            // ISO 8601 datetime string
   region: Region
+  tags?: StoryTag[]            // Entity tags extracted by AI
+}
+
+/** All tag types as an array, for iteration and validation. */
+export const ALL_TAG_TYPES: TagType[] = [
+  'person', 'organization', 'location', 'event', 'topic',
+]
+
+/** Human-readable labels for TagType, displayed in tag pills. */
+export const TAG_TYPE_LABELS: Record<TagType, string> = {
+  'person': 'Person',
+  'organization': 'Organization',
+  'location': 'Location',
+  'event': 'Event',
+  'topic': 'Topic',
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +238,17 @@ export interface NewsArticle {
 /** All bias categories as an array, for iteration and validation. */
 export const ALL_BIASES: BiasCategory[] = [
   'far-left', 'left', 'lean-left', 'center', 'lean-right', 'right', 'far-right',
+]
+
+/** All factuality levels as an array, for iteration and validation. */
+export const ALL_FACTUALITIES: FactualityLevel[] = [
+  'very-high', 'high', 'mixed', 'low', 'very-low',
+]
+
+/** All ownership types as an array, for iteration and validation. */
+export const ALL_OWNERSHIPS: OwnershipType[] = [
+  'independent', 'corporate', 'non-profit', 'state-funded',
+  'private-equity', 'telecom', 'government', 'other',
 ]
 
 /** Bias categories for each perspective preset (All/Left/Center/Right). */
@@ -189,6 +286,16 @@ export const BIAS_CSS_CLASS: Record<BiasCategory, string> = {
   'far-right': 'spectrum-far-right',
 }
 
+export const BIAS_COLOR: Record<BiasCategory, string> = {
+  'far-left': '#3B82F6',
+  'left': '#60A5FA',
+  'lean-left': '#93C5FD',
+  'center': '#A1A1AA',
+  'lean-right': '#FCA5A5',
+  'right': '#F87171',
+  'far-right': '#EF4444',
+}
+
 /** Human-readable labels for FactualityLevel, used in tooltips and filters. */
 export const FACTUALITY_LABELS: Record<FactualityLevel, string> = {
   'very-high': 'Very High Factuality',
@@ -197,6 +304,15 @@ export const FACTUALITY_LABELS: Record<FactualityLevel, string> = {
   'low': 'Low Factuality',
   'very-low': 'Very Low Factuality',
 }
+
+/** Color, background, border, and fill percentage for each factuality level. */
+export const FACTUALITY = {
+  'very-high': { color: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.25)', fill: 1.0 },
+  'high':      { color: '#4ade80', bg: 'rgba(74,222,128,0.12)', border: 'rgba(74,222,128,0.25)', fill: 0.8 },
+  'mixed':     { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.25)', fill: 0.6 },
+  'low':       { color: '#f97316', bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.25)', fill: 0.4 },
+  'very-low':  { color: '#ef4444', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.25)', fill: 0.2 },
+} as const
 
 /** Human-readable labels for OwnershipType, displayed in the source list. */
 export const OWNERSHIP_LABELS: Record<OwnershipType, string> = {
@@ -289,4 +405,16 @@ export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
 // Database row type aliases (re-exported from lib/supabase/types)
 // ---------------------------------------------------------------------------
 
-export type { DbSource, DbArticle, DbStory, DbAdminUser } from '@/lib/supabase/types'
+/** Human-readable labels for Region, displayed in filter pills. */
+export const REGION_LABELS: Record<Region, string> = {
+  'us': 'United States',
+  'international': 'International',
+  'uk': 'United Kingdom',
+  'canada': 'Canada',
+  'europe': 'Europe',
+}
+
+/** All region values as an array, for iteration and validation. */
+export const ALL_REGIONS: Region[] = ['us', 'international', 'uk', 'canada', 'europe']
+
+export type { DbSource, DbArticle, DbStory, DbAdminUser, DbTag, DbStoryTag } from '@/lib/supabase/types'

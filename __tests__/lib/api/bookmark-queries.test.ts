@@ -20,10 +20,12 @@ function createMockClient(overrides: Record<string, unknown> = {}) {
 describe('queryBookmarks', () => {
   it('returns story IDs for user', async () => {
     const mockClient = createMockClient()
-    mockClient._chain.order.mockResolvedValue({
-      data: [{ story_id: 'id-1' }, { story_id: 'id-2' }],
-      error: null,
-    })
+    mockClient._chain.order
+      .mockReturnValueOnce(mockClient._chain)
+      .mockResolvedValueOnce({
+        data: [{ story_id: 'id-1' }, { story_id: 'id-2' }],
+        error: null,
+      })
 
     const result = await queryBookmarks(mockClient as any, 'user-1')
     expect(result.storyIds).toEqual(['id-1', 'id-2'])
@@ -32,7 +34,9 @@ describe('queryBookmarks', () => {
 
   it('returns empty array when no bookmarks', async () => {
     const mockClient = createMockClient()
-    mockClient._chain.order.mockResolvedValue({ data: [], error: null })
+    mockClient._chain.order
+      .mockReturnValueOnce(mockClient._chain)
+      .mockResolvedValueOnce({ data: [], error: null })
 
     const result = await queryBookmarks(mockClient as any, 'user-1')
     expect(result.storyIds).toEqual([])
@@ -40,10 +44,12 @@ describe('queryBookmarks', () => {
 
   it('throws on query error', async () => {
     const mockClient = createMockClient()
-    mockClient._chain.order.mockResolvedValue({
-      data: null,
-      error: { message: 'Query failed' },
-    })
+    mockClient._chain.order
+      .mockReturnValueOnce(mockClient._chain)
+      .mockResolvedValueOnce({
+        data: null,
+        error: { message: 'Query failed' },
+      })
 
     await expect(queryBookmarks(mockClient as any, 'user-1')).rejects.toThrow(
       'Failed to query bookmarks: Query failed'

@@ -1,11 +1,13 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { SearchFilters } from '@/components/organisms/SearchFilters'
-import type { BiasCategory, FactualityLevel, DatePreset, Topic } from '@/lib/types'
+import type { BiasCategory, FactualityLevel, DatePreset, Topic, Region } from '@/lib/types'
 import { ALL_BIASES, TOPIC_LABELS } from '@/lib/types'
 
 function renderFilters(overrides: Partial<{
   topic: Topic | null
   onTopicChange: (v: Topic | null) => void
+  region: Region | null
+  onRegionChange: (v: Region | null) => void
   biasRange: BiasCategory[]
   onBiasRangeChange: (v: BiasCategory[]) => void
   minFactuality: FactualityLevel | null
@@ -16,6 +18,8 @@ function renderFilters(overrides: Partial<{
   const props = {
     topic: null as Topic | null,
     onTopicChange: vi.fn(),
+    region: null as Region | null,
+    onRegionChange: vi.fn(),
     biasRange: ALL_BIASES,
     onBiasRangeChange: vi.fn(),
     minFactuality: null,
@@ -227,5 +231,58 @@ describe('SearchFilters', () => {
     fireEvent.click(screen.getByTestId('search-filters-toggle'))
     fireEvent.click(screen.getByTestId('clear-filters'))
     expect(onBiasRangeChange).toHaveBeenCalledWith(ALL_BIASES)
+  })
+
+  // Region filter tests
+  it('renders region pills when expanded', () => {
+    renderFilters()
+    fireEvent.click(screen.getByTestId('search-filters-toggle'))
+    expect(screen.getByTestId('region-filter-pill-all')).toBeInTheDocument()
+    expect(screen.getByTestId('region-filter-pill-us')).toBeInTheDocument()
+    expect(screen.getByTestId('region-filter-pill-uk')).toBeInTheDocument()
+    expect(screen.getByTestId('region-filter-pill-canada')).toBeInTheDocument()
+    expect(screen.getByTestId('region-filter-pill-europe')).toBeInTheDocument()
+    expect(screen.getByTestId('region-filter-pill-international')).toBeInTheDocument()
+  })
+
+  it('calls onRegionChange when region pill clicked', () => {
+    const onRegionChange = vi.fn()
+    renderFilters({ onRegionChange })
+    fireEvent.click(screen.getByTestId('search-filters-toggle'))
+    fireEvent.click(screen.getByTestId('region-filter-pill-uk'))
+    expect(onRegionChange).toHaveBeenCalledWith('uk')
+  })
+
+  it('calls onRegionChange with null when All region pill clicked', () => {
+    const onRegionChange = vi.fn()
+    renderFilters({ region: 'uk', onRegionChange })
+    fireEvent.click(screen.getByTestId('search-filters-toggle'))
+    fireEvent.click(screen.getByTestId('region-filter-pill-all'))
+    expect(onRegionChange).toHaveBeenCalledWith(null)
+  })
+
+  it('includes region in active filter count', () => {
+    renderFilters({ region: 'us' })
+    const badge = screen.getByTestId('filter-count-badge')
+    expect(badge).toHaveTextContent('1')
+  })
+
+  it('marks active region pill as pressed', () => {
+    renderFilters({ region: 'europe' })
+    fireEvent.click(screen.getByTestId('search-filters-toggle'))
+    expect(screen.getByTestId('region-filter-pill-europe')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('region-filter-pill-all')).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('clear filters resets region to null', () => {
+    const onRegionChange = vi.fn()
+    renderFilters({
+      region: 'uk',
+      topic: 'politics',
+      onRegionChange,
+    })
+    fireEvent.click(screen.getByTestId('search-filters-toggle'))
+    fireEvent.click(screen.getByTestId('clear-filters'))
+    expect(onRegionChange).toHaveBeenCalledWith(null)
   })
 })

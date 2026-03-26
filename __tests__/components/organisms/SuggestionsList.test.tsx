@@ -25,7 +25,7 @@ describe('SuggestionsList', () => {
       <SuggestionsList suggestions={[]} isLoading={true} />
     )
     // NexusCardSkeletonList renders animated pulse elements
-    expect(container.querySelector('.animate-pulse')).toBeInTheDocument()
+    expect(container.querySelector('.animate-shimmer')).toBeInTheDocument()
   })
 
   it('shows empty state message when suggestions=[]', () => {

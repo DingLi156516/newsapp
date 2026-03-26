@@ -20,6 +20,13 @@ interface ReviewStoryRow {
   ownership: string
   spectrum_segments: unknown
   ai_summary: unknown
+  assembly_status: string
+  publication_status: string
+  review_reasons: string[]
+  confidence_score: number | null
+  processing_error: string | null
+  assembled_at: string | null
+  published_at: string | null
   review_status: string
   reviewed_by: string | null
   reviewed_at: string | null
@@ -37,16 +44,22 @@ export async function queryReviewQueue(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query = (client.from('stories') as any)
     .select(
-      'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, review_status, reviewed_by, reviewed_at, first_published, last_updated',
+      'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, assembly_status, publication_status, review_reasons, confidence_score, processing_error, assembled_at, published_at, review_status, reviewed_by, reviewed_at, first_published, last_updated',
       { count: 'exact' }
     )
 
   if (status) {
-    query = query.eq('review_status', status)
+    const publicationStatus = status === 'pending'
+      ? 'needs_review'
+      : status === 'approved'
+        ? 'published'
+        : 'rejected'
+    query = query.eq('publication_status', publicationStatus)
   }
 
   query = query
     .order('last_updated', { ascending: false })
+    .order('id', { ascending: false })
     .range(offset, offset + limit - 1)
 
   const { data, count, error } = await query
@@ -73,6 +86,8 @@ export async function updateReviewStatus(
   switch (action.action) {
     case 'approve':
       updateData.review_status = 'approved'
+      updateData.publication_status = 'published'
+      updateData.published_at = new Date().toISOString()
       if (action.headline) {
         updateData.headline = action.headline
       }
@@ -82,15 +97,23 @@ export async function updateReviewStatus(
       break
     case 'reject':
       updateData.review_status = 'rejected'
+      updateData.publication_status = 'rejected'
       break
     case 'reprocess':
       updateData.review_status = 'pending'
+      updateData.publication_status = 'draft'
+      updateData.assembly_status = 'pending'
       updateData.headline = 'Pending headline generation'
       updateData.ai_summary = {
         commonGround: '',
         leftFraming: '',
         rightFraming: '',
       }
+      updateData.processing_error = null
+      updateData.review_reasons = []
+      updateData.confidence_score = null
+      updateData.assembled_at = null
+      updateData.published_at = null
       updateData.reviewed_by = null
       updateData.reviewed_at = null
       break
@@ -116,8 +139,14 @@ export async function queryReviewStats(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { count, error } = await (client.from('stories') as any)
         .select('id', { count: 'exact' })
-        .eq('review_status', status)
-        .neq('headline', 'Pending headline generation')
+        .eq(
+          'publication_status',
+          status === 'pending'
+            ? 'needs_review'
+            : status === 'approved'
+              ? 'published'
+              : 'rejected'
+        )
 
       if (error) {
         throw new Error(`Failed to query review stats: ${error.message}`)

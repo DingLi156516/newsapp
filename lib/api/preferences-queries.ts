@@ -8,13 +8,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
 
-interface PreferencesRow {
+export interface PreferencesRow {
   id: string
   user_id: string
   followed_topics: string[]
   default_region: string
   default_perspective: string
   factuality_minimum: string
+  blindspot_digest_enabled: boolean
   created_at: string
   updated_at: string
 }

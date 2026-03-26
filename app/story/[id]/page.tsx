@@ -41,9 +41,11 @@ import { AISummaryTabs } from '@/components/organisms/AISummaryTabs'
 import { BookmarkButton } from '@/components/atoms/BookmarkButton'
 import { BlindspotBadge } from '@/components/atoms/BlindspotBadge'
 import { CoverageCount } from '@/components/atoms/CoverageCount'
-import { FactualityDots } from '@/components/atoms/FactualityDots'
+import { FactualityBar } from '@/components/atoms/FactualityBar'
+import { GuideLink } from '@/components/atoms/GuideLink'
 import { StoryTimeline } from '@/components/organisms/StoryTimeline'
 import { UserMenu } from '@/components/organisms/UserMenu'
+import { CoverageIntelligence } from '@/components/organisms/CoverageIntelligence'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
 
@@ -152,8 +154,8 @@ export default function StoryPage({ params }: Props) {
           </span>
           {/* ml-auto pushes factuality dots to the right end of the row */}
           <div className="flex items-center gap-1.5 ml-auto">
-            {/* showLabel=true displays the text label alongside the dots */}
-            <FactualityDots level={article.factuality} showLabel />
+            <FactualityBar level={article.factuality} showLabel />
+            <GuideLink section="factuality" />
           </div>
         </div>
 
@@ -177,13 +179,15 @@ export default function StoryPage({ params }: Props) {
             showLabels
             height="md"
           />
-          {/* Axis labels below the spectrum bar */}
-          <div className="flex justify-between text-xs text-white/50">
-            <span>Far Left</span>
-            <span>Center</span>
-            <span>Far Right</span>
-          </div>
         </div>
+
+        {/* Single-source coverage notice */}
+        {article.sourceCount === 1 && (
+          <div className="glass-sm px-4 py-3 text-sm text-amber-200/80 leading-relaxed">
+            This story is based on a single source. Cross-spectrum analysis is limited —
+            perspectives may update as more outlets cover this story.
+          </div>
+        )}
 
         {/* AI summary section */}
         <div className="space-y-2">
@@ -196,6 +200,8 @@ export default function StoryPage({ params }: Props) {
             rightFraming={article.aiSummary.rightFraming}
           />
         </div>
+
+        <CoverageIntelligence article={article} timeline={timeline} />
 
         {/* Coverage timeline */}
         {(timelineLoading || (timeline && timeline.events.length > 0)) && (
