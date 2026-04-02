@@ -1,5 +1,6 @@
 vi.mock('@/lib/ai/gemini-client', () => ({
   generateText: vi.fn(),
+  SUMMARY_GENERATION_MODEL: 'models/gemini-2.5-flash',
 }))
 
 describe('generateAISummary', () => {
@@ -34,7 +35,10 @@ describe('generateAISummary', () => {
     expect(result.commonGround).toBe('• Both sides agree on X')
     expect(result.leftFraming).toBe('• Left sees Y')
     expect(result.rightFraming).toBe('• Right sees Z')
-    expect(generateText).toHaveBeenCalledWith(expect.any(String), { jsonMode: true })
+    expect(generateText).toHaveBeenCalledWith(expect.any(String), {
+      jsonMode: true,
+      model: 'models/gemini-2.5-flash',
+    })
   })
 
   it('returns fallback on invalid JSON response', async () => {

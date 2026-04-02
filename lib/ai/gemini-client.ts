@@ -1,5 +1,5 @@
 /**
- * lib/ai/gemini-client.ts — Gemini 2.5 Flash-Lite API client wrapper.
+ * lib/ai/gemini-client.ts — Gemini API client wrapper.
  *
  * Provides typed methods for embedding generation and text generation
  * using Google's Gemini API. Used by the clustering and summary pipelines.
@@ -8,7 +8,10 @@
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 const EMBEDDING_MODEL = 'models/gemini-embedding-001'
 const EMBEDDING_DIMENSIONS = 768
-const GENERATION_MODEL = 'models/gemini-2.5-flash-lite'
+const DEFAULT_GENERATION_MODEL = process.env.GEMINI_DEFAULT_MODEL ?? 'models/gemini-2.5-flash-lite'
+
+export const SUMMARY_GENERATION_MODEL = process.env.GEMINI_SUMMARY_MODEL ?? 'models/gemini-2.5-flash'
+export const CHEAP_GENERATION_MODEL = process.env.GEMINI_CHEAP_MODEL ?? DEFAULT_GENERATION_MODEL
 
 function getApiKey(): string {
   const key = process.env.GEMINI_API_KEY
@@ -84,6 +87,7 @@ export async function generateEmbeddingBatch(
 
 export interface GenerationOptions {
   readonly jsonMode?: boolean
+  readonly model?: string
 }
 
 export async function generateText(
@@ -101,12 +105,15 @@ export async function generateText(
     generationConfig.responseMimeType = 'application/json'
   }
 
+  const model = options?.model ?? DEFAULT_GENERATION_MODEL
+
   const response = await fetch(
-    `${GEMINI_BASE_URL}/${GENERATION_MODEL}:generateContent?key=${apiKey}`,
+    `${GEMINI_BASE_URL}/${model}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        model,
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig,
       }),

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { runProcessPipeline } from '@/lib/pipeline/process-runner'
 
 describe('runProcessPipeline', () => {
-  it('runs downstream stages in later rounds before embedding more articles', async () => {
+  it('prioritizes freshness stages before assembly', async () => {
     const countBacklog = vi
       .fn()
       .mockResolvedValueOnce({
@@ -99,8 +99,8 @@ describe('runProcessPipeline', () => {
     expect(callOrder).toContain('cluster')
     expect(callOrder).toContain('assemble')
     expect(callOrder).toContain('embed')
+    expect(callOrder.indexOf('embed')).toBeLessThan(callOrder.indexOf('cluster'))
     expect(callOrder.indexOf('cluster')).toBeLessThan(callOrder.indexOf('assemble'))
-    expect(callOrder.indexOf('cluster')).toBeLessThan(callOrder.indexOf('embed'))
     expect(cluster).toHaveBeenCalledTimes(1)
     expect(assemble).toHaveBeenCalledTimes(1)
     expect(embed).toHaveBeenCalledTimes(1)
@@ -111,27 +111,34 @@ describe('runProcessPipeline', () => {
     expect(summary.assembly.sentToReview).toBe(1)
   })
 
-  it('skips embedding when remaining time is reserved for downstream backlog', async () => {
+  it('defers assembly until freshness backlog is drained', async () => {
     let nowMs = 0
     const countBacklog = vi
       .fn()
       .mockResolvedValueOnce({
-        unembeddedArticles: 2000,
-        unclusteredArticles: 1200,
+        unembeddedArticles: 100,
+        unclusteredArticles: 25,
         pendingAssemblyStories: 10,
         reviewQueueStories: 4,
         expiredArticles: 0,
       })
       .mockResolvedValueOnce({
-        unembeddedArticles: 2000,
-        unclusteredArticles: 1200,
+        unembeddedArticles: 0,
+        unclusteredArticles: 25,
         pendingAssemblyStories: 10,
         reviewQueueStories: 4,
         expiredArticles: 0,
       })
       .mockResolvedValueOnce({
-        unembeddedArticles: 2000,
-        unclusteredArticles: 1200,
+        unembeddedArticles: 0,
+        unclusteredArticles: 0,
+        pendingAssemblyStories: 10,
+        reviewQueueStories: 4,
+        expiredArticles: 0,
+      })
+      .mockResolvedValueOnce({
+        unembeddedArticles: 0,
+        unclusteredArticles: 0,
         pendingAssemblyStories: 10,
         reviewQueueStories: 4,
         expiredArticles: 0,
@@ -142,7 +149,7 @@ describe('runProcessPipeline', () => {
       return { totalProcessed: 100, claimedArticles: 100, errors: [] }
     })
     const cluster = vi.fn().mockImplementation(async () => {
-      nowMs += 55_000
+      nowMs += 50_000
       return {
         newStories: 0,
         updatedStories: 1,
@@ -154,7 +161,7 @@ describe('runProcessPipeline', () => {
       }
     })
     const assemble = vi.fn().mockImplementation(async () => {
-      nowMs += 35_000
+      nowMs += 5_000
       return {
         storiesProcessed: 5,
         claimedStories: 5,
@@ -185,12 +192,11 @@ describe('runProcessPipeline', () => {
       }
     )
 
-    expect(assemble).toHaveBeenCalledTimes(1)
+    expect(embed).toHaveBeenCalledTimes(1)
     expect(cluster).toHaveBeenCalledTimes(1)
-    expect(embed).not.toHaveBeenCalled()
-    expect(summary.embeddings.skipped).toBe(true)
-    expect(summary.embeddings.skipReason).toBe('budget_reserved_for_downstream')
+    expect(assemble).toHaveBeenCalled()
     expect(summary.clustering.skipped).toBe(false)
+    expect(summary.embeddings.skipped).toBe(false)
     expect(summary.assembly.skipped).toBe(false)
   })
 

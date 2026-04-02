@@ -10,6 +10,7 @@ vi.mock('@/lib/ai/headline-generator', () => ({
 
 vi.mock('@/lib/ai/summary-generator', () => ({
   generateAISummary: vi.fn(),
+  isFallbackSummary: vi.fn(() => false),
 }))
 
 vi.mock('@/lib/ai/topic-classifier', () => ({
@@ -304,13 +305,13 @@ describe('assembleStories', () => {
 
     const result = await assembleStories(client as never)
 
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       storiesProcessed: 0,
       claimedStories: 0,
       autoPublished: 0,
       sentToReview: 0,
       errors: [],
-    })
+    }))
   })
 
   it('throws when fetching pending stories fails', async () => {

@@ -11,6 +11,14 @@ import { getSupabaseServiceClient } from '@/lib/supabase/server'
 import { ingestFeeds } from '@/lib/rss/ingest'
 import { PipelineLogger } from '@/lib/pipeline/logger'
 
+function toPerMinute(total: number, durationMs: number): number {
+  if (total <= 0 || durationMs <= 0) {
+    return 0
+  }
+
+  return Number(((total / durationMs) * 60_000).toFixed(2))
+}
+
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
@@ -40,11 +48,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const result = await logger.logStep('ingest_feeds', () =>
       ingestFeeds(client) as unknown as Promise<Record<string, unknown>>
     )
-    await logger.complete(result)
+    const durationMs = logger.getSteps().find((step) => step.step === 'ingest_feeds')?.duration_ms ?? 0
+    const summary = {
+      ...result,
+      ingestedPerMinute: toPerMinute(Number((result as Record<string, unknown>).newArticles ?? 0), durationMs),
+    }
+    await logger.complete(summary)
 
     return NextResponse.json({
       success: true,
-      data: { runId: logger.getRunId(), ...result },
+      data: { runId: logger.getRunId(), ...summary },
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

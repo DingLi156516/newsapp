@@ -6,13 +6,17 @@
  */
 
 import type { AISummary } from '@/lib/types'
-import { generateText } from '@/lib/ai/gemini-client'
+import { generateText, SUMMARY_GENERATION_MODEL } from '@/lib/ai/gemini-client'
 
 interface ArticleWithBias {
   readonly title: string
   readonly description: string | null
   readonly bias: string
 }
+
+const FALLBACK_COMMON_GROUND = 'AI summary generation failed. Manual review needed.'
+const FALLBACK_LEFT = 'Analysis unavailable.'
+const FALLBACK_RIGHT = 'Analysis unavailable.'
 
 export async function generateAISummary(
   articles: readonly ArticleWithBias[]
@@ -26,7 +30,7 @@ export async function generateAISummary(
   }
 
   const articlesBlock = articles
-    .map((a) => `[${a.bias.toUpperCase()}] ${a.title}${a.description ? ` — ${a.description}` : ''}`)
+    .map((article) => `[${article.bias.toUpperCase()}] ${article.title}${article.description ? ` — ${article.description}` : ''}`)
     .join('\n')
 
   const prompt = `You are a media analyst. Analyze these news articles about the same story from different political perspectives.
@@ -44,7 +48,10 @@ Generate a structured summary in exactly this JSON format (no markdown, no code 
 Each section should have 2-4 bullet points separated by newlines. Return ONLY valid JSON.`
 
   try {
-    const response = await generateText(prompt, { jsonMode: true })
+    const response = await generateText(prompt, {
+      jsonMode: true,
+      model: SUMMARY_GENERATION_MODEL,
+    })
 
     if (!response.text.trim()) {
       console.error('[summary-generator] Empty response from Gemini — retrying with fewer articles')
@@ -63,15 +70,21 @@ Each section should have 2-4 bullet points separated by newlines. Return ONLY va
   }
 }
 
+export function isFallbackSummary(summary: AISummary): boolean {
+  return summary.commonGround === FALLBACK_COMMON_GROUND
+    && summary.leftFraming === FALLBACK_LEFT
+    && summary.rightFraming === FALLBACK_RIGHT
+}
+
 function sampleArticles(
   articles: readonly ArticleWithBias[],
   maxPerBias: number
 ): readonly ArticleWithBias[] {
   const byBias = new Map<string, ArticleWithBias[]>()
-  for (const a of articles) {
-    const group = byBias.get(a.bias) ?? []
-    group.push(a)
-    byBias.set(a.bias, group)
+  for (const article of articles) {
+    const group = byBias.get(article.bias) ?? []
+    group.push(article)
+    byBias.set(article.bias, group)
   }
 
   const sampled: ArticleWithBias[] = []
@@ -87,7 +100,7 @@ async function retryWithFewerArticles(
   const sampled = sampleArticles(articles, 2)
 
   const articlesBlock = sampled
-    .map((a) => `[${a.bias.toUpperCase()}] ${a.title}`)
+    .map((article) => `[${article.bias.toUpperCase()}] ${article.title}`)
     .join('\n')
 
   const prompt = `Analyze these news headlines from different political perspectives and generate a JSON summary.
@@ -105,7 +118,10 @@ Return JSON with this exact structure:
 Each section should have 2-3 bullet points. Return ONLY valid JSON.`
 
   try {
-    const response = await generateText(prompt, { jsonMode: true })
+    const response = await generateText(prompt, {
+      jsonMode: true,
+      model: SUMMARY_GENERATION_MODEL,
+    })
 
     if (!response.text.trim()) {
       console.error('[summary-generator] Retry also returned empty response')
@@ -126,8 +142,8 @@ Each section should have 2-3 bullet points. Return ONLY valid JSON.`
 
 function fallbackSummary(): AISummary {
   return {
-    commonGround: 'AI summary generation failed. Manual review needed.',
-    leftFraming: 'Analysis unavailable.',
-    rightFraming: 'Analysis unavailable.',
+    commonGround: FALLBACK_COMMON_GROUND,
+    leftFraming: FALLBACK_LEFT,
+    rightFraming: FALLBACK_RIGHT,
   }
 }

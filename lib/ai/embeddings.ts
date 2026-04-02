@@ -24,6 +24,8 @@ export interface EmbeddingResult {
   readonly totalProcessed: number
   readonly claimedArticles: number
   readonly errors: readonly string[]
+  readonly dbTimeMs?: number
+  readonly modelTimeMs?: number
 }
 
 function buildEmbeddingText(article: UnembeddedArticle): string {
@@ -32,6 +34,110 @@ function buildEmbeddingText(article: UnembeddedArticle): string {
     parts.push(article.description)
   }
   return parts.join(' — ')
+}
+
+async function bulkClaimArticles(
+  client: SupabaseClient<Database>,
+  articleIds: readonly string[],
+  claimedAt: string
+): Promise<void> {
+  if (articleIds.length === 0) {
+    return
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const query = (client.from('articles') as any).update({ embedding_claimed_at: claimedAt })
+  if (typeof query.in === 'function') {
+    const { error } = await query.in('id', articleIds)
+    if (error) {
+      throw new Error(`Failed to claim embedding batch: ${error.message}`)
+    }
+    return
+  }
+
+  for (const articleId of articleIds) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (client.from('articles') as any)
+      .update({ embedding_claimed_at: claimedAt })
+      .eq('id', articleId)
+
+    if (error) {
+      throw new Error(`Failed to claim article ${articleId}: ${error.message}`)
+    }
+  }
+}
+
+async function clearClaims(
+  client: SupabaseClient<Database>,
+  articleIds: readonly string[]
+): Promise<void> {
+  if (articleIds.length === 0) {
+    return
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const query = (client.from('articles') as any).update({ embedding_claimed_at: null })
+  if (typeof query.in === 'function') {
+    await query.in('id', articleIds)
+    return
+  }
+
+  for (const articleId of articleIds) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (client.from('articles') as any).update({ embedding_claimed_at: null }).eq('id', articleId)
+  }
+}
+
+async function bulkWriteEmbeddings(
+  client: SupabaseClient<Database>,
+  batch: readonly UnembeddedArticle[],
+  embeddings: readonly { readonly embedding: readonly number[] }[]
+): Promise<{ processed: number; errors: string[] }> {
+  const rows = batch.map((article, index) => ({
+    id: article.id,
+    embedding: embeddings[index]?.embedding as number[],
+    is_embedded: true,
+    embedding_claimed_at: null,
+  }))
+
+  const errors: string[] = []
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const table = client.from('articles') as any
+    if (typeof table.upsert === 'function') {
+      const { error } = await table.upsert(rows, { onConflict: 'id' })
+      if (!error) {
+        return { processed: rows.length, errors }
+      }
+      errors.push(`Batch embedding write failed: ${error.message}`)
+    }
+  } catch (error) {
+    errors.push(`Batch embedding write failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+
+  let processed = 0
+
+  for (const row of rows) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (client.from('articles') as any)
+      .update({
+        embedding: row.embedding,
+        is_embedded: row.is_embedded,
+        embedding_claimed_at: row.embedding_claimed_at,
+      })
+      .eq('id', row.id)
+
+    if (error) {
+      errors.push(`Update failed for ${row.id}: ${error.message}`)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (client.from('articles') as any).update({ embedding_claimed_at: null }).eq('id', row.id)
+    } else {
+      processed += 1
+    }
+  }
+
+  return { processed, errors }
 }
 
 export async function embedUnembeddedArticles(
@@ -52,7 +158,7 @@ export async function embedUnembeddedArticles(
   }
 
   if (!fetchedArticles || fetchedArticles.length === 0) {
-    return { totalProcessed: 0, claimedArticles: 0, errors: [] }
+    return { totalProcessed: 0, claimedArticles: 0, errors: [], dbTimeMs: 0, modelTimeMs: 0 }
   }
 
   const articles = fetchedArticles
@@ -60,59 +166,42 @@ export async function embedUnembeddedArticles(
     .slice(0, maxArticles)
 
   if (articles.length === 0) {
-    return { totalProcessed: 0, claimedArticles: 0, errors: [] }
+    return { totalProcessed: 0, claimedArticles: 0, errors: [], dbTimeMs: 0, modelTimeMs: 0 }
   }
 
   const errors: string[] = []
   let totalProcessed = 0
+  let dbTimeMs = 0
+  let modelTimeMs = 0
   const claimedAt = new Date().toISOString()
+  const articleIds = articles.map((article) => article.id)
 
-  for (const article of articles) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (client.from('articles') as any)
-      .update({ embedding_claimed_at: claimedAt })
-      .eq('id', article.id)
-  }
+  const claimStartedAt = Date.now()
+  await bulkClaimArticles(client, articleIds, claimedAt)
+  dbTimeMs += Date.now() - claimStartedAt
 
   for (let i = 0; i < articles.length; i += EMBED_BATCH_SIZE) {
     const batch = articles.slice(i, i + EMBED_BATCH_SIZE)
     const texts = batch.map(buildEmbeddingText)
 
     try {
+      const modelStartedAt = Date.now()
       const embeddings = await generateEmbeddingBatch(texts)
+      modelTimeMs += Date.now() - modelStartedAt
 
-      for (let j = 0; j < batch.length; j++) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error: updateError } = await (client.from('articles') as any)
-          .update({
-            embedding: embeddings[j].embedding as number[],
-            is_embedded: true,
-            embedding_claimed_at: null,
-          })
-          .eq('id', batch[j].id)
-
-        if (updateError) {
-          errors.push(`Update failed for ${batch[j].id}: ${updateError.message}`)
-          // Best-effort clear of the claim so failed items can be retried promptly.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (client.from('articles') as any)
-            .update({ embedding_claimed_at: null })
-            .eq('id', batch[j].id)
-        } else {
-          totalProcessed++
-        }
-      }
+      const writeStartedAt = Date.now()
+      const writeResult = await bulkWriteEmbeddings(client, batch, embeddings)
+      dbTimeMs += Date.now() - writeStartedAt
+      totalProcessed += writeResult.processed
+      errors.push(...writeResult.errors)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       errors.push(`Batch embedding failed: ${message}`)
-      for (const article of batch) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (client.from('articles') as any)
-          .update({ embedding_claimed_at: null })
-          .eq('id', article.id)
-      }
+      const clearStartedAt = Date.now()
+      await clearClaims(client, batch.map((article) => article.id))
+      dbTimeMs += Date.now() - clearStartedAt
     }
   }
 
-  return { totalProcessed, claimedArticles: articles.length, errors }
+  return { totalProcessed, claimedArticles: articles.length, errors, dbTimeMs, modelTimeMs }
 }

@@ -30,7 +30,7 @@ export interface ProcessPipelineOptions {
 
 export type ProcessStageSkipReason =
   | 'no_backlog'
-  | 'budget_reserved_for_downstream'
+  | 'budget_reserved_for_freshness'
   | 'time_budget_exhausted'
   | 'no_progress'
 
@@ -38,6 +38,15 @@ interface StageExecutionMeta {
   readonly passes: number
   readonly skipped: boolean
   readonly skipReason: ProcessStageSkipReason | null
+  readonly wallTimeMs: number
+  readonly dbTimeMs: number
+  readonly modelTimeMs: number
+  readonly processedPerMinute: number
+}
+
+export interface ProcessPipelineTelemetry {
+  readonly durationMs: number
+  readonly processedPerMinute: number
 }
 
 export interface ProcessPipelineSummary {
@@ -48,17 +57,24 @@ export interface ProcessPipelineSummary {
     readonly before: PipelineBacklog
     readonly after: PipelineBacklog
   }
+  readonly telemetry: ProcessPipelineTelemetry
 }
 
-interface MutableEmbeddingSummary {
+interface MutableStageSummary {
+  passes: number
+  firstSkipReason: ProcessStageSkipReason | null
+  wallTimeMs: number
+  dbTimeMs: number
+  modelTimeMs: number
+}
+
+interface MutableEmbeddingSummary extends MutableStageSummary {
   totalProcessed: number
   claimedArticles: number
   errors: string[]
-  passes: number
-  firstSkipReason: ProcessStageSkipReason | null
 }
 
-interface MutableClusteringSummary {
+interface MutableClusteringSummary extends MutableStageSummary {
   newStories: number
   updatedStories: number
   assignedArticles: number
@@ -66,18 +82,17 @@ interface MutableClusteringSummary {
   promotedSingletons: number
   expiredArticles: number
   errors: string[]
-  passes: number
-  firstSkipReason: ProcessStageSkipReason | null
 }
 
-interface MutableAssemblySummary {
+interface MutableAssemblySummary extends MutableStageSummary {
   storiesProcessed: number
   claimedStories: number
   autoPublished: number
   sentToReview: number
+  cheapModelTasks: number
+  cheapModelFallbacks: number
+  summaryFallbacks: number
   errors: string[]
-  passes: number
-  firstSkipReason: ProcessStageSkipReason | null
 }
 
 const DEFAULT_OPTIONS: Required<ProcessPipelineOptions> = {
@@ -90,7 +105,7 @@ const DEFAULT_OPTIONS: Required<ProcessPipelineOptions> = {
   timeBudgetMs: process.env.PIPELINE_PROCESS_TIME_BUDGET_MS
     ? Number(process.env.PIPELINE_PROCESS_TIME_BUDGET_MS)
     : Infinity,
-  clusterReserveMs: Number(process.env.PIPELINE_PROCESS_CLUSTER_RESERVE_MS ?? 25_000),
+  clusterReserveMs: Number(process.env.PIPELINE_PROCESS_CLUSTER_RESERVE_MS ?? 0),
   assembleReserveMs: Number(process.env.PIPELINE_PROCESS_ASSEMBLE_RESERVE_MS ?? 15_000),
 }
 
@@ -102,38 +117,49 @@ function getRemainingBudgetMs(startMs: number, now: () => number, timeBudgetMs: 
   return timeBudgetMs - (now() - startMs)
 }
 
-function getEmbedReserveMs(backlog: PipelineBacklog, options: Required<ProcessPipelineOptions>): number {
-  let reserveMs = 0
-  if (backlog.unclusteredArticles > 0) {
-    reserveMs += options.clusterReserveMs
-  }
-  if (backlog.pendingAssemblyStories > 0) {
-    reserveMs += options.assembleReserveMs
-  }
-  return reserveMs
+function freshnessBacklogExists(backlog: PipelineBacklog): boolean {
+  return backlog.unembeddedArticles > 0 || backlog.unclusteredArticles > 0
 }
 
-function markInitialSkipReason<T extends { passes: number; firstSkipReason: ProcessStageSkipReason | null }>(
-  summary: T,
-  reason: ProcessStageSkipReason
-) {
+function markInitialSkipReason(summary: MutableStageSummary, reason: ProcessStageSkipReason) {
   if (summary.passes === 0 && summary.firstSkipReason === null) {
     summary.firstSkipReason = reason
   }
 }
 
-function clusterMadeProgress(result: ClusterResult): boolean {
-  return result.assignedArticles > 0
+function perMinute(total: number, wallTimeMs: number): number {
+  if (total <= 0 || wallTimeMs <= 0) {
+    return 0
+  }
+
+  return Number(((total / wallTimeMs) * 60_000).toFixed(2))
 }
 
-function finalizeStageMeta<T extends { passes: number; firstSkipReason: ProcessStageSkipReason | null }>(
-  summary: T
-): StageExecutionMeta {
+function finalizeStageMeta(summary: MutableStageSummary, processedCount: number): StageExecutionMeta {
   return {
     passes: summary.passes,
     skipped: summary.passes === 0,
     skipReason: summary.passes === 0 ? summary.firstSkipReason : null,
+    wallTimeMs: summary.wallTimeMs,
+    dbTimeMs: summary.dbTimeMs,
+    modelTimeMs: summary.modelTimeMs,
+    processedPerMinute: perMinute(processedCount, summary.wallTimeMs),
   }
+}
+
+async function runMeasuredStep<T extends { dbTimeMs?: number; modelTimeMs?: number }>(
+  runStep: <R>(step: string, fn: () => Promise<R>) => Promise<R>,
+  now: () => number,
+  summary: MutableStageSummary,
+  step: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const startedAt = now()
+  const result = await runStep(step, fn)
+  summary.wallTimeMs += Math.max(0, now() - startedAt)
+  summary.dbTimeMs += result.dbTimeMs ?? 0
+  summary.modelTimeMs += result.modelTimeMs ?? 0
+  return result
 }
 
 export async function runProcessPipeline(
@@ -158,8 +184,10 @@ export async function runProcessPipeline(
     errors: [],
     passes: 0,
     firstSkipReason: null,
+    wallTimeMs: 0,
+    dbTimeMs: 0,
+    modelTimeMs: 0,
   }
-
   const clustering: MutableClusteringSummary = {
     newStories: 0,
     updatedStories: 0,
@@ -170,16 +198,24 @@ export async function runProcessPipeline(
     errors: [],
     passes: 0,
     firstSkipReason: null,
+    wallTimeMs: 0,
+    dbTimeMs: 0,
+    modelTimeMs: 0,
   }
-
   const assembly: MutableAssemblySummary = {
     storiesProcessed: 0,
     claimedStories: 0,
     autoPublished: 0,
     sentToReview: 0,
+    cheapModelTasks: 0,
+    cheapModelFallbacks: 0,
+    summaryFallbacks: 0,
     errors: [],
     passes: 0,
     firstSkipReason: null,
+    wallTimeMs: 0,
+    dbTimeMs: 0,
+    modelTimeMs: 0,
   }
 
   let currentBacklog = backlogBefore
@@ -187,41 +223,46 @@ export async function runProcessPipeline(
   while (hasBudget(startMs, now, resolved.timeBudgetMs)) {
     let roundProgress = false
 
-    if (assembly.storiesProcessed < resolved.assembleTarget) {
+    if (embeddings.totalProcessed < resolved.embedTarget) {
       const remainingBudgetMs = getRemainingBudgetMs(startMs, now, resolved.timeBudgetMs)
-      if (currentBacklog.pendingAssemblyStories <= 0) {
-        markInitialSkipReason(assembly, 'no_backlog')
-      } else if (remainingBudgetMs <= resolved.assembleReserveMs) {
-        markInitialSkipReason(assembly, 'time_budget_exhausted')
+      if (currentBacklog.unembeddedArticles <= 0) {
+        markInitialSkipReason(embeddings, 'no_backlog')
+      } else if (remainingBudgetMs <= 0) {
+        markInitialSkipReason(embeddings, 'time_budget_exhausted')
       } else {
-        assembly.passes += 1
-        const result = await runStep(`assemble_pass_${assembly.passes}`, () =>
-          deps.assemble(Math.min(resolved.assembleBatchSize, resolved.assembleTarget - assembly.storiesProcessed))
+        embeddings.passes += 1
+        const result = await runMeasuredStep(
+          runStep,
+          now,
+          embeddings,
+          `embed_pass_${embeddings.passes}`,
+          () => deps.embed(Math.min(resolved.embedBatchSize, resolved.embedTarget - embeddings.totalProcessed))
         )
-        assembly.storiesProcessed += result.storiesProcessed
-        assembly.claimedStories += result.claimedStories
-        assembly.autoPublished += result.autoPublished
-        assembly.sentToReview += result.sentToReview
-        assembly.errors = [...assembly.errors, ...result.errors]
+        embeddings.totalProcessed += result.totalProcessed
+        embeddings.claimedArticles += result.claimedArticles
+        embeddings.errors = [...embeddings.errors, ...result.errors]
 
-        if (result.storiesProcessed > 0) {
+        if (result.totalProcessed > 0) {
           roundProgress = true
+          currentBacklog = await deps.countBacklog()
         }
       }
     }
 
     if (clustering.assignedArticles < resolved.clusterTarget) {
       const remainingBudgetMs = getRemainingBudgetMs(startMs, now, resolved.timeBudgetMs)
-      const requiredBudgetMs = resolved.clusterReserveMs +
-        (currentBacklog.pendingAssemblyStories > 0 ? resolved.assembleReserveMs : 0)
       if (currentBacklog.unclusteredArticles <= 0) {
         markInitialSkipReason(clustering, 'no_backlog')
-      } else if (remainingBudgetMs <= requiredBudgetMs) {
+      } else if (remainingBudgetMs <= 0) {
         markInitialSkipReason(clustering, 'time_budget_exhausted')
       } else {
         clustering.passes += 1
-        const result = await runStep(`cluster_pass_${clustering.passes}`, () =>
-          deps.cluster(Math.min(resolved.clusterBatchSize, resolved.clusterTarget - clustering.assignedArticles))
+        const result = await runMeasuredStep(
+          runStep,
+          now,
+          clustering,
+          `cluster_pass_${clustering.passes}`,
+          () => deps.cluster(Math.min(resolved.clusterBatchSize, resolved.clusterTarget - clustering.assignedArticles))
         )
         clustering.newStories += result.newStories
         clustering.updatedStories += result.updatedStories
@@ -231,58 +272,69 @@ export async function runProcessPipeline(
         clustering.expiredArticles += result.expiredArticles
         clustering.errors = [...clustering.errors, ...result.errors]
 
-        if (clusterMadeProgress(result)) {
+        if (result.assignedArticles > 0 || result.expiredArticles > 0) {
           roundProgress = true
           currentBacklog = await deps.countBacklog()
         }
       }
     }
 
-    if (embeddings.totalProcessed < resolved.embedTarget) {
+    if (assembly.storiesProcessed < resolved.assembleTarget) {
       const remainingBudgetMs = getRemainingBudgetMs(startMs, now, resolved.timeBudgetMs)
-      if (currentBacklog.unembeddedArticles <= 0) {
-        markInitialSkipReason(embeddings, 'no_backlog')
+      if (currentBacklog.pendingAssemblyStories <= 0) {
+        markInitialSkipReason(assembly, 'no_backlog')
       } else if (remainingBudgetMs <= 0) {
-        markInitialSkipReason(embeddings, 'time_budget_exhausted')
-      } else if (remainingBudgetMs <= getEmbedReserveMs(currentBacklog, resolved)) {
-        markInitialSkipReason(embeddings, 'budget_reserved_for_downstream')
+        markInitialSkipReason(assembly, 'time_budget_exhausted')
+      } else if (freshnessBacklogExists(currentBacklog) && remainingBudgetMs <= resolved.assembleReserveMs) {
+        markInitialSkipReason(assembly, 'budget_reserved_for_freshness')
       } else {
-        embeddings.passes += 1
-        const result = await runStep(`embed_pass_${embeddings.passes}`, () =>
-          deps.embed(Math.min(resolved.embedBatchSize, resolved.embedTarget - embeddings.totalProcessed))
+        assembly.passes += 1
+        const result = await runMeasuredStep(
+          runStep,
+          now,
+          assembly,
+          `assemble_pass_${assembly.passes}`,
+          () => deps.assemble(Math.min(resolved.assembleBatchSize, resolved.assembleTarget - assembly.storiesProcessed))
         )
-        embeddings.totalProcessed += result.totalProcessed
-        embeddings.claimedArticles += result.claimedArticles
-        embeddings.errors = [...embeddings.errors, ...result.errors]
+        assembly.storiesProcessed += result.storiesProcessed
+        assembly.claimedStories += result.claimedStories
+        assembly.autoPublished += result.autoPublished
+        assembly.sentToReview += result.sentToReview
+        assembly.cheapModelTasks += result.cheapModelTasks ?? 0
+        assembly.cheapModelFallbacks += result.cheapModelFallbacks ?? 0
+        assembly.summaryFallbacks += result.summaryFallbacks ?? 0
+        assembly.errors = [...assembly.errors, ...result.errors]
 
-        if (result.totalProcessed > 0) {
+        if (result.storiesProcessed > 0) {
           roundProgress = true
+          currentBacklog = await deps.countBacklog()
         }
       }
     }
 
     if (!roundProgress) {
       if (!hasBudget(startMs, now, resolved.timeBudgetMs)) {
-        markInitialSkipReason(assembly, 'time_budget_exhausted')
-        markInitialSkipReason(clustering, 'time_budget_exhausted')
         markInitialSkipReason(embeddings, 'time_budget_exhausted')
+        markInitialSkipReason(clustering, 'time_budget_exhausted')
+        markInitialSkipReason(assembly, 'time_budget_exhausted')
       } else {
-        markInitialSkipReason(assembly, 'no_progress')
-        markInitialSkipReason(clustering, 'no_progress')
         markInitialSkipReason(embeddings, 'no_progress')
+        markInitialSkipReason(clustering, 'no_progress')
+        markInitialSkipReason(assembly, 'no_progress')
       }
       break
     }
-
-    currentBacklog = await deps.countBacklog()
   }
+
+  const durationMs = Math.max(0, now() - startMs)
+  const totalProcessed = embeddings.totalProcessed + clustering.assignedArticles + assembly.storiesProcessed
 
   return {
     embeddings: {
       totalProcessed: embeddings.totalProcessed,
       claimedArticles: embeddings.claimedArticles,
       errors: embeddings.errors,
-      ...finalizeStageMeta(embeddings),
+      ...finalizeStageMeta(embeddings, embeddings.totalProcessed),
     },
     clustering: {
       newStories: clustering.newStories,
@@ -292,19 +344,26 @@ export async function runProcessPipeline(
       promotedSingletons: clustering.promotedSingletons,
       expiredArticles: clustering.expiredArticles,
       errors: clustering.errors,
-      ...finalizeStageMeta(clustering),
+      ...finalizeStageMeta(clustering, clustering.assignedArticles),
     },
     assembly: {
       storiesProcessed: assembly.storiesProcessed,
       claimedStories: assembly.claimedStories,
       autoPublished: assembly.autoPublished,
       sentToReview: assembly.sentToReview,
+      cheapModelTasks: assembly.cheapModelTasks,
+      cheapModelFallbacks: assembly.cheapModelFallbacks,
+      summaryFallbacks: assembly.summaryFallbacks,
       errors: assembly.errors,
-      ...finalizeStageMeta(assembly),
+      ...finalizeStageMeta(assembly, assembly.storiesProcessed),
     },
     backlog: {
       before: backlogBefore,
       after: currentBacklog,
+    },
+    telemetry: {
+      durationMs,
+      processedPerMinute: perMinute(totalProcessed, durationMs),
     },
   }
 }

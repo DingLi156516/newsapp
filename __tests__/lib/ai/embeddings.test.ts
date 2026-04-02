@@ -77,11 +77,11 @@ describe('embedUnembeddedArticles', () => {
 
     const result = await embedUnembeddedArticles(client as never, 10)
 
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       totalProcessed: 0,
       claimedArticles: 0,
       errors: [],
-    })
+    }))
   })
 
   it('skips freshly claimed articles but processes unclaimed and stale claims', async () => {
