@@ -179,8 +179,8 @@ export async function queryStories(
   // Strip nested story_tags from response when tag filter was used
   let filteredStories = (data ?? []).map((story: StoryRow & { story_tags?: unknown }) => {
     if (!hasTagFilter) return story
-    const { story_tags: _st, ...rest } = story
-    return rest
+    const { story_tags: _st, ...sanitizedStory } = story
+    return sanitizedStory
   })
 
   if (biasRange) {

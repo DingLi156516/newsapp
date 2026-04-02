@@ -1,5 +1,6 @@
 vi.mock('@/lib/ai/gemini-client', () => ({
   generateText: vi.fn(),
+  CHEAP_GENERATION_MODEL: 'models/gemini-2.5-flash-lite',
 }))
 
 describe('generateNeutralHeadline', () => {
@@ -14,7 +15,11 @@ describe('generateNeutralHeadline', () => {
     const { generateNeutralHeadline } = await import('@/lib/ai/headline-generator')
     const result = await generateNeutralHeadline(['AI bill passes House', 'Senate to vote on AI regulation'])
 
-    expect(result).toBe('Congress Debates New AI Regulation Bill')
+    expect(result).toEqual({
+      headline: 'Congress Debates New AI Regulation Bill',
+      usedCheapModel: true,
+      usedFallback: false,
+    })
     expect(generateText).toHaveBeenCalledOnce()
   })
 
@@ -25,7 +30,11 @@ describe('generateNeutralHeadline', () => {
     const { generateNeutralHeadline } = await import('@/lib/ai/headline-generator')
     const result = await generateNeutralHeadline(['AI regulation moves forward'])
 
-    expect(result).toBe('AI Regulation Advances in Congress')
+    expect(result).toEqual({
+      headline: 'AI Regulation Advances in Congress',
+      usedCheapModel: true,
+      usedFallback: false,
+    })
   })
 
   it('trims whitespace from response', async () => {
@@ -35,7 +44,11 @@ describe('generateNeutralHeadline', () => {
     const { generateNeutralHeadline } = await import('@/lib/ai/headline-generator')
     const result = await generateNeutralHeadline(['test title'])
 
-    expect(result).toBe('Some Headline')
+    expect(result).toEqual({
+      headline: 'Some Headline',
+      usedCheapModel: true,
+      usedFallback: false,
+    })
   })
 
   it('throws on empty article list', async () => {
@@ -53,6 +66,10 @@ describe('generateNeutralHeadline', () => {
       'Senate debates new AI rules',
     ])
 
-    expect(result).toBe('AI regulation moves forward in Congress')
+    expect(result).toEqual({
+      headline: 'AI regulation moves forward in Congress',
+      usedCheapModel: true,
+      usedFallback: true,
+    })
   })
 })

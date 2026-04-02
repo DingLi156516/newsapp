@@ -52,19 +52,20 @@ Article identity rules:
 - migration `011_articles_canonical_url_cutover.sql` removes the legacy raw-URL uniqueness constraint so ingest can rely on canonical identity without breaking older rows
 - migration `012_pipeline_backfill_hardening.sql` backfills `title_fingerprint` and clears stale/non-terminal claim timestamps on existing rows
 
-**Process** (`/api/cron/process`): Orchestrates three bounded stages and returns backlog counts before and after the run:
-1. **Assemble** — claims a limited batch of pending stories and generates headline, summary, spectrum, topic, region, blindspot flag, and entity tags
+**Process** (`/api/cron/process`): Orchestrates three bounded stages in freshness-first order and returns backlog counts before and after the run:
+1. **Embed** — claims a limited batch of unembedded articles and generates Gemini vector embeddings
 2. **Cluster** — claims a limited batch of embedded, unassigned articles and groups them into story clusters by cosine similarity
-3. **Embed** — claims a limited batch of unembedded articles and generates Gemini vector embeddings
+3. **Assemble** — claims a limited batch of pending stories and generates headline, summary, spectrum, topic, region, blindspot flag, and entity tags
 
-The process runner is backlog-aware, multi-pass, and downstream-first:
+The process runner is backlog-aware, multi-pass, and freshness-first:
 - embed target per invocation defaults to `1500` articles
 - cluster target per invocation defaults to `1500` articles
 - assemble target per invocation defaults to `100` stories
-- default batch sizes are intentionally biased toward downstream completion: embed `50`, cluster `75`, assemble `25`
-- each invocation works in rounds, refreshing backlog between rounds so newly clustered stories can be assembled before more embedding work is started
-- embed work is skipped when the remaining budget is reserved for downstream cluster/assembly work
-- stage summaries now include `passes`, `skipped`, and `skipReason` so operators can tell whether a stage had no backlog, no progress, or was held back to protect downstream work
+- default batch sizes: embed `50`, cluster `75`, assemble `25`
+- each invocation works in rounds, refreshing backlog between rounds so newly embedded articles can be clustered before more work starts
+- embed reserves time budget for downstream cluster/assembly stages so they are not starved
+- assembly is deferred when a freshness backlog exists **and** the remaining time budget is too small to run both freshness stages and assembly; with `Infinity` budget (admin trigger / local), assembly always runs alongside freshness stages
+- stage summaries include `passes`, `skipped`, and `skipReason` so operators can tell whether a stage had no backlog, no progress, or was held back to protect freshness work
 - env overrides: `PIPELINE_PROCESS_EMBED_TARGET`, `PIPELINE_PROCESS_CLUSTER_TARGET`, `PIPELINE_PROCESS_ASSEMBLE_TARGET`, `PIPELINE_PROCESS_EMBED_BATCH_SIZE`, `PIPELINE_PROCESS_CLUSTER_BATCH_SIZE`, `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`, `PIPELINE_PROCESS_TIME_BUDGET_MS`, `PIPELINE_PROCESS_CLUSTER_RESERVE_MS`, `PIPELINE_PROCESS_ASSEMBLE_RESERVE_MS`
 
 Current observability is split across two surfaces:

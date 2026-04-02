@@ -1,5 +1,6 @@
 vi.mock('@/lib/ai/gemini-client', () => ({
   generateText: vi.fn(),
+  SUMMARY_GENERATION_MODEL: 'models/gemini-2.5-flash',
 }))
 
 describe('generateAISummary', () => {
@@ -34,7 +35,10 @@ describe('generateAISummary', () => {
     expect(result.commonGround).toBe('• Both sides agree on X')
     expect(result.leftFraming).toBe('• Left sees Y')
     expect(result.rightFraming).toBe('• Right sees Z')
-    expect(generateText).toHaveBeenCalledWith(expect.any(String), { jsonMode: true, task: 'summary' })
+    expect(generateText).toHaveBeenCalledWith(expect.any(String), {
+      jsonMode: true,
+      model: 'models/gemini-2.5-flash',
+    })
   })
 
   it('returns fallback on invalid JSON response', async () => {
@@ -49,7 +53,7 @@ describe('generateAISummary', () => {
     expect(result.commonGround).toBe('AI summary generation failed. Manual review needed.')
   })
 
-  it('uses the summary task route when retrying with fewer articles', async () => {
+  it('uses the summary model when retrying with fewer articles', async () => {
     const { generateText } = await import('@/lib/ai/gemini-client')
     vi.mocked(generateText)
       .mockResolvedValueOnce({ text: '' })
@@ -67,7 +71,13 @@ describe('generateAISummary', () => {
       { title: 'Two', description: 'Desc', bias: 'right' },
     ])
 
-    expect(generateText).toHaveBeenNthCalledWith(1, expect.any(String), { jsonMode: true, task: 'summary' })
-    expect(generateText).toHaveBeenNthCalledWith(2, expect.any(String), { jsonMode: true, task: 'summary' })
+    expect(generateText).toHaveBeenNthCalledWith(1, expect.any(String), {
+      jsonMode: true,
+      model: 'models/gemini-2.5-flash',
+    })
+    expect(generateText).toHaveBeenNthCalledWith(2, expect.any(String), {
+      jsonMode: true,
+      model: 'models/gemini-2.5-flash',
+    })
   })
 })

@@ -1,5 +1,6 @@
 vi.mock('@/lib/ai/gemini-client', () => ({
   generateText: vi.fn(),
+  CHEAP_GENERATION_MODEL: 'models/gemini-2.5-flash-lite',
 }))
 
 describe('classifyTopic', () => {
@@ -14,7 +15,11 @@ describe('classifyTopic', () => {
     const { classifyTopic } = await import('@/lib/ai/topic-classifier')
     const result = await classifyTopic(['AI regulation advances in Congress'])
 
-    expect(result).toBe('technology')
+    expect(result).toEqual({
+      topic: 'technology',
+      usedCheapModel: true,
+      usedFallback: false,
+    })
   })
 
   it('falls back to politics for invalid topic', async () => {
@@ -24,14 +29,22 @@ describe('classifyTopic', () => {
     const { classifyTopic } = await import('@/lib/ai/topic-classifier')
     const result = await classifyTopic(['Some article'])
 
-    expect(result).toBe('politics')
+    expect(result).toEqual({
+      topic: 'politics',
+      usedCheapModel: true,
+      usedFallback: true,
+    })
   })
 
   it('returns politics for empty input', async () => {
     const { classifyTopic } = await import('@/lib/ai/topic-classifier')
     const result = await classifyTopic([])
 
-    expect(result).toBe('politics')
+    expect(result).toEqual({
+      topic: 'politics',
+      usedCheapModel: false,
+      usedFallback: true,
+    })
   })
 
   it('trims whitespace from response', async () => {
@@ -41,7 +54,11 @@ describe('classifyTopic', () => {
     const { classifyTopic } = await import('@/lib/ai/topic-classifier')
     const result = await classifyTopic(['mRNA vaccine trial results'])
 
-    expect(result).toBe('health')
+    expect(result).toEqual({
+      topic: 'health',
+      usedCheapModel: true,
+      usedFallback: false,
+    })
   })
 
   it('falls back to keyword heuristics when generation fails', async () => {
@@ -51,6 +68,10 @@ describe('classifyTopic', () => {
     const { classifyTopic } = await import('@/lib/ai/topic-classifier')
     const result = await classifyTopic(['AI regulation advances in Congress'])
 
-    expect(result).toBe('technology')
+    expect(result).toEqual({
+      topic: 'technology',
+      usedCheapModel: true,
+      usedFallback: true,
+    })
   })
 })

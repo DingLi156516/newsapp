@@ -256,6 +256,8 @@ describe('POST /api/admin/pipeline/trigger', () => {
       skipped: expect.any(Boolean),
     }))
     expect(body.data.assembly).toHaveProperty('skipReason')
+    // With Infinity budget (default for admin triggers), assembly runs alongside freshness
+    expect(body.data.assembly.skipped).toBe(false)
     expect(body.data.assembly.autoPublished).toBe(1)
     expect(body.data.assembly.sentToReview).toBe(1)
 
@@ -292,7 +294,9 @@ describe('POST /api/admin/pipeline/trigger', () => {
     expect(ingestFeeds).toHaveBeenCalled()
     expect(embedUnembeddedArticles).toHaveBeenCalled()
     expect(clusterArticles).toHaveBeenCalled()
+    // With Infinity budget, assembly runs alongside freshness stages
     expect(assembleStories).toHaveBeenCalled()
+    expect(body.data.assembly.skipped).toBe(false)
   })
 
   it('returns 500 on pipeline error', async () => {

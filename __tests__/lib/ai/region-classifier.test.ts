@@ -1,5 +1,6 @@
 vi.mock('@/lib/ai/gemini-client', () => ({
   generateText: vi.fn(),
+  CHEAP_GENERATION_MODEL: 'models/gemini-2.5-flash-lite',
 }))
 
 describe('classifyRegion', () => {
@@ -14,7 +15,11 @@ describe('classifyRegion', () => {
     const { classifyRegion } = await import('@/lib/ai/region-classifier')
     const result = await classifyRegion(['UK Parliament passes new climate bill'])
 
-    expect(result).toBe('uk')
+    expect(result).toEqual({
+      region: 'uk',
+      usedCheapModel: true,
+      usedFallback: false,
+    })
   })
 
   it('falls back to us for invalid region', async () => {
@@ -24,14 +29,22 @@ describe('classifyRegion', () => {
     const { classifyRegion } = await import('@/lib/ai/region-classifier')
     const result = await classifyRegion(['Some article'])
 
-    expect(result).toBe('us')
+    expect(result).toEqual({
+      region: 'us',
+      usedCheapModel: true,
+      usedFallback: true,
+    })
   })
 
   it('returns us for empty input', async () => {
     const { classifyRegion } = await import('@/lib/ai/region-classifier')
     const result = await classifyRegion([])
 
-    expect(result).toBe('us')
+    expect(result).toEqual({
+      region: 'us',
+      usedCheapModel: false,
+      usedFallback: true,
+    })
   })
 
   it('trims whitespace from response', async () => {
@@ -41,7 +54,11 @@ describe('classifyRegion', () => {
     const { classifyRegion } = await import('@/lib/ai/region-classifier')
     const result = await classifyRegion(['EU summit on migration policy'])
 
-    expect(result).toBe('europe')
+    expect(result).toEqual({
+      region: 'europe',
+      usedCheapModel: true,
+      usedFallback: false,
+    })
   })
 
   it('handles canada response', async () => {
@@ -51,7 +68,11 @@ describe('classifyRegion', () => {
     const { classifyRegion } = await import('@/lib/ai/region-classifier')
     const result = await classifyRegion(['Canadian PM announces new policy'])
 
-    expect(result).toBe('canada')
+    expect(result).toEqual({
+      region: 'canada',
+      usedCheapModel: true,
+      usedFallback: false,
+    })
   })
 
   it('handles international response', async () => {
@@ -61,7 +82,11 @@ describe('classifyRegion', () => {
     const { classifyRegion } = await import('@/lib/ai/region-classifier')
     const result = await classifyRegion(['G20 leaders meet in global summit'])
 
-    expect(result).toBe('international')
+    expect(result).toEqual({
+      region: 'international',
+      usedCheapModel: true,
+      usedFallback: false,
+    })
   })
 
   it('falls back to keyword heuristics when generation fails', async () => {
@@ -71,6 +96,10 @@ describe('classifyRegion', () => {
     const { classifyRegion } = await import('@/lib/ai/region-classifier')
     const result = await classifyRegion(['UK Parliament passes new climate bill'])
 
-    expect(result).toBe('uk')
+    expect(result).toEqual({
+      region: 'uk',
+      usedCheapModel: true,
+      usedFallback: true,
+    })
   })
 })

@@ -13,7 +13,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    exclude: ['node_modules', 'e2e', '.worktrees/**', 'worktrees/**', 'apps/**'],
+    exclude: ['node_modules', 'e2e', '.omx/**', '.worktrees/**', 'worktrees/**', 'apps/**'],
     coverage: {
       provider: 'v8',
       include: ['components/**', 'lib/**'],

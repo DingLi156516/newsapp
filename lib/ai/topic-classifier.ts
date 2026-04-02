@@ -6,12 +6,18 @@
  */
 
 import type { Topic } from '@/lib/types'
-import { generateText } from '@/lib/ai/gemini-client'
+import { CHEAP_GENERATION_MODEL, generateText } from '@/lib/ai/gemini-client'
 
 const VALID_TOPICS: readonly Topic[] = [
   'politics', 'world', 'technology', 'business',
   'science', 'health', 'culture', 'sports', 'environment',
 ]
+
+export interface TopicClassificationResult {
+  readonly topic: Topic
+  readonly usedCheapModel: boolean
+  readonly usedFallback: boolean
+}
 
 const TOPIC_KEYWORDS: ReadonlyArray<readonly [Topic, readonly string[]]> = [
   ['technology', ['ai', 'artificial intelligence', 'technology', 'tech', 'software', 'chip', 'cyber', 'startup']],
@@ -50,9 +56,9 @@ function fallbackTopic(articleTitles: readonly string[]): Topic {
 
 export async function classifyTopic(
   articleTitles: readonly string[]
-): Promise<Topic> {
+): Promise<TopicClassificationResult> {
   if (articleTitles.length === 0) {
-    return fallbackTopic(articleTitles)
+    return { topic: 'politics', usedCheapModel: false, usedFallback: true }
   }
 
   const titlesBlock = articleTitles.join('\n')
@@ -67,15 +73,19 @@ Valid categories: ${VALID_TOPICS.join(', ')}
 Return ONLY the category name, nothing else.`
 
   try {
-    const response = await generateText(prompt, { task: 'topic' })
+    const response = await generateText(prompt, { model: CHEAP_GENERATION_MODEL })
     const topic = response.text.trim().toLowerCase() as Topic
 
     if (VALID_TOPICS.includes(topic)) {
-      return topic
+      return { topic, usedCheapModel: true, usedFallback: false }
     }
   } catch {
-    return fallbackTopic(articleTitles)
+    // fall through to deterministic fallback
   }
 
-  return fallbackTopic(articleTitles)
+  return {
+    topic: fallbackTopic(articleTitles),
+    usedCheapModel: true,
+    usedFallback: true,
+  }
 }

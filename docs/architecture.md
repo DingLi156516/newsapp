@@ -26,9 +26,9 @@ Axiom has two halves:
 ┌──────────────────┐     ┌──────────────────┐     ┌─────────────┐
 │  INGEST (15 min) │────▶│  PROCESS (15 min)│────▶│  Supabase   │
 │                  │     │                  │     │  Database   │
-│  Fetch RSS feeds │     │  1. Assemble (AI)│     │             │
+│  Fetch RSS feeds │     │  1. Embed (AI)   │     │             │
 │  Remove dupes    │     │  2. Cluster      │     │  sources    │
-│  Save articles   │     │  3. Embed (AI)   │     │  articles   │
+│  Save articles   │     │  3. Assemble (AI)│     │  articles   │
 └──────────────────┘     └──────────────────┘     │  stories    │
                                                    └──────┬──────┘
                                                           │
@@ -66,7 +66,7 @@ Individual feed failures are caught and reported — if Fox News is down, NPR st
 
 **Endpoint:** `GET /api/cron/process`
 
-This runs three sub-stages in fair, downstream-first rounds:
+This runs three sub-stages in fair, freshness-first rounds:
 
 #### 2a. Assembly (`lib/ai/story-assembler.ts`)
 
@@ -86,7 +86,7 @@ The headline prompt explicitly tells Gemini: *"avoid loaded language or bias fra
 
 The summary prompt labels each article's source bias (e.g., `[LEFT] CNN: ...`, `[RIGHT] Fox News: ...`) so Gemini can distinguish perspectives.
 
-Entity tags are attempted before the publication decision is applied, but tagging failures are swallowed so they never block publication or retries. After assembly, a pure publication-decision layer scores the story and either auto-publishes it or routes it to manual review. Sparse clusters (fewer than 2 articles or sources) go to review. Stories that fail assembly move to `assembly_status = 'failed'` and stay out of the public feed until reprocessed. Story claiming is batched, but the outer assembly loop is still sequential today.
+Entity tags are attempted before the publication decision is applied, but tagging failures are swallowed so they never block publication or retries. After assembly, a pure publication-decision layer scores the story and either auto-publishes it or routes it to manual review. Sparse clusters (fewer than 2 articles or sources) go to review. Stories that fail assembly move to `assembly_status = 'failed'` and stay out of the public feed until reprocessed. Story claiming is batched. Story assembly runs with bounded concurrency (default 3, env: PIPELINE_ASSEMBLY_CONCURRENCY).
 `assembly_claimed_at` acts as the in-flight lease for this stage; claims older than 60 minutes are treated as stale and can be reclaimed.
 
 #### 2b. Clustering (`lib/ai/clustering.ts`)
@@ -231,12 +231,13 @@ lib/rss/         — Ingestion pipeline (5 files)
   dedup.ts          — Detects duplicate articles by canonical URL plus legacy raw URL compatibility checks
   ingest.ts         — Orchestrates fetch → parse → dedup → insert pipeline
 
-lib/pipeline/    — Pipeline orchestration helpers (5 files)
+lib/pipeline/    — Pipeline orchestration helpers (6 files)
   backlog.ts         — Counts unembedded, unclustered, pending-assembly, and review backlog
   claim-utils.ts     — Shared stale-claim helpers for article/story leases
   logger.ts          — Persists pipeline_runs and pipeline_steps entries
-  process-runner.ts  — Round-based process orchestration with downstream budget reservation and skip diagnostics
+  process-runner.ts  — Round-based process orchestration with freshness-first budget reservation and skip diagnostics
   story-state.ts     — Publication decision logic and legacy-state backfill helpers
+  telemetry-utils.ts — Shared telemetry helpers (toPerMinute rate calculation)
 
 lib/story-intelligence.ts — Pure story-detail analysis helpers; derives coverage rollups, momentum, gap summaries, framing-delta copy, methodology text, and ownership mix from existing frontend data
 lib/source-profiles.ts — Pure source-profile helpers; builds topic mix, blindspot counts, and sample-data fallbacks for source detail pages

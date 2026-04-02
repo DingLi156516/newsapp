@@ -13,17 +13,9 @@ import {
 function createMockClient(
   articleRows: Record<string, unknown>[] = [],
   storyRows: Record<string, unknown>[] = [],
-  options: { failSingletonUpdate?: boolean } = {},
+  options: { failSingletonUpdate?: boolean; failInitialClaimIds?: string[] } = {},
 ) {
   const articleUpdateCalls: { payload: Record<string, unknown>; id: string }[] = []
-
-  // Article update chain: .update(payload).eq('id', val)
-  const articleUpdate = vi.fn().mockImplementation((payload: Record<string, unknown>) => ({
-    eq: vi.fn().mockImplementation((_col: string, id: string) => {
-      articleUpdateCalls.push({ payload, id })
-      return Promise.resolve({ error: null })
-    }),
-  }))
 
   // Article select chain for fetching unassigned articles
   // Chain: .select().eq('is_embedded').is('story_id').eq('clustering_status').order().order().limit().returns()
@@ -71,6 +63,19 @@ function createMockClient(
           select: articleSelect,
           update: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
             return {
+              in: vi.fn().mockImplementation((_col: string, ids: string[]) => {
+                if (payload.clustering_claimed_at) {
+                  const shouldFail = ids.some((id) => options.failInitialClaimIds?.includes(id))
+                  if (shouldFail) {
+                    return Promise.resolve({ error: { message: 'Simulated initial claim failure' } })
+                  }
+                }
+                if (options.failSingletonUpdate && payload.clustering_status === 'clustered') {
+                  return Promise.resolve({ error: { message: 'Simulated update failure' } })
+                }
+                ids.forEach((id) => articleUpdateCalls.push({ payload, id }))
+                return Promise.resolve({ error: null })
+              }),
               eq: vi.fn().mockImplementation((_col: string, id: string) => {
                 articleUpdateCalls.push({ payload, id })
                 if (options.failSingletonUpdate && payload.clustering_status === 'clustered') {
@@ -315,5 +320,33 @@ describe('clusterArticles', () => {
 
     // Should have deleted the orphan story
     expect(client._storyDeleteCalls).toEqual(['story-1'])
+  })
+
+  it('does not process articles whose initial claim update failed', async () => {
+    const client = createMockClient(
+      [
+        {
+          ...TWO_SIMILAR_ARTICLES[0],
+          id: 'failed-claim',
+        },
+        {
+          ...TWO_SIMILAR_ARTICLES[1],
+          id: 'claimed-ok',
+          clustering_claimed_at: null,
+        },
+      ],
+      [],
+      { failInitialClaimIds: ['failed-claim'] },
+    )
+
+    const result = await clusterArticles(client as never)
+
+    expect(result.assignedArticles).toBe(0)
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('claim'),
+      ]),
+    )
+    expect(client._articleUpdateCalls.some((call) => call.id === 'failed-claim' && call.payload.story_id)).toBe(false)
   })
 })

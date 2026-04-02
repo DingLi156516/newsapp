@@ -38,6 +38,7 @@ __tests__/
       backlog.test.ts
       logger.test.ts
       process-runner.test.ts
+      process-runner-freshness.test.ts
       story-state.test.ts
     hooks/
       fetcher.test.ts
@@ -80,11 +81,13 @@ __tests__/
     rss/
       parser.test.ts  parser-errors.test.ts  dedup.test.ts  ingest.test.ts  feed-registry.test.ts  normalization.test.ts
     ai/
-      gemini-client.test.ts  clustering.test.ts  clustering-stage.test.ts
+      gemini-client.test.ts  gemini-client-model-routing.test.ts
+      clustering.test.ts  clustering-stage.test.ts
       embeddings.test.ts
       spectrum-calculator.test.ts  topic-classifier.test.ts
       headline-generator.test.ts  summary-generator.test.ts
       blindspot-detector.test.ts  region-classifier.test.ts
+      story-assembler.test.ts  story-assembler-concurrency.test.ts
     email/
       send-digest.test.ts
     offline/
@@ -107,6 +110,7 @@ __tests__/
       admin/review-stats-route.test.ts
       admin/pipeline/route.test.ts
       admin/pipeline/sources/route.test.ts
+      admin/pipeline/stats/route.test.ts
       admin/pipeline/trigger/route.test.ts
   components/
     atoms/   (10 test files — includes Skeleton.test.tsx, ReviewStatusBadge.test.tsx, OfflineIndicator.test.tsx, ShareButton.test.tsx, Toast.test.tsx)
@@ -123,7 +127,7 @@ __tests__/
 
 `ViewSwitcher.test.tsx` verifies the pill tabs render, aria-selected state, onChange callbacks, and data-testids. `SourcesView.test.tsx` covers filter sections, source card rendering, search input, and multi-select filtering. `e2e/public/home-feed.spec.ts` checks the ViewSwitcher is visible and that clicking Sources switches the view inline (URL → `/?view=sources`, feed tabs hidden). `e2e/public/view-switcher.spec.ts` covers direct URL navigation to `/?view=sources`, `/sources` redirect, browser back button, and feed/sources content toggling.
 
-`tag-upsert.test.ts` covers entity tag upserting including UUID quoting, deduplication, and error handling. `story-state.test.ts` covers the conservative publication-decision rules and legacy-state backfill mapping. `embeddings.test.ts`, `clustering-stage.test.ts`, `process-runner.test.ts`, and `backlog.test.ts` cover bounded stage claiming, stale-claim recovery, downstream-first process orchestration, skip-reason reporting, and backlog reporting for the pipeline. `PipelineRunHistory.test.tsx` verifies that the admin dashboard shows backlog deltas plus per-stage skip/pass diagnostics for process runs.
+`tag-upsert.test.ts` covers entity tag upserting including UUID quoting, deduplication, and error handling. `story-state.test.ts` covers the conservative publication-decision rules and legacy-state backfill mapping. `embeddings.test.ts`, `clustering-stage.test.ts`, `process-runner.test.ts`, and `backlog.test.ts` cover bounded stage claiming, stale-claim recovery, freshness-first process orchestration, skip-reason reporting, and backlog reporting for the pipeline. `PipelineRunHistory.test.tsx` verifies that the admin dashboard shows backlog deltas plus per-stage skip/pass diagnostics for process runs.
 
 ## Coverage Target
 

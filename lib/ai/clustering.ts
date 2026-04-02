@@ -73,6 +73,7 @@ export interface ClusterResult {
   readonly promotedSingletons: number
   readonly expiredArticles: number
   readonly errors: readonly string[]
+  readonly dbTimeMs?: number
 }
 
 function parseVector(v: string | number[]): number[] {
@@ -131,6 +132,47 @@ async function clearClusteringClaim(client: SupabaseClient<Database>, articleId:
     .eq('id', articleId)
 }
 
+async function bulkUpdateArticles(
+  client: SupabaseClient<Database>,
+  articleIds: readonly string[],
+  payload: Record<string, unknown>
+): Promise<{ failedIds: string[]; message?: string }> {
+  if (articleIds.length === 0) {
+    return { failedIds: [] }
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const query = (client.from('articles') as any).update(payload)
+    if (typeof query.in === 'function') {
+      const { error } = await query.in('id', articleIds)
+      if (!error) {
+        return { failedIds: [] }
+      }
+      return { failedIds: [...articleIds], message: error.message }
+    }
+  } catch (error) {
+    return {
+      failedIds: [...articleIds],
+      message: error instanceof Error ? error.message : String(error),
+    }
+  }
+
+  const failedIds: string[] = []
+  let firstMessage: string | undefined
+
+  for (const articleId of articleIds) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (client.from('articles') as any).update(payload).eq('id', articleId)
+    if (error) {
+      failedIds.push(articleId)
+      firstMessage ??= error.message
+    }
+  }
+
+  return { failedIds, message: firstMessage }
+}
+
 async function queueStoryForReassembly(
   client: SupabaseClient<Database>,
   storyId: string,
@@ -183,6 +225,7 @@ export async function clusterArticles(
       promotedSingletons: 0,
       expiredArticles: 0,
       errors: [],
+      dbTimeMs: 0,
     }
   }
 
@@ -204,15 +247,45 @@ export async function clusterArticles(
       promotedSingletons: 0,
       expiredArticles: 0,
       errors: [],
+      dbTimeMs: 0,
     }
   }
 
   const claimedAt = now.toISOString()
-  for (const article of unassigned) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (client.from('articles') as any)
-      .update({ clustering_claimed_at: claimedAt })
-      .eq('id', article.id)
+  let dbTimeMs = 0
+  const claimStartedAt = Date.now()
+  const { failedIds: initialClaimFailedIds, message: initialClaimMessage } = await bulkUpdateArticles(
+    client,
+    unassigned.map((article) => article.id),
+    { clustering_claimed_at: claimedAt }
+  )
+  dbTimeMs += Date.now() - claimStartedAt
+
+  const claimableArticles = initialClaimFailedIds.length > 0
+    ? (() => {
+        const failedClaimIdSet = new Set(initialClaimFailedIds)
+        return unassigned.filter((article) => !failedClaimIdSet.has(article.id))
+      })()
+    : unassigned
+
+  const errors: string[] = []
+  if (initialClaimFailedIds.length > 0) {
+    errors.push(
+      `Failed to claim ${initialClaimFailedIds.length} articles for clustering: ${initialClaimMessage ?? 'unknown error'}`
+    )
+  }
+
+  if (claimableArticles.length === 0) {
+    return {
+      newStories: 0,
+      updatedStories: 0,
+      assignedArticles: 0,
+      unmatchedSingletons: 0,
+      promotedSingletons: 0,
+      expiredArticles: 0,
+      errors,
+      dbTimeMs,
+    }
   }
 
   const { data: existingStoryRows, error: storyError } = await client
@@ -226,7 +299,6 @@ export async function clusterArticles(
     throw new Error(`Failed to fetch existing stories: ${storyError.message}`)
   }
 
-  const errors: string[] = []
   let newStories = 0
   let assignedArticles = 0
   let unmatchedSingletons = 0
@@ -252,7 +324,7 @@ export async function clusterArticles(
 
   const newClusters: ClusterCandidate[] = []
 
-  for (const article of unassigned) {
+  for (const article of claimableArticles) {
     let bestStoryId: string | null = null
     let bestSimilarity = 0
 
@@ -268,13 +340,16 @@ export async function clusterArticles(
       const tracker = storyMap.get(bestStoryId)
       tracker?.articleIds.push(article.id)
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (client.from('articles') as any)
-        .update({ story_id: bestStoryId, clustering_claimed_at: null, clustering_status: 'clustered' })
-        .eq('id', article.id)
+      const assignStartedAt = Date.now()
+      const { failedIds, message } = await bulkUpdateArticles(client, [article.id], {
+        story_id: bestStoryId,
+        clustering_claimed_at: null,
+        clustering_status: 'clustered',
+      })
+      dbTimeMs += Date.now() - assignStartedAt
 
-      if (error) {
-        errors.push(`Failed to assign article ${article.id}: ${error.message}`)
+      if (failedIds.length > 0) {
+        errors.push(`Failed to assign article ${article.id}: ${message ?? 'unknown error'}`)
         await clearClusteringClaim(client, article.id)
       } else {
         assignedArticles++
@@ -311,7 +386,7 @@ export async function clusterArticles(
 
   for (const cluster of newClusters) {
     if (cluster.articleIds.length < 2) {
-      const article = unassigned.find(a => a.id === cluster.articleIds[0])!
+      const article = claimableArticles.find(a => a.id === cluster.articleIds[0])!
       const newAttempts = (article.clustering_attempts ?? 0) + 1
 
       if (newAttempts >= MAX_CLUSTERING_ATTEMPTS) {
@@ -335,18 +410,17 @@ export async function clusterArticles(
           .select('id').single()
 
         if (!insertError && singletonStoryData) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { error: updateError } = await (client.from('articles') as any)
-            .update({
-              story_id: singletonStoryData.id,
-              clustering_claimed_at: null,
-              clustering_attempts: newAttempts,
-              clustering_status: 'clustered',
-            })
-            .eq('id', article.id)
+          const singletonAssignStartedAt = Date.now()
+          const { failedIds, message } = await bulkUpdateArticles(client, [article.id], {
+            story_id: singletonStoryData.id,
+            clustering_claimed_at: null,
+            clustering_attempts: newAttempts,
+            clustering_status: 'clustered',
+          })
+          dbTimeMs += Date.now() - singletonAssignStartedAt
 
-          if (updateError) {
-            errors.push(`Failed to assign promoted singleton ${article.id}: ${updateError.message}`)
+          if (failedIds.length > 0) {
+            errors.push(`Failed to assign promoted singleton ${article.id}: ${message ?? 'unknown error'}`)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (client.from('stories') as any).delete().eq('id', singletonStoryData.id)
             await clearClusteringClaim(client, article.id)
@@ -384,18 +458,22 @@ export async function clusterArticles(
     }
 
     if (duplicateStoryId) {
-      for (const articleId of cluster.articleIds) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error } = await (client.from('articles') as any)
-          .update({ story_id: duplicateStoryId, clustering_claimed_at: null, clustering_status: 'clustered' })
-          .eq('id', articleId)
+      const duplicateAssignStartedAt = Date.now()
+      const { failedIds, message } = await bulkUpdateArticles(client, cluster.articleIds, {
+        story_id: duplicateStoryId,
+        clustering_claimed_at: null,
+        clustering_status: 'clustered',
+      })
+      dbTimeMs += Date.now() - duplicateAssignStartedAt
 
-        if (error) {
-          errors.push(`Failed to assign article ${articleId} to existing story: ${error.message}`)
+      if (failedIds.length > 0) {
+        for (const articleId of failedIds) {
+          errors.push(`Failed to assign article ${articleId} to existing story: ${message ?? 'unknown error'}`)
           await clearClusteringClaim(client, articleId)
-        } else {
-          assignedArticles++
         }
+        assignedArticles += cluster.articleIds.length - failedIds.length
+      } else {
+        assignedArticles += cluster.articleIds.length
       }
 
       const existing = storyMap.get(duplicateStoryId)
@@ -437,18 +515,22 @@ export async function clusterArticles(
 
     newStories++
 
-    for (const articleId of cluster.articleIds) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (client.from('articles') as any)
-        .update({ story_id: storyData.id, clustering_claimed_at: null, clustering_status: 'clustered' })
-        .eq('id', articleId)
+    const clusterAssignStartedAt = Date.now()
+    const { failedIds, message } = await bulkUpdateArticles(client, cluster.articleIds, {
+      story_id: storyData.id,
+      clustering_claimed_at: null,
+      clustering_status: 'clustered',
+    })
+    dbTimeMs += Date.now() - clusterAssignStartedAt
 
-      if (error) {
-        errors.push(`Failed to assign article ${articleId}: ${error.message}`)
+    if (failedIds.length > 0) {
+      for (const articleId of failedIds) {
+        errors.push(`Failed to assign article ${articleId}: ${message ?? 'unknown error'}`)
         await clearClusteringClaim(client, articleId)
-      } else {
-        assignedArticles++
       }
+      assignedArticles += cluster.articleIds.length - failedIds.length
+    } else {
+      assignedArticles += cluster.articleIds.length
     }
 
     storyMap.set(storyData.id, {
@@ -473,6 +555,7 @@ export async function clusterArticles(
     promotedSingletons,
     expiredArticles: 0,
     errors,
+    dbTimeMs,
   }
 }
 

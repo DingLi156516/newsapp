@@ -16,10 +16,18 @@ import { assembleStories } from '@/lib/ai/story-assembler'
 import { z } from 'zod'
 import { countPipelineBacklog } from '@/lib/pipeline/backlog'
 import { runProcessPipeline } from '@/lib/pipeline/process-runner'
+import { toPerMinute } from '@/lib/pipeline/telemetry-utils'
 
 const triggerSchema = z.object({
   type: z.enum(['ingest', 'process', 'full']),
 })
+
+function getStepDurationMs(
+  logger: PipelineLogger,
+  stepName: string
+): number {
+  return logger.getSteps().find((step) => step.step === stepName)?.duration_ms ?? 0
+}
 
 export async function POST(request: NextRequest) {
   const { user, isAdmin, error: authError } = await getAdminUser()
@@ -59,6 +67,7 @@ export async function POST(request: NextRequest) {
   const { type } = parsed.data
   const serviceClient = getSupabaseServiceClient()
   const logger = new PipelineLogger(serviceClient)
+  let ingestSummary: Record<string, unknown> | null = null
 
   try {
     await logger.startRun(type, `admin:${user.id}`)
@@ -68,10 +77,17 @@ export async function POST(request: NextRequest) {
       const ingestResult = await logger.logStep('ingest_feeds', () =>
         ingestFeeds(serviceClient) as unknown as Promise<Record<string, unknown>>
       )
+      ingestSummary = {
+        ...ingestResult,
+        ingestedPerMinute: toPerMinute(
+          Number((ingestResult as Record<string, unknown>).newArticles ?? 0),
+          getStepDurationMs(logger, 'ingest_feeds')
+        ),
+      }
 
       if (type === 'ingest') {
         const summary = {
-          ingest: ingestResult,
+          ingest: ingestSummary,
           backlog: { before: backlogBefore, after: await countPipelineBacklog(serviceClient) },
         }
         await logger.complete(summary)
@@ -80,7 +96,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === 'process' || type === 'full') {
-      const summary = await runProcessPipeline({
+      const processSummary = await runProcessPipeline({
         countBacklog: () => countPipelineBacklog(serviceClient),
         embed: (maxArticles) => embedUnembeddedArticles(serviceClient, maxArticles),
         cluster: (maxArticles) => clusterArticles(serviceClient, maxArticles),
@@ -88,6 +104,7 @@ export async function POST(request: NextRequest) {
         logStep: <T,>(step: string, fn: () => Promise<T>) =>
           logger.logStep(step, () => fn() as unknown as Promise<Record<string, unknown>>) as Promise<T>,
       })
+      const summary = ingestSummary ? { ingest: ingestSummary, ...processSummary } : processSummary
       await logger.complete(summary as unknown as Record<string, unknown>)
       return NextResponse.json({ success: true, data: { runId: logger.getRunId(), ...summary } })
     }

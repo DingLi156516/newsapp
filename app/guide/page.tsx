@@ -6,8 +6,6 @@ import {
   ALL_BIASES,
   ALL_FACTUALITIES,
   ALL_OWNERSHIPS,
-  BIAS_LABELS,
-  FACTUALITY_LABELS,
   OWNERSHIP_LABELS,
 } from '@/lib/types'
 import { BiasTag } from '@/components/atoms/BiasTag'

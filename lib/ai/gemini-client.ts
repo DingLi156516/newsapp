@@ -1,18 +1,28 @@
 /**
  * lib/ai/gemini-client.ts — Gemini API client wrapper.
  *
- * Provides typed methods for embedding generation and task-specific text
- * generation using Google's Gemini API. Used by the clustering and summary
- * pipelines.
+ * Provides typed methods for embedding generation and text generation
+ * using Google's Gemini API. Used by the clustering and summary pipelines.
  */
 
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 const EMBEDDING_MODEL = 'models/gemini-embedding-001'
 const EMBEDDING_DIMENSIONS = 768
-const QUALITY_GENERATION_MODEL =
-  process.env.GEMINI_GENERATION_MODEL ?? 'models/gemini-2.5-flash'
-const LOW_COST_GENERATION_MODEL =
-  process.env.GEMINI_LOW_COST_GENERATION_MODEL ?? 'models/gemini-2.5-flash-lite'
+const DEFAULT_GENERATION_MODEL =
+  process.env.GEMINI_DEFAULT_MODEL
+  ?? process.env.GEMINI_GENERATION_MODEL
+  ?? process.env.GEMINI_LOW_COST_GENERATION_MODEL
+  ?? 'models/gemini-2.5-flash-lite'
+
+export const SUMMARY_GENERATION_MODEL =
+  process.env.GEMINI_SUMMARY_MODEL
+  ?? process.env.GEMINI_GENERATION_MODEL
+  ?? 'models/gemini-2.5-flash'
+
+export const CHEAP_GENERATION_MODEL =
+  process.env.GEMINI_CHEAP_MODEL
+  ?? process.env.GEMINI_LOW_COST_GENERATION_MODEL
+  ?? DEFAULT_GENERATION_MODEL
 
 function getApiKey(): string {
   const key = process.env.GEMINI_API_KEY
@@ -81,22 +91,31 @@ export async function generateEmbeddingBatch(
   }
 
   const data = await response.json()
-  return (data.embeddings as Array<{ values: number[] }>).map((e) => ({
-    embedding: e.values,
+  return (data.embeddings as Array<{ values: number[] }>).map((embedding) => ({
+    embedding: embedding.values,
   }))
 }
 
 export interface GenerationOptions {
   readonly jsonMode?: boolean
+  readonly model?: string
   readonly task?: 'headline' | 'topic' | 'region' | 'summary'
 }
 
-function resolveGenerationModel(task?: GenerationOptions['task']): string {
-  if (task === 'headline' || task === 'topic' || task === 'region') {
-    return LOW_COST_GENERATION_MODEL
+function resolveGenerationModel(options?: GenerationOptions): string {
+  if (options?.model) {
+    return options.model
   }
 
-  return QUALITY_GENERATION_MODEL
+  if (options?.task === 'headline' || options?.task === 'topic' || options?.task === 'region') {
+    return CHEAP_GENERATION_MODEL
+  }
+
+  if (options?.task === 'summary') {
+    return SUMMARY_GENERATION_MODEL
+  }
+
+  return DEFAULT_GENERATION_MODEL
 }
 
 export async function generateText(
@@ -104,7 +123,6 @@ export async function generateText(
   options?: GenerationOptions
 ): Promise<GenerationResponse> {
   const apiKey = getApiKey()
-  const model = resolveGenerationModel(options?.task)
 
   const generationConfig: Record<string, unknown> = {
     temperature: 0.3,
@@ -115,12 +133,15 @@ export async function generateText(
     generationConfig.responseMimeType = 'application/json'
   }
 
+  const model = resolveGenerationModel(options)
+
   const response = await fetch(
     `${GEMINI_BASE_URL}/${model}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        model,
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig,
       }),

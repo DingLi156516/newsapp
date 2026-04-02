@@ -10,6 +10,7 @@ vi.mock('@/lib/ai/headline-generator', () => ({
 
 vi.mock('@/lib/ai/summary-generator', () => ({
   generateAISummary: vi.fn(),
+  isFallbackSummary: vi.fn(() => false),
 }))
 
 vi.mock('@/lib/ai/topic-classifier', () => ({
@@ -36,6 +37,7 @@ vi.mock('@/lib/ai/tag-upsert', () => ({
   upsertStoryTags: vi.fn(),
 }))
 
+import type { Region, Topic } from '@/lib/types'
 import { assembleSingleStory, assembleStories } from '@/lib/ai/story-assembler'
 import { generateNeutralHeadline } from '@/lib/ai/headline-generator'
 import { generateAISummary } from '@/lib/ai/summary-generator'
@@ -54,6 +56,18 @@ const mockSpectrum = vi.mocked(calculateSpectrum)
 const mockBlindspot = vi.mocked(isBlindspot)
 const mockExtractEntities = vi.mocked(extractEntities)
 const mockUpsertStoryTags = vi.mocked(upsertStoryTags)
+
+function headlineResult(headline: string) {
+  return { headline, usedCheapModel: true, usedFallback: false }
+}
+
+function topicResult(topic: Topic) {
+  return { topic, usedCheapModel: true, usedFallback: false }
+}
+
+function regionResult(region: Region) {
+  return { region, usedCheapModel: true, usedFallback: false }
+}
 
 function createMockClient(overrides: {
   articles?: { data: unknown[] | null; error: unknown | null }
@@ -133,9 +147,9 @@ describe('assembleSingleStory', () => {
       { id: 's2', bias: 'right', factuality: 'mixed', ownership: 'independent' },
     ]
 
-    mockHeadline.mockResolvedValue('Generated Headline')
-    mockTopic.mockResolvedValue('politics')
-    mockRegion.mockResolvedValue('us')
+    mockHeadline.mockResolvedValue(headlineResult('Generated Headline'))
+    mockTopic.mockResolvedValue(topicResult('politics'))
+    mockRegion.mockResolvedValue(regionResult('us'))
     mockSummary.mockResolvedValue({
       commonGround: 'CG',
       leftFraming: 'LF',
@@ -234,9 +248,9 @@ describe('assembleSingleStory', () => {
       { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
     ]
 
-    mockHeadline.mockResolvedValue('Headline')
-    mockTopic.mockResolvedValue('politics')
-    mockRegion.mockResolvedValue('us')
+    mockHeadline.mockResolvedValue(headlineResult('Headline'))
+    mockTopic.mockResolvedValue(topicResult('politics'))
+    mockRegion.mockResolvedValue(regionResult('us'))
     mockSummary.mockResolvedValue({ commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' })
     mockSpectrum.mockReturnValue([
       { bias: 'left', percentage: 50 },
@@ -254,6 +268,7 @@ describe('assembleSingleStory', () => {
     // Should not throw even though upsertStoryTags fails
     const result = await assembleSingleStory(client as never, 'story-1')
     expect(result.publicationStatus).toBe('published')
+    expect(result.tagError).toBe('Entity tagging failed for story-1: Tag DB error')
     expect(mockUpsertStoryTags).toHaveBeenCalledOnce()
   })
 
@@ -265,9 +280,9 @@ describe('assembleSingleStory', () => {
       { id: 's1', bias: 'center', factuality: 'high', ownership: 'corporate' },
     ]
 
-    mockHeadline.mockResolvedValue('Headline')
-    mockTopic.mockResolvedValue('politics')
-    mockRegion.mockResolvedValue('us')
+    mockHeadline.mockResolvedValue(headlineResult('Headline'))
+    mockTopic.mockResolvedValue(topicResult('politics'))
+    mockRegion.mockResolvedValue(regionResult('us'))
     mockSummary.mockResolvedValue({ commonGround: '', leftFraming: '', rightFraming: '' })
     mockSpectrum.mockReturnValue([])
     mockBlindspot.mockReturnValue(false)
@@ -304,13 +319,13 @@ describe('assembleStories', () => {
 
     const result = await assembleStories(client as never)
 
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       storiesProcessed: 0,
       claimedStories: 0,
       autoPublished: 0,
       sentToReview: 0,
       errors: [],
-    })
+    }))
   })
 
   it('throws when fetching pending stories fails', async () => {
@@ -333,9 +348,9 @@ describe('assembleStories', () => {
       { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
     ]
 
-    mockHeadline.mockResolvedValue('Generated Headline')
-    mockTopic.mockResolvedValue('politics')
-    mockRegion.mockResolvedValue('us')
+    mockHeadline.mockResolvedValue(headlineResult('Generated Headline'))
+    mockTopic.mockResolvedValue(topicResult('politics'))
+    mockRegion.mockResolvedValue(regionResult('us'))
     mockSummary.mockResolvedValue({
       commonGround: 'CG',
       leftFraming: 'LF',
@@ -373,9 +388,9 @@ describe('assembleStories', () => {
       { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
     ]
 
-    mockHeadline.mockResolvedValue('Generated Headline')
-    mockTopic.mockResolvedValue('politics')
-    mockRegion.mockResolvedValue('us')
+    mockHeadline.mockResolvedValue(headlineResult('Generated Headline'))
+    mockTopic.mockResolvedValue(topicResult('politics'))
+    mockRegion.mockResolvedValue(regionResult('us'))
     mockSummary.mockResolvedValue({
       commonGround: 'CG',
       leftFraming: 'LF',
@@ -420,9 +435,9 @@ describe('assembleStories', () => {
     ]
     const summaryResolvers: Array<(value: { commonGround: string; leftFraming: string; rightFraming: string }) => void> = []
 
-    mockHeadline.mockResolvedValue('Generated Headline')
-    mockTopic.mockResolvedValue('politics')
-    mockRegion.mockResolvedValue('us')
+    mockHeadline.mockResolvedValue(headlineResult('Generated Headline'))
+    mockTopic.mockResolvedValue(topicResult('politics'))
+    mockRegion.mockResolvedValue(regionResult('us'))
     mockSummary.mockImplementation(
       () =>
         new Promise((resolve) => {

@@ -6,11 +6,17 @@
  */
 
 import type { Region } from '@/lib/types'
-import { generateText } from '@/lib/ai/gemini-client'
+import { CHEAP_GENERATION_MODEL, generateText } from '@/lib/ai/gemini-client'
 
 const VALID_REGIONS: readonly Region[] = [
   'us', 'international', 'uk', 'canada', 'europe',
 ]
+
+export interface RegionClassificationResult {
+  readonly region: Region
+  readonly usedCheapModel: boolean
+  readonly usedFallback: boolean
+}
 
 const REGION_KEYWORDS: ReadonlyArray<readonly [Region, readonly string[]]> = [
   ['uk', [' uk ', 'britain', 'british', 'england', 'scotland', 'wales', 'london', 'parliament', 'westminster']],
@@ -33,9 +39,9 @@ function fallbackRegion(articleTitles: readonly string[]): Region {
 
 export async function classifyRegion(
   articleTitles: readonly string[]
-): Promise<Region> {
+): Promise<RegionClassificationResult> {
   if (articleTitles.length === 0) {
-    return fallbackRegion(articleTitles)
+    return { region: 'us', usedCheapModel: false, usedFallback: true }
   }
 
   const titlesBlock = articleTitles.join('\n')
@@ -50,15 +56,19 @@ Valid regions: ${VALID_REGIONS.join(', ')}
 Return ONLY the region name, nothing else.`
 
   try {
-    const response = await generateText(prompt, { task: 'region' })
+    const response = await generateText(prompt, { model: CHEAP_GENERATION_MODEL })
     const region = response.text.trim().toLowerCase() as Region
 
     if (VALID_REGIONS.includes(region)) {
-      return region
+      return { region, usedCheapModel: true, usedFallback: false }
     }
   } catch {
-    return fallbackRegion(articleTitles)
+    // fall through to deterministic fallback
   }
 
-  return fallbackRegion(articleTitles)
+  return {
+    region: fallbackRegion(articleTitles),
+    usedCheapModel: true,
+    usedFallback: true,
+  }
 }

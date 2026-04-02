@@ -101,18 +101,15 @@ The ingest/process pipeline now uses explicit story lifecycle state instead of r
 
 - `assembly_status`: `pending | processing | completed | failed`
 - `publication_status`: `draft | needs_review | published | rejected`
-- `story_kind`: `standard | emerging_single_source`
+- `story_kind`: `standard`
 
 Public story APIs only serve `published` stories. Assembly applies a conservative risk-based decision:
 - low-risk stories auto-publish
-- blindspots, sparse clusters, AI fallbacks, weak source mixes, and failed assembly runs go to admin review
+- `sparse_coverage`, `ai_fallback`, and `processing_anomaly` trigger admin review; blindspot and factuality no longer gate publication
 
 The processing cron now runs backlog-aware multi-pass embed/cluster/assemble loops and reports backlog counts before and after each run so operators can distinguish ingest, embedding, clustering, assembly, and review backlog.
 
-Embedded singletons no longer retry forever:
-- unmatched single-source articles retry clustering for 24 hours
-- after that they are promoted to `emerging_single_source` stories
-- if an independent outlet later matches the same centroid, the story upgrades back to `standard` and is reassembled
+Singletons retry clustering 3 times then promote to single-article standard stories. Unclustered articles expire after 7 days.
 
 ---
 
@@ -287,8 +284,11 @@ newsapp/
 │   │   └── cache-manager.ts
 │   ├── pipeline/                # Pipeline state, backlog, run logging
 │   │   ├── backlog.ts
+│   │   ├── claim-utils.ts
 │   │   ├── logger.ts
-│   │   └── story-state.ts
+│   │   ├── process-runner.ts
+│   │   ├── story-state.ts
+│   │   └── telemetry-utils.ts
 │   ├── supabase/               # Database client + schema types
 │   ├── rss/                    # RSS ingestion pipeline
 │   │   ├── normalization.ts    # Canonical URL + title fingerprint helpers

@@ -134,7 +134,7 @@ The process runner's `clusterMadeProgress` function intentionally does **not** c
 8. Update story with all generated fields, set final `publication_status`
 9. On error: set `assembly_status = 'failed'`, `publication_status = 'needs_review'`
 
-Claiming is batched, but the outer story loop is still sequential today. The approved throughput redesign keeps the current behavior contract while evaluating bounded story-level concurrency as a later change behind quality gates.
+Claiming is batched. Story assembly runs with bounded concurrency (default 3, env: PIPELINE_ASSEMBLY_CONCURRENCY).
 
 **Batch size:** 25 stories per pass (env: `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`)
 
@@ -151,9 +151,9 @@ The process runner orchestrates embed, cluster, and assemble in a budget-constra
 while (time budget remaining) {
   roundProgress = false
 
-  1. Assembly   -- highest priority (finish what's started)
+  1. Embedding  -- highest priority (freshness)
   2. Clustering -- medium priority
-  3. Embedding  -- lowest priority (reserves time for downstream)
+  3. Assembly   -- lowest priority (deferred when budget is tight and freshness backlog exists)
 
   if (!roundProgress) break
   refresh backlog counts
@@ -194,7 +194,7 @@ If no stage makes progress in a round, the loop exits with skip reason `no_progr
 | Reason | Meaning |
 |--------|---------|
 | `no_backlog` | No articles/stories to process in this stage |
-| `budget_reserved_for_downstream` | Embedding skipped to preserve time for cluster/assembly |
+| `budget_reserved_for_freshness` | Stage skipped to preserve time budget for freshness stages (embed/cluster) |
 | `time_budget_exhausted` | Total time limit reached |
 | `no_progress` | No stage made progress; loop exited |
 
@@ -319,6 +319,7 @@ The approved plan in `.omx/plans/prd-pipeline-throughput-scale-20260402.md` keep
 | `lib/pipeline/backlog.ts` | Backlog count queries |
 | `lib/pipeline/claim-utils.ts` | Claim TTL helpers |
 | `lib/pipeline/logger.ts` | Run logging to `pipeline_runs` table |
+| `lib/pipeline/telemetry-utils.ts` | Shared telemetry helpers (toPerMinute rate calculation) |
 | `app/api/cron/ingest/route.ts` | Ingest cron endpoint |
 | `app/api/cron/process/route.ts` | Process cron endpoint |
 | `app/api/admin/pipeline/trigger/route.ts` | Admin manual trigger |
