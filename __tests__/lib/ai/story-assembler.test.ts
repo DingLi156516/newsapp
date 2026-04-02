@@ -408,4 +408,60 @@ describe('assembleStories', () => {
     expect(result.storiesProcessed).toBe(2)
     expect(result.autoPublished).toBe(2)
   })
+
+  it('processes multiple stories concurrently when a concurrency cap is provided', async () => {
+    const articles = [
+      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: 'img.jpg' },
+      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null },
+    ]
+    const sources = [
+      { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
+      { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
+    ]
+    const summaryResolvers: Array<(value: { commonGround: string; leftFraming: string; rightFraming: string }) => void> = []
+
+    mockHeadline.mockResolvedValue('Generated Headline')
+    mockTopic.mockResolvedValue('politics')
+    mockRegion.mockResolvedValue('us')
+    mockSummary.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          summaryResolvers.push(resolve)
+        })
+    )
+    mockSpectrum.mockReturnValue([
+      { bias: 'left', percentage: 50 },
+      { bias: 'right', percentage: 50 },
+    ])
+    mockBlindspot.mockReturnValue(false)
+    mockExtractEntities.mockResolvedValue([])
+    mockUpsertStoryTags.mockResolvedValue(undefined)
+
+    const client = createMockClient({
+      stories: {
+        data: [
+          { id: 'story-1', assembly_claimed_at: null },
+          { id: 'story-2', assembly_claimed_at: null },
+        ],
+        error: null,
+      },
+      articles: { data: articles, error: null },
+      sources: { data: sources, error: null },
+    })
+
+    const resultPromise = assembleStories(client as never, 10, { concurrency: 2 })
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve()
+    }
+
+    expect(mockSummary).toHaveBeenCalledTimes(2)
+
+    for (const resolve of summaryResolvers) {
+      resolve({ commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' })
+    }
+
+    const result = await resultPromise
+    expect(result.storiesProcessed).toBe(2)
+    expect(result.autoPublished).toBe(2)
+  })
 })

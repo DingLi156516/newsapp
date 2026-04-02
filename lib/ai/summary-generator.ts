@@ -44,7 +44,7 @@ Generate a structured summary in exactly this JSON format (no markdown, no code 
 Each section should have 2-4 bullet points separated by newlines. Return ONLY valid JSON.`
 
   try {
-    const response = await generateText(prompt, { jsonMode: true })
+    const response = await generateText(prompt, { jsonMode: true, task: 'summary' })
 
     if (!response.text.trim()) {
       console.error('[summary-generator] Empty response from Gemini — retrying with fewer articles')
@@ -105,7 +105,7 @@ Return JSON with this exact structure:
 Each section should have 2-3 bullet points. Return ONLY valid JSON.`
 
   try {
-    const response = await generateText(prompt, { jsonMode: true })
+    const response = await generateText(prompt, { jsonMode: true, task: 'summary' })
 
     if (!response.text.trim()) {
       console.error('[summary-generator] Retry also returned empty response')

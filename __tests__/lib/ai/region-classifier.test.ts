@@ -63,4 +63,14 @@ describe('classifyRegion', () => {
 
     expect(result).toBe('international')
   })
+
+  it('falls back to keyword heuristics when generation fails', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockRejectedValue(new Error('model unavailable'))
+
+    const { classifyRegion } = await import('@/lib/ai/region-classifier')
+    const result = await classifyRegion(['UK Parliament passes new climate bill'])
+
+    expect(result).toBe('uk')
+  })
 })

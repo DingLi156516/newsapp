@@ -84,6 +84,36 @@ describe('gemini-client', () => {
     expect(callBody.generationConfig.responseMimeType).toBe('application/json')
   })
 
+  it('generateText uses the low-cost model for headline/topic/region tasks', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          candidates: [{ content: { parts: [{ text: 'Generated response' }] } }],
+        }),
+    } as Response)
+
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    await generateText('test prompt', { task: 'headline' })
+
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain('models/gemini-2.5-flash-lite:generateContent')
+  })
+
+  it('generateText uses the quality model for summary tasks', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          candidates: [{ content: { parts: [{ text: 'Generated response' }] } }],
+        }),
+    } as Response)
+
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    await generateText('test prompt', { task: 'summary' })
+
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain('models/gemini-2.5-flash:generateContent')
+  })
+
   it('generateText without jsonMode omits responseMimeType', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
