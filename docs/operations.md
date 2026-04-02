@@ -67,6 +67,12 @@ The process runner is backlog-aware, multi-pass, and downstream-first:
 - stage summaries now include `passes`, `skipped`, and `skipReason` so operators can tell whether a stage had no backlog, no progress, or was held back to protect downstream work
 - env overrides: `PIPELINE_PROCESS_EMBED_TARGET`, `PIPELINE_PROCESS_CLUSTER_TARGET`, `PIPELINE_PROCESS_ASSEMBLE_TARGET`, `PIPELINE_PROCESS_EMBED_BATCH_SIZE`, `PIPELINE_PROCESS_CLUSTER_BATCH_SIZE`, `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`, `PIPELINE_PROCESS_TIME_BUDGET_MS`, `PIPELINE_PROCESS_CLUSTER_RESERVE_MS`, `PIPELINE_PROCESS_ASSEMBLE_RESERVE_MS`
 
+Current observability is split across two surfaces:
+- `/api/admin/pipeline` exposes run history with step timings and stage summaries
+- `/api/admin/pipeline/stats` currently exposes coarse live counts only (`publishedStories`, `totalArticles`, `reviewQueue`, `unembedded`, `unclustered`, `expiredArticles`)
+
+The approved throughput redesign in `.omx/plans/prd-pipeline-throughput-scale-20260402.md` expands these surfaces in phases: instrumentation first, then batching/concurrency improvements, then conditional lifecycle/model-routing changes only if telemetry proves they are needed.
+
 Claim timestamp rules:
 - `embedding_claimed_at` and `clustering_claimed_at` are 30 minute leases
 - `assembly_claimed_at` is a 60 minute lease
@@ -362,7 +368,7 @@ curl -s "http://localhost:3000/api/sources/compare?left=reuters&right=fox-news" 
 | GET | `/api/admin/pipeline` | Pipeline dashboard overview |
 | GET | `/api/admin/pipeline/sources` | Source health data |
 | GET | `/api/admin/pipeline/stats` | Pipeline statistics |
-| GET | `/api/admin/pipeline/trigger` | Trigger pipeline run manually |
+| POST | `/api/admin/pipeline/trigger` | Trigger pipeline run manually |
 
 #### Admin API Examples
 
@@ -372,7 +378,17 @@ curl -s "http://localhost:3000/api/admin/review?status=pending&page=1&limit=20" 
   -H "Cookie: <auth-cookies>" | jq .
 ```
 
-Expected response:
+```bash
+# Trigger a manual process run
+curl -s -X POST "http://localhost:3000/api/admin/pipeline/trigger" \
+  -H "Cookie: <auth-cookies>" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"process"}' | jq .
+```
+
+Process trigger responses mirror the process summary shape documented earlier in this runbook.
+
+Expected response for the review-queue example:
 ```json
 {
   "success": true,
