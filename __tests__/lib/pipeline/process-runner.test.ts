@@ -254,4 +254,77 @@ describe('runProcessPipeline', () => {
     expect(summary.assembly.skipReason).toBe('no_backlog')
     expect(summary.embeddings.skipped).toBe(false)
   })
+
+  it('refreshes backlog after clustering progress before deciding whether embeddings can run', async () => {
+    let nowMs = 0
+    const countBacklog = vi
+      .fn()
+      .mockResolvedValueOnce({
+        unembeddedArticles: 500,
+        unclusteredArticles: 120,
+        pendingAssemblyStories: 0,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+      .mockResolvedValueOnce({
+        unembeddedArticles: 500,
+        unclusteredArticles: 20,
+        pendingAssemblyStories: 5,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+      .mockResolvedValueOnce({
+        unembeddedArticles: 500,
+        unclusteredArticles: 20,
+        pendingAssemblyStories: 5,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+
+    const embed = vi.fn().mockResolvedValue({
+      totalProcessed: 100,
+      claimedArticles: 100,
+      errors: [],
+    })
+    const cluster = vi.fn().mockImplementation(async () => {
+      nowMs += 90_000
+      return {
+        newStories: 1,
+        updatedStories: 0,
+        assignedArticles: 100,
+        expiredArticles: 0,
+        promotedSingletons: 0,
+        unmatchedSingletons: 0,
+        errors: [],
+      }
+    })
+    const assemble = vi.fn()
+
+    const summary = await runProcessPipeline(
+      {
+        countBacklog,
+        embed,
+        cluster,
+        assemble,
+        now: () => nowMs,
+      },
+      {
+        embedTarget: 100,
+        clusterTarget: 250,
+        assembleTarget: 25,
+        embedBatchSize: 100,
+        clusterBatchSize: 250,
+        assembleBatchSize: 25,
+        timeBudgetMs: 100_000,
+        clusterReserveMs: 25_000,
+        assembleReserveMs: 15_000,
+      }
+    )
+
+    expect(cluster).toHaveBeenCalledTimes(1)
+    expect(embed).not.toHaveBeenCalled()
+    expect(summary.backlog.after.pendingAssemblyStories).toBe(5)
+    expect(summary.embeddings.skipped).toBe(true)
+    expect(summary.embeddings.skipReason).toBe('budget_reserved_for_downstream')
+  })
 })

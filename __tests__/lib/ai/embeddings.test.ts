@@ -117,4 +117,37 @@ describe('embedUnembeddedArticles', () => {
     expect(result.claimedArticles).toBe(2)
     expect(mockGenerateEmbeddingBatch).toHaveBeenCalledWith(['First — One', 'Second — Two'])
   })
+
+  it('clears claims and records an error when a batch embedding request fails', async () => {
+    mockGenerateEmbeddingBatch.mockRejectedValue(new Error('provider unavailable'))
+
+    const client = createMockClient([
+      {
+        id: 'a1',
+        title: 'First',
+        description: 'One',
+        embedding_claimed_at: null,
+      },
+      {
+        id: 'a2',
+        title: 'Second',
+        description: 'Two',
+        embedding_claimed_at: null,
+      },
+    ])
+
+    const result = await embedUnembeddedArticles(client as never, 2)
+
+    expect(result).toEqual({
+      totalProcessed: 0,
+      claimedArticles: 2,
+      errors: ['Batch embedding failed: provider unavailable'],
+    })
+    expect(client._update.mock.calls).toEqual(
+      expect.arrayContaining([
+        [expect.objectContaining({ embedding_claimed_at: expect.any(String) })],
+        [expect.objectContaining({ embedding_claimed_at: null })],
+      ])
+    )
+  })
 })

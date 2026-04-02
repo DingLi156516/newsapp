@@ -641,7 +641,7 @@ describe('queryTagsForStory', () => {
 
     expect(result).toHaveLength(1)
     expect(result[0].slug).toBe('iran')
-    expect(result[0].relevance).toBe(0.95)
+    expect((result[0] as typeof result[number] & { relevance: number }).relevance).toBe(0.95)
   })
 
   it('filters out rows with null tags', async () => {
