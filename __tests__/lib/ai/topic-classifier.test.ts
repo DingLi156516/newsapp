@@ -43,4 +43,14 @@ describe('classifyTopic', () => {
 
     expect(result).toBe('health')
   })
+
+  it('falls back to keyword heuristics when generation fails', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockRejectedValue(new Error('model unavailable'))
+
+    const { classifyTopic } = await import('@/lib/ai/topic-classifier')
+    const result = await classifyTopic(['AI regulation advances in Congress'])
+
+    expect(result).toBe('technology')
+  })
 })

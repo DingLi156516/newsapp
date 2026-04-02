@@ -42,4 +42,17 @@ describe('generateNeutralHeadline', () => {
     const { generateNeutralHeadline } = await import('@/lib/ai/headline-generator')
     await expect(generateNeutralHeadline([])).rejects.toThrow('Cannot generate headline from empty article list')
   })
+
+  it('falls back to the first article title when generation fails', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockRejectedValue(new Error('model unavailable'))
+
+    const { generateNeutralHeadline } = await import('@/lib/ai/headline-generator')
+    const result = await generateNeutralHeadline([
+      'AI regulation moves forward in Congress',
+      'Senate debates new AI rules',
+    ])
+
+    expect(result).toBe('AI regulation moves forward in Congress')
+  })
 })

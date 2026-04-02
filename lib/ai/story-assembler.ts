@@ -36,12 +36,23 @@ export interface AssemblyResult {
   readonly errors: readonly string[]
 }
 
+export interface AssembleStoriesOptions {
+  readonly concurrency?: number
+}
+
+interface StoryAssemblyBatchResult {
+  readonly storyId: string
+  readonly result?: Awaited<ReturnType<typeof assembleSingleStory>>
+  readonly error?: string
+}
+
 interface PendingStory {
   id: string
   assembly_claimed_at: string | null
 }
 
 const CLAIM_SCAN_MULTIPLIER = 3
+const DEFAULT_STORY_ASSEMBLY_CONCURRENCY = 3
 
 function dominantValue<T extends string>(values: readonly T[], fallback: T): T {
   if (values.length === 0) return fallback
@@ -182,7 +193,8 @@ export async function assembleSingleStory(
 
 export async function assembleStories(
   client: SupabaseClient<Database>,
-  maxStories = 50
+  maxStories = 50,
+  options?: AssembleStoriesOptions
 ): Promise<AssemblyResult> {
   const { data: fetchedStories, error: fetchError } = await client
     .from('stories')
@@ -198,7 +210,7 @@ export async function assembleStories(
   }
 
   if (!fetchedStories || fetchedStories.length === 0) {
-      return { storiesProcessed: 0, claimedStories: 0, autoPublished: 0, sentToReview: 0, errors: [] }
+    return { storiesProcessed: 0, claimedStories: 0, autoPublished: 0, sentToReview: 0, errors: [] }
   }
 
   const pendingStories = fetchedStories
@@ -210,11 +222,15 @@ export async function assembleStories(
   }
 
   const errors: string[] = []
-  let storiesProcessed = 0
-  let autoPublished = 0
-  let sentToReview = 0
   const claimedStories = pendingStories.length
   const claimedAt = new Date().toISOString()
+  const concurrency = Math.max(
+    1,
+    Math.min(
+      claimedStories,
+      Math.floor(options?.concurrency ?? DEFAULT_STORY_ASSEMBLY_CONCURRENCY)
+    )
+  )
 
   for (const story of pendingStories) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -226,30 +242,53 @@ export async function assembleStories(
       .eq('id', story.id)
   }
 
-  for (const story of pendingStories) {
-    try {
-      const result = await assembleSingleStory(client, story.id)
+  let storiesProcessed = 0
+  let autoPublished = 0
+  let sentToReview = 0
+
+  for (let i = 0; i < pendingStories.length; i += concurrency) {
+    const storyBatch = pendingStories.slice(i, i + concurrency)
+    const batchResults: StoryAssemblyBatchResult[] = await Promise.all(
+      storyBatch.map(async (story) => {
+        try {
+          const result = await assembleSingleStory(client, story.id)
+          return { storyId: story.id, result }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          const formattedMessage = `Story assembly failed for ${story.id}: ${message}`
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (client.from('stories') as any)
+            .update({
+              assembly_status: 'failed',
+              publication_status: 'needs_review',
+              review_status: 'pending',
+              review_reasons: ['assembly_failed'],
+              processing_error: message,
+              assembly_claimed_at: null,
+              last_updated: new Date().toISOString(),
+            })
+            .eq('id', story.id)
+          return { storyId: story.id, error: formattedMessage }
+        }
+      })
+    )
+
+    for (const batchResult of batchResults) {
+      if (batchResult.error) {
+        errors.push(batchResult.error)
+        continue
+      }
+
+      if (!batchResult.result) {
+        continue
+      }
+
       storiesProcessed++
-      if (result.publicationStatus === 'published') {
+      if (batchResult.result.publicationStatus === 'published') {
         autoPublished++
-      } else if (result.publicationStatus === 'needs_review') {
+      } else if (batchResult.result.publicationStatus === 'needs_review') {
         sentToReview++
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      errors.push(`Story assembly failed for ${story.id}: ${message}`)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (client.from('stories') as any)
-        .update({
-          assembly_status: 'failed',
-          publication_status: 'needs_review',
-          review_status: 'pending',
-          review_reasons: ['assembly_failed'],
-          processing_error: message,
-          assembly_claimed_at: null,
-          last_updated: new Date().toISOString(),
-        })
-        .eq('id', story.id)
     }
   }
 

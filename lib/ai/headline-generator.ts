@@ -7,6 +7,10 @@
 
 import { generateText } from '@/lib/ai/gemini-client'
 
+function fallbackHeadline(articleTitles: readonly string[]): string {
+  return articleTitles[0].trim().replace(/^["']|["']$/g, '')
+}
+
 export async function generateNeutralHeadline(
   articleTitles: readonly string[]
 ): Promise<string> {
@@ -23,6 +27,11 @@ ${titlesBlock}
 
 Neutral headline:`
 
-  const response = await generateText(prompt)
-  return response.text.trim().replace(/^["']|["']$/g, '')
+  try {
+    const response = await generateText(prompt, { task: 'headline' })
+    const normalized = response.text.trim().replace(/^["']|["']$/g, '')
+    return normalized || fallbackHeadline(articleTitles)
+  } catch {
+    return fallbackHeadline(articleTitles)
+  }
 }
