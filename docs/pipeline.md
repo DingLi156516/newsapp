@@ -17,11 +17,11 @@ The pipeline transforms raw RSS articles into published stories through four sta
 
 | Trigger | Route | Schedule | Auth |
 |---------|-------|----------|------|
-| Cron ingest | `POST /api/cron/ingest` | Every 15 min | `Bearer CRON_SECRET` |
-| Cron process | `POST /api/cron/process` | Every 15 min (5 min offset) | `Bearer CRON_SECRET` |
-| Admin trigger | `GET /api/admin/pipeline/trigger` | Manual | Supabase auth + admin |
+| Cron ingest | `GET /api/cron/ingest` | Every 15 min | `Bearer CRON_SECRET` |
+| Cron process | `GET /api/cron/process` | Every 15 min (5 min offset) | `Bearer CRON_SECRET` |
+| Admin trigger | `POST /api/admin/pipeline/trigger` | Manual | Supabase auth + admin |
 
-The admin trigger accepts `?type=ingest`, `?type=process`, or `?type=full`. There is no distributed lock between triggers -- cron and admin can overlap freely.
+The admin trigger accepts a JSON body with `type: 'ingest' | 'process' | 'full'`. There is no distributed lock between triggers -- cron and admin can overlap freely.
 
 ## Stage 1: Ingest
 
@@ -118,21 +118,23 @@ The process runner's `clusterMadeProgress` function intentionally does **not** c
 1. Fetch stories where `assembly_status = 'pending'`, scanning 3x batch, filtering to unclaimed (claim TTL = 60 min)
 2. Claim stories (`assembly_status = 'processing'`, `assembly_claimed_at = now`)
 3. For each story, fetch all articles and source metadata
-4. Run 5 parallel Gemini calls:
+4. Start entity extraction in parallel, then run 4 primary model calls with `Promise.all(...)`:
    - `generateNeutralHeadline` -- bias-neutral headline
    - `classifyTopic` -- topic classification (politics, tech, health, etc.)
    - `classifyRegion` -- region classification (us, international, uk, etc.)
    - `generateAISummary` -- spectrum-aware summary with `leftFraming`, `rightFraming`, `commonGround`
-   - `extractEntities` -- entity/tag extraction (async, non-blocking)
-5. Compute metadata: spectrum distribution, blindspot flag, factuality, ownership
-6. **Publication decision:**
+5. Compute deterministic metadata: spectrum distribution, blindspot flag, factuality, ownership
+6. Best-effort upsert entity tags before publication; tagging failures are logged but do not block story updates
+7. **Publication decision:**
    - **Auto-publish** if: >= 2 articles, >= 2 sources, good AI summary, confidence >= 0.25
    - **Needs review** if any condition fails. Review reasons:
      - `sparse_coverage` -- fewer than 2 articles or 2 sources (-0.35 confidence)
      - `ai_fallback` -- AI summary generation failed (-0.25)
      - `processing_anomaly` -- errors during assembly (-0.25)
-7. Update story with all generated fields, set final `publication_status`
-8. On error: set `assembly_status = 'failed'`, `publication_status = 'needs_review'`
+8. Update story with all generated fields, set final `publication_status`
+9. On error: set `assembly_status = 'failed'`, `publication_status = 'needs_review'`
+
+Claiming is batched, but the outer story loop is still sequential today. The approved throughput redesign keeps the current behavior contract while evaluating bounded story-level concurrency as a later change behind quality gates.
 
 **Batch size:** 25 stories per pass (env: `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`)
 
@@ -287,6 +289,18 @@ Every run creates a record in the `pipeline_runs` table:
 
 The admin dashboard at `/admin/pipeline` surfaces these logs via `PipelineRunHistory`.
 
+Today the logger persists step timings and per-run summaries, while `/api/admin/pipeline/stats` still returns coarse live counts only. The approved throughput redesign expands this evidence with backlog-age and rate telemetry before any higher-risk scheduling/state changes roll out.
+
+## Throughput Redesign Roadmap
+
+The approved plan in `.omx/plans/prd-pipeline-throughput-scale-20260402.md` keeps the current publication contract unless telemetry proves a broader lifecycle change is necessary:
+
+1. **Phase 0 — Instrumentation:** add rate, latency, and backlog-age evidence to process runs and admin surfaces.
+2. **Phase 1 — Throughput fixes:** keep the current story lifecycle, but remove row-by-row DB hotspots and verify freshness improves enough on its own.
+3. **Phase 2 — Conditional lifecycle split:** only if Phase 1 still misses the target, introduce an explicit freshness/enrichment contract across DB types, API transformers, and review flows.
+4. **Phase 3 — Cheap-model routing:** downshift low-risk generation tasks only if review-queue and fallback rates stay within the PRD quality gates.
+5. **Phase 4 — Queue/worker escalation:** consider heavier architecture only if measured throughput still fails after earlier phases.
+
 ## Key Source Files
 
 | File | Purpose |
@@ -299,7 +313,7 @@ The admin dashboard at `/admin/pipeline` surfaces these logs via `PipelineRunHis
 | `lib/ai/embeddings.ts` | Gemini embedding generation |
 | `lib/ai/clustering.ts` | Cosine similarity clustering + singleton/expiry logic |
 | `lib/ai/story-assembler.ts` | AI headline/summary/topic/region generation |
-| `lib/ai/story-state.ts` | Publication decision logic |
+| `lib/pipeline/story-state.ts` | Publication decision logic |
 | `lib/ai/region-classifier.ts` | Region classification via Gemini |
 | `lib/pipeline/process-runner.ts` | Budget-constrained multi-pass orchestrator |
 | `lib/pipeline/backlog.ts` | Backlog count queries |

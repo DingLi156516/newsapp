@@ -70,7 +70,7 @@ This runs three sub-stages in fair, downstream-first rounds:
 
 #### 2a. Assembly (`lib/ai/story-assembler.ts`)
 
-For each pending story (`assembly_status = 'pending'`), the system claims a bounded batch and runs **7 AI operations in parallel**:
+For each pending story (`assembly_status = 'pending'`), the system claims a bounded batch, starts entity extraction concurrently, and runs **4 primary model calls in parallel**:
 
 | Operation | File | What it does |
 |-----------|------|-------------|
@@ -78,15 +78,15 @@ For each pending story (`assembly_status = 'pending'`), the system claims a boun
 | **Topic** | `topic-classifier.ts` | Picks one of 9 categories (politics, world, tech, etc.) |
 | **AI Summary** | `summary-generator.ts` | Produces 3 perspectives: Common Ground, Left Framing, Right Framing |
 | **Region** | `region-classifier.ts` | Classifies story into a geographic region (us, uk, etc.) |
-| **Spectrum** | `spectrum-calculator.ts` | Calculates % breakdown by political leaning |
-| **Blindspot** | `blindspot-detector.ts` | Flags stories where >80% coverage is from one side |
-| **Entity Tags** | `entity-extractor.ts` + `tag-upsert.ts` | Extracts people, orgs, locations, topics; writes to `story_tags` before publication |
+| **Spectrum** | `spectrum-calculator.ts` | Deterministically calculates % breakdown by political leaning |
+| **Blindspot** | `blindspot-detector.ts` | Deterministically flags stories where >80% coverage is from one side |
+| **Entity Tags** | `entity-extractor.ts` + `tag-upsert.ts` | Starts async entity extraction and writes `story_tags` before publication when possible |
 
 The headline prompt explicitly tells Gemini: *"avoid loaded language or bias framing."*
 
 The summary prompt labels each article's source bias (e.g., `[LEFT] CNN: ...`, `[RIGHT] Fox News: ...`) so Gemini can distinguish perspectives.
 
-Entity tags are written before the publication decision is applied, so published stories are never missing tags. After assembly, a pure publication-decision layer scores the story and either auto-publishes it or routes it to manual review. Sparse clusters (fewer than 2 articles or sources) go to review. Stories that fail assembly move to `assembly_status = 'failed'` and stay out of the public feed until reprocessed.
+Entity tags are attempted before the publication decision is applied, but tagging failures are swallowed so they never block publication or retries. After assembly, a pure publication-decision layer scores the story and either auto-publishes it or routes it to manual review. Sparse clusters (fewer than 2 articles or sources) go to review. Stories that fail assembly move to `assembly_status = 'failed'` and stay out of the public feed until reprocessed. Story claiming is batched, but the outer assembly loop is still sequential today.
 `assembly_claimed_at` acts as the in-flight lease for this stage; claims older than 60 minutes are treated as stale and can be reclaimed.
 
 #### 2b. Clustering (`lib/ai/clustering.ts`)
@@ -95,12 +95,12 @@ This is where the magic happens. The system groups articles about the same event
 
 1. Fetch all embedded articles that don't belong to a story yet
 2. For each article, compare its fingerprint to existing stories using **cosine similarity** (a math operation that measures how "close" two vectors are — 1.0 = identical, 0.0 = completely unrelated)
-3. If similarity >= **78%** to an existing story, assign it to that story
+3. If similarity >= **72%** to an existing story, assign it to that story
 4. Otherwise, try to match it with other unassigned articles to form a new cluster
 5. A cluster with **2+ articles** becomes a `standard` story immediately
-6. Singletons remain unclustered and retry for up to **7 days**; after that they expire from the clustering pool
+6. Singletons remain unclustered while `clustering_attempts < 3`; once they hit the retry cap they are promoted into single-article stories. Separately, still-pending articles older than **7 days** are expired out of the clustering pool
 
-Clustering matches stories over the last **72 hours** by default.
+Clustering matches stories over the last **7 days** by default.
 
 Uses `clustering_claimed_at` as the article-stage lease marker, with the same 30 minute stale-claim recovery window as embedding.
 New stories begin as `assembly_status = 'pending'` and `publication_status = 'draft'`.
@@ -109,7 +109,7 @@ New stories begin as `assembly_status = 'pending'` and `publication_status = 'dr
 
 Every article gets a **768-number fingerprint** that represents its meaning. The title + description are sent to Google Gemini's embedding model, which returns a vector like `[0.023, -0.018, 0.041, ...]`. Articles about the same event produce similar vectors, even if the words are completely different.
 
-- Processes up to 100 articles per pass by default, in batches of 20 at the model layer
+- Processes bounded batches driven by the process runner (50 articles per pass by default), in batches of 20 at the model layer
 - Uses `embedding_claimed_at` to claim bounded batches safely between runs
 - Fresh claims are skipped; claims older than 30 minutes are treated as stale and retried
 - Once embedded, the article is flagged `is_embedded = true` and its claim is cleared
@@ -322,7 +322,7 @@ lib/hooks/       — SWR data-fetching hooks + auth hooks + utilities (23 files)
 | `GET` | `/api/admin/pipeline` | Pipeline dashboard overview (admin required) |
 | `GET` | `/api/admin/pipeline/sources` | Source health data for pipeline admin (admin required) |
 | `GET` | `/api/admin/pipeline/stats` | Pipeline statistics (admin required) |
-| `GET` | `/api/admin/pipeline/trigger` | Trigger pipeline run manually (admin required) |
+| `POST` | `/api/admin/pipeline/trigger` | Trigger pipeline run manually (admin required) |
 | `POST` | `/api/cron/digest` | Weekly blindspot digest email (protected by CRON_SECRET) |
 All responses follow `{ success: boolean, data: T, meta?: { total, page, limit } }`.
 
