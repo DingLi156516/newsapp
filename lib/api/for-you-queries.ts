@@ -31,8 +31,16 @@ interface StoryRow {
   ownership: string
   spectrum_segments: unknown
   ai_summary: unknown
+  published_at: string
   first_published: string
   last_updated: string
+  story_velocity: unknown
+  impact_score: number | null
+  source_diversity: number | null
+  controversy_score: number | null
+  sentiment: unknown
+  key_quotes: unknown
+  key_claims: unknown
 }
 
 export async function queryForYouStories(
@@ -113,12 +121,12 @@ async function fetchCandidateStories(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query = (client.from('stories') as any)
     .select(
-      'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, first_published, last_updated'
+      'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, published_at, first_published, last_updated, story_velocity, impact_score, source_diversity, controversy_score, sentiment, key_quotes, key_claims'
     )
     .eq('publication_status', 'published')
 
   query = query
-    .order('first_published', { ascending: false })
+    .order('published_at', { ascending: false })
     .order('id', { ascending: false })
     .limit(CANDIDATE_LIMIT)
 

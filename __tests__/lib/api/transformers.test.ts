@@ -1,4 +1,4 @@
-import { transformSource, transformStory, transformStoryList, transformTag } from '@/lib/api/transformers'
+import { transformSource, transformStory, transformStoryList, transformTag, transformHeadlines } from '@/lib/api/transformers'
 import type { DbSource } from '@/lib/supabase/types'
 
 const mockSource: DbSource = {
@@ -41,6 +41,7 @@ const mockStory = {
     leftFraming: 'Left sees it as Y.',
     rightFraming: 'Right sees it as Z.',
   },
+  published_at: '2024-06-01T11:00:00Z',
   first_published: '2024-06-01T12:00:00Z',
   last_updated: '2024-06-01T14:00:00Z',
 }
@@ -107,6 +108,102 @@ describe('transformStoryList', () => {
     const result = transformStoryList(mockStory)
     expect(result.sources).toEqual([])
     expect(result.headline).toBe('Test Headline')
+  })
+})
+
+describe('transformStory enrichment fields', () => {
+  const enrichedStory = {
+    ...mockStory,
+    story_velocity: { articles_24h: 5, articles_48h: 8, articles_7d: 12, phase: 'breaking' },
+    impact_score: 75,
+    source_diversity: 4,
+    controversy_score: 0.82,
+    sentiment: { left: 'critical', right: 'hopeful' },
+    key_quotes: [{ text: 'Important quote', sourceName: 'CNN', sourceBias: 'lean-left' }],
+    key_claims: [{ claim: 'Taxes rise', side: 'left', disputed: true, counterClaim: 'Offsets exist' }],
+  }
+
+  it('transforms all enrichment fields in transformStory', () => {
+    const result = transformStory(enrichedStory, [mockSource])
+    expect(result.storyVelocity).toEqual({ articles_24h: 5, articles_48h: 8, articles_7d: 12, phase: 'breaking' })
+    expect(result.impactScore).toBe(75)
+    expect(result.sourceDiversity).toBe(4)
+    expect(result.controversyScore).toBe(0.82)
+    expect(result.sentiment).toEqual({ left: 'critical', right: 'hopeful' })
+    expect(result.keyQuotes).toEqual([{ text: 'Important quote', sourceName: 'CNN', sourceBias: 'lean-left' }])
+    expect(result.keyClaims).toEqual([{ claim: 'Taxes rise', side: 'left', disputed: true, counterClaim: 'Offsets exist' }])
+  })
+
+  it('transforms enrichment fields in transformStoryList', () => {
+    const result = transformStoryList(enrichedStory)
+    expect(result.storyVelocity).toEqual({ articles_24h: 5, articles_48h: 8, articles_7d: 12, phase: 'breaking' })
+    expect(result.impactScore).toBe(75)
+    expect(result.sourceDiversity).toBe(4)
+    expect(result.controversyScore).toBe(0.82)
+    expect(result.sentiment).toEqual({ left: 'critical', right: 'hopeful' })
+  })
+
+  it('returns null for missing enrichment fields', () => {
+    const result = transformStory(mockStory, [])
+    expect(result.storyVelocity).toBeNull()
+    expect(result.impactScore).toBeNull()
+    expect(result.sourceDiversity).toBeNull()
+    expect(result.controversyScore).toBeNull()
+    expect(result.sentiment).toBeNull()
+    expect(result.keyQuotes).toBeNull()
+    expect(result.keyClaims).toBeNull()
+  })
+
+  it('rejects invalid velocity phase', () => {
+    const bad = { ...mockStory, story_velocity: { articles_24h: 1, articles_48h: 2, articles_7d: 3, phase: 'invalid' } }
+    const result = transformStory(bad, [])
+    expect(result.storyVelocity).toBeNull()
+  })
+
+  it('rejects invalid sentiment values', () => {
+    const bad = { ...mockStory, sentiment: { left: 'invalid', right: 'hopeful' } }
+    const result = transformStory(bad, [])
+    expect(result.sentiment).toBeNull()
+  })
+
+  it('filters out malformed key quotes', () => {
+    const bad = {
+      ...mockStory,
+      key_quotes: [
+        { text: 'Good', sourceName: 'CNN', sourceBias: 'lean-left' },
+        { text: 123 }, // invalid
+      ],
+    }
+    const result = transformStory(bad, [])
+    expect(result.keyQuotes).toHaveLength(1)
+  })
+
+  it('includes headlines when provided to transformStory', () => {
+    const headlines = [
+      { title: 'Left Title', sourceName: 'NYT', sourceBias: 'lean-left' },
+      { title: 'Right Title', sourceName: 'Fox', sourceBias: 'right' },
+    ]
+    const result = transformStory(mockStory, [], undefined, undefined, headlines)
+    expect(result.headlines).toHaveLength(2)
+    expect(result.headlines![0].title).toBe('Left Title')
+  })
+})
+
+describe('transformHeadlines', () => {
+  it('transforms headline rows into HeadlineComparison array', () => {
+    const rows = [
+      { title: 'Left Headline', sourceName: 'CNN', sourceBias: 'lean-left' },
+      { title: 'Right Headline', sourceName: 'Fox News', sourceBias: 'right' },
+    ]
+    const result = transformHeadlines(rows)
+    expect(result).toEqual([
+      { title: 'Left Headline', sourceName: 'CNN', sourceBias: 'lean-left' },
+      { title: 'Right Headline', sourceName: 'Fox News', sourceBias: 'right' },
+    ])
+  })
+
+  it('returns empty array for empty input', () => {
+    expect(transformHeadlines([])).toEqual([])
   })
 })
 

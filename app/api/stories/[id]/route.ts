@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServerClient } from '@/lib/supabase/server'
-import { queryStoryById, querySourcesForStory, queryTagsForStory } from '@/lib/api/query-helpers'
+import { queryStoryById, querySourcesForStory, queryTagsForStory, queryHeadlinesForStory } from '@/lib/api/query-helpers'
 import { transformStory } from '@/lib/api/transformers'
 import type { DbSource } from '@/lib/supabase/types'
 
@@ -44,13 +44,21 @@ export async function GET(
     }
 
     const { sources: sourceRows, articleUrlMap } = await querySourcesForStory(client, id)
+
+    let headlineRows: Array<{ title: string; sourceName: string; sourceBias: string }> = []
+    try {
+      headlineRows = await queryHeadlinesForStory(client, id)
+    } catch (headlineErr) {
+      console.error(`[stories/${id}] Headline fetch failed:`, headlineErr instanceof Error ? headlineErr.message : String(headlineErr))
+    }
+
     let tagRows: Array<{ slug: string; label: string; tag_type: string; story_count: number; description?: string | null; relevance?: number }> = []
     try {
       tagRows = await queryTagsForStory(client, id)
     } catch (tagErr) {
       console.error(`[stories/${id}] Tag fetch failed:`, tagErr instanceof Error ? tagErr.message : String(tagErr))
     }
-    const transformed = transformStory(story, sourceRows as DbSource[], articleUrlMap, tagRows)
+    const transformed = transformStory(story, sourceRows as DbSource[], articleUrlMap, tagRows, headlineRows)
 
     return NextResponse.json({
       success: true,

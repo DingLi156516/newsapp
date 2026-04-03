@@ -126,4 +126,60 @@ describe('NexusCard', () => {
     const headline = screen.getByText(article.headline)
     expect(headline.className).not.toContain('text-white/50')
   })
+
+  it('renders MomentumBadge for breaking stories', () => {
+    const breakingArticle = {
+      ...article,
+      storyVelocity: { articles_24h: 5, articles_48h: 8, articles_7d: 12, phase: 'breaking' as const },
+    }
+    render(
+      <NexusCard article={breakingArticle} isSaved={false} onSave={vi.fn()} onClick={vi.fn()} />,
+    )
+    expect(screen.getByText('BREAKING')).toBeInTheDocument()
+  })
+
+  it('does not render MomentumBadge for aftermath phase', () => {
+    const aftermathArticle = {
+      ...article,
+      storyVelocity: { articles_24h: 0, articles_48h: 0, articles_7d: 1, phase: 'aftermath' as const },
+    }
+    render(
+      <NexusCard article={aftermathArticle} isSaved={false} onSave={vi.fn()} onClick={vi.fn()} />,
+    )
+    expect(screen.queryByText('BREAKING')).not.toBeInTheDocument()
+    expect(screen.queryByText('DEVELOPING')).not.toBeInTheDocument()
+    expect(screen.queryByText('ANALYSIS')).not.toBeInTheDocument()
+    expect(screen.queryByText('AFTERMATH')).not.toBeInTheDocument()
+  })
+
+  it('does not render MomentumBadge when storyVelocity is absent', () => {
+    render(
+      <NexusCard article={article} isSaved={false} onSave={vi.fn()} onClick={vi.fn()} />,
+    )
+    expect(screen.queryByText('BREAKING')).not.toBeInTheDocument()
+    expect(screen.queryByText('DEVELOPING')).not.toBeInTheDocument()
+  })
+
+  it('renders HIGH DISAGREEMENT badge for high controversy score', () => {
+    const controversialArticle = { ...article, controversyScore: 0.85 }
+    render(
+      <NexusCard article={controversialArticle} isSaved={false} onSave={vi.fn()} onClick={vi.fn()} />,
+    )
+    expect(screen.getByText('HIGH DISAGREEMENT')).toBeInTheDocument()
+  })
+
+  it('does not render HIGH DISAGREEMENT badge for low controversy score', () => {
+    const mildArticle = { ...article, controversyScore: 0.5 }
+    render(
+      <NexusCard article={mildArticle} isSaved={false} onSave={vi.fn()} onClick={vi.fn()} />,
+    )
+    expect(screen.queryByText('HIGH DISAGREEMENT')).not.toBeInTheDocument()
+  })
+
+  it('does not render HIGH DISAGREEMENT badge when controversyScore is absent', () => {
+    render(
+      <NexusCard article={article} isSaved={false} onSave={vi.fn()} onClick={vi.fn()} />,
+    )
+    expect(screen.queryByText('HIGH DISAGREEMENT')).not.toBeInTheDocument()
+  })
 })

@@ -17,6 +17,12 @@ import type {
   TagType,
   Topic,
   Region,
+  BiasCategory,
+  StoryVelocity,
+  StorySentiment,
+  KeyQuote,
+  KeyClaim,
+  HeadlineComparison,
 } from '@/lib/types'
 import type { DbSource } from '@/lib/supabase/types'
 import { getSourceSlug } from '@/lib/source-slugs'
@@ -33,8 +39,16 @@ interface StoryWithSources {
   ownership: string
   spectrum_segments: unknown
   ai_summary: unknown
+  published_at: string
   first_published: string
   last_updated: string
+  story_velocity?: unknown
+  impact_score?: number | null
+  source_diversity?: number | null
+  controversy_score?: number | null
+  sentiment?: unknown
+  key_quotes?: unknown
+  key_claims?: unknown
 }
 
 const DEFAULT_AI_SUMMARY: AISummary = {
@@ -59,6 +73,83 @@ function parseAISummary(raw: unknown): AISummary {
     }
   }
   return DEFAULT_AI_SUMMARY
+}
+
+const VALID_SENTIMENTS = new Set(['angry', 'fearful', 'hopeful', 'neutral', 'critical', 'celebratory'])
+const VALID_PHASES = new Set(['breaking', 'developing', 'analysis', 'aftermath'])
+
+function parseStoryVelocity(raw: unknown): StoryVelocity | null {
+  if (raw === null || raw === undefined || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  if (
+    typeof obj.articles_24h !== 'number' ||
+    typeof obj.articles_48h !== 'number' ||
+    typeof obj.articles_7d !== 'number' ||
+    !VALID_PHASES.has(String(obj.phase))
+  ) {
+    return null
+  }
+  return {
+    articles_24h: obj.articles_24h,
+    articles_48h: obj.articles_48h,
+    articles_7d: obj.articles_7d,
+    phase: obj.phase as StoryVelocity['phase'],
+  }
+}
+
+function parseSentiment(raw: unknown): StorySentiment | null {
+  if (raw === null || raw === undefined || typeof raw !== 'object') return null
+  const obj = raw as Record<string, unknown>
+  if (!VALID_SENTIMENTS.has(String(obj.left)) || !VALID_SENTIMENTS.has(String(obj.right))) {
+    return null
+  }
+  return {
+    left: obj.left as StorySentiment['left'],
+    right: obj.right as StorySentiment['right'],
+  }
+}
+
+function parseKeyQuotes(raw: unknown): KeyQuote[] | null {
+  if (!Array.isArray(raw)) return null
+  return raw
+    .filter(
+      (q): q is { text: string; sourceName: string; sourceBias: string } =>
+        typeof q === 'object' &&
+        q !== null &&
+        typeof q.text === 'string' &&
+        typeof q.sourceName === 'string' &&
+        typeof q.sourceBias === 'string'
+    )
+    .map((q) => ({ text: q.text, sourceName: q.sourceName, sourceBias: q.sourceBias }))
+}
+
+function parseKeyClaims(raw: unknown): KeyClaim[] | null {
+  if (!Array.isArray(raw)) return null
+  return raw
+    .filter(
+      (c): c is { claim: string; side: string; disputed: boolean; counterClaim?: string } =>
+        typeof c === 'object' &&
+        c !== null &&
+        typeof c.claim === 'string' &&
+        typeof c.side === 'string' &&
+        typeof c.disputed === 'boolean'
+    )
+    .map((c) => ({
+      claim: c.claim,
+      side: c.side as KeyClaim['side'],
+      disputed: c.disputed,
+      ...(c.counterClaim ? { counterClaim: c.counterClaim } : {}),
+    }))
+}
+
+export function transformHeadlines(
+  rows: ReadonlyArray<{ title: string; sourceName: string; sourceBias: string }>
+): HeadlineComparison[] {
+  return rows.map((row) => ({
+    title: row.title,
+    sourceName: row.sourceName,
+    sourceBias: row.sourceBias as BiasCategory,
+  }))
 }
 
 function parseSpectrumSegments(raw: unknown): SpectrumSegment[] {
@@ -116,7 +207,8 @@ export function transformStory(
   story: StoryWithSources,
   sources: readonly DbSource[],
   articleUrlMap?: Map<string, string>,
-  tags?: readonly TagRow[]
+  tags?: readonly TagRow[],
+  headlines?: ReadonlyArray<{ title: string; sourceName: string; sourceBias: string }>
 ): NewsArticle {
   return {
     id: story.id,
@@ -130,9 +222,17 @@ export function transformStory(
     sources: sources.map((s) => transformSource(s, articleUrlMap?.get(s.id))),
     spectrumSegments: parseSpectrumSegments(story.spectrum_segments),
     aiSummary: parseAISummary(story.ai_summary),
-    timestamp: story.first_published,
+    timestamp: story.published_at,
     region: story.region as Region,
     ...(tags && tags.length > 0 ? { tags: tags.map(transformTag) } : {}),
+    storyVelocity: parseStoryVelocity(story.story_velocity),
+    impactScore: story.impact_score ?? null,
+    sourceDiversity: story.source_diversity ?? null,
+    controversyScore: story.controversy_score ?? null,
+    sentiment: parseSentiment(story.sentiment),
+    keyQuotes: parseKeyQuotes(story.key_quotes),
+    keyClaims: parseKeyClaims(story.key_claims),
+    ...(headlines && headlines.length > 0 ? { headlines: transformHeadlines(headlines) } : {}),
   }
 }
 
@@ -151,7 +251,14 @@ export function transformStoryList(
     sources: [],
     spectrumSegments: parseSpectrumSegments(story.spectrum_segments),
     aiSummary: parseAISummary(story.ai_summary),
-    timestamp: story.first_published,
+    timestamp: story.published_at,
     region: story.region as Region,
+    storyVelocity: parseStoryVelocity(story.story_velocity),
+    impactScore: story.impact_score ?? null,
+    sourceDiversity: story.source_diversity ?? null,
+    controversyScore: story.controversy_score ?? null,
+    sentiment: parseSentiment(story.sentiment),
+    keyQuotes: parseKeyQuotes(story.key_quotes),
+    keyClaims: parseKeyClaims(story.key_claims),
   }
 }

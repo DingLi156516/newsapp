@@ -118,6 +118,58 @@ export interface AISummary {
   rightFraming: string  // How right-leaning outlets frame/interpret the story
 }
 
+// ---------------------------------------------------------------------------
+// Story enrichment types (data intelligence layer)
+// ---------------------------------------------------------------------------
+
+/** Sentiment label for political framing analysis. */
+export type SentimentLabel =
+  | 'angry'
+  | 'fearful'
+  | 'hopeful'
+  | 'neutral'
+  | 'critical'
+  | 'celebratory'
+
+/** Narrative phase derived from article velocity. */
+export type NarrativePhase = 'breaking' | 'developing' | 'analysis' | 'aftermath'
+
+/** Story velocity metrics computed from article timestamps. */
+export interface StoryVelocity {
+  readonly articles_24h: number
+  readonly articles_48h: number
+  readonly articles_7d: number
+  readonly phase: NarrativePhase
+}
+
+/** Left/right sentiment derived from AI summary analysis. */
+export interface StorySentiment {
+  readonly left: SentimentLabel
+  readonly right: SentimentLabel
+}
+
+/** A notable quote extracted from article coverage. */
+export interface KeyQuote {
+  readonly text: string
+  readonly sourceName: string
+  readonly sourceBias: string
+}
+
+/** A factual claim identified across coverage, with dispute tracking. */
+export interface KeyClaim {
+  readonly claim: string
+  readonly side: 'left' | 'right' | 'both'
+  readonly disputed: boolean
+  readonly counterClaim?: string
+}
+
+/** Headline comparison entry showing how different outlets title the same story. */
+export interface HeadlineComparison {
+  readonly title: string
+  readonly sourceName: string
+  readonly sourceBias: BiasCategory
+}
+
 /**
  * A single news outlet that covered a story.
  * Analogous to a "Source" record in your backend DB.
@@ -213,6 +265,14 @@ export interface NewsArticle {
   timestamp: string            // ISO 8601 datetime string
   region: Region
   tags?: StoryTag[]            // Entity tags extracted by AI
+  storyVelocity?: StoryVelocity | null
+  impactScore?: number | null
+  sourceDiversity?: number | null
+  controversyScore?: number | null
+  sentiment?: StorySentiment | null
+  keyQuotes?: KeyQuote[] | null
+  keyClaims?: KeyClaim[] | null
+  headlines?: HeadlineComparison[]
 }
 
 /** All tag types as an array, for iteration and validation. */

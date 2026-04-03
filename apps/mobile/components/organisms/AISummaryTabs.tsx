@@ -7,11 +7,14 @@ import { useState, useRef, useCallback } from 'react'
 import { View, Text, Pressable, type LayoutChangeEvent } from 'react-native'
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, withSpring, useSharedValue } from 'react-native-reanimated'
 import { GlassView } from '@/components/ui/GlassView'
+import { SentimentPill } from '@/components/atoms/SentimentPill'
+import type { StorySentiment } from '@/lib/shared/types'
 
 interface Props {
   readonly commonGround: string
   readonly leftFraming: string
   readonly rightFraming: string
+  readonly sentiment?: StorySentiment | null
 }
 
 type TabId = 'common' | 'left' | 'right'
@@ -37,7 +40,7 @@ function ContentBlock({ content }: { content: string }) {
   )
 }
 
-export function AISummaryTabs({ commonGround, leftFraming, rightFraming }: Props) {
+export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentiment }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('common')
   const underlineX = useSharedValue(0)
   const underlineWidth = useSharedValue(0)
@@ -89,10 +92,13 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming }: Props
               key={tab.id}
               onPress={() => handlePress(tab.id)}
               onLayout={(e) => handleLayout(tab.id, e)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
               style={{
                 flex: 1,
                 paddingVertical: 12,
                 alignItems: 'center',
+                gap: 4,
               }}
             >
               <Text style={{
@@ -102,6 +108,12 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming }: Props
               }}>
                 {tab.label}
               </Text>
+              {sentiment && tab.id === 'left' && (
+                <SentimentPill sentiment={sentiment.left} />
+              )}
+              {sentiment && tab.id === 'right' && (
+                <SentimentPill sentiment={sentiment.right} />
+              )}
             </Pressable>
           )
         })}

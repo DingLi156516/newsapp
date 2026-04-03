@@ -9,6 +9,7 @@ import { CoverageCount } from '@/components/atoms/CoverageCount'
 import { BlindspotBadge } from '@/components/atoms/BlindspotBadge'
 import { BookmarkButton } from '@/components/atoms/BookmarkButton'
 import { ShareButton } from '@/components/atoms/ShareButton'
+import { MomentumBadge } from '@/components/atoms/MomentumBadge'
 import { MonochromeSpectrumBar } from '@/components/molecules/MonochromeSpectrumBar'
 
 interface Props {
@@ -76,6 +77,17 @@ export function NexusCard({ article, onSave, isSaved, onClick, compact = false, 
             <div className="flex items-center flex-wrap gap-1.5">
               <CoverageCount count={article.sourceCount} />
               {article.isBlindspot && <BlindspotBadge />}
+              {article.storyVelocity && article.storyVelocity.phase !== 'aftermath' && (
+                <MomentumBadge phase={article.storyVelocity.phase} />
+              )}
+              {article.controversyScore != null && article.controversyScore > 0.7 && (
+                <span
+                  className="inline-flex items-center rounded-full border border-orange-500/30 bg-orange-500/15 px-2.5 py-0.5 text-[10px] font-semibold tracking-widest text-orange-300 uppercase"
+                  aria-label="High disagreement between political perspectives"
+                >
+                  HIGH DISAGREEMENT
+                </span>
+              )}
               {isRead && (
                 <span className="glass-pill px-2 py-0.5 text-[10px] text-white/40">
                   Read

@@ -12,6 +12,7 @@ import {
   queryTags,
   queryTagsForStory,
   queryRelatedTags,
+  queryHeadlinesForStory,
 } from '@/lib/api/query-helpers'
 
 function createMockQueryBuilder(data: unknown = [], count: number = 0, error: null | { message: string; code?: string } = null) {
@@ -57,8 +58,16 @@ const mockStory = {
   ownership: 'corporate',
   spectrum_segments: [],
   ai_summary: {},
+  published_at: '2024-01-01T00:00:00Z',
   first_published: '2024-01-01T00:00:00Z',
   last_updated: '2024-01-01T00:00:00Z',
+  story_velocity: null,
+  impact_score: null,
+  source_diversity: null,
+  controversy_score: null,
+  sentiment: null,
+  key_quotes: null,
+  key_claims: null,
 }
 
 describe('queryStories', () => {
@@ -661,6 +670,85 @@ describe('queryTagsForStory', () => {
     const client = createMockClient(builder)
 
     await expect(queryTagsForStory(client, 'story-1')).rejects.toThrow('Failed to fetch tags for story')
+  })
+})
+
+describe('queryHeadlinesForStory', () => {
+  it('returns headlines sorted by bias spectrum', async () => {
+    const mockHeadlines = [
+      { title: 'Right Headline', sources: { name: 'Fox News', bias: 'right' } },
+      { title: 'Left Headline', sources: { name: 'CNN', bias: 'lean-left' } },
+      { title: 'Center Headline', sources: { name: 'Reuters', bias: 'center' } },
+    ]
+    const builder = createMockQueryBuilder(mockHeadlines)
+    const client = createMockClient(builder)
+
+    const result = await queryHeadlinesForStory(client, 'story-1')
+
+    expect(result).toHaveLength(3)
+    // Should be sorted: lean-left, center, right
+    expect(result[0].sourceBias).toBe('lean-left')
+    expect(result[1].sourceBias).toBe('center')
+    expect(result[2].sourceBias).toBe('right')
+  })
+
+  it('returns empty array for no articles', async () => {
+    const builder = createMockQueryBuilder([])
+    const client = createMockClient(builder)
+
+    const result = await queryHeadlinesForStory(client, 'story-1')
+    expect(result).toEqual([])
+  })
+
+  it('filters out rows with null sources', async () => {
+    const mockHeadlines = [
+      { title: 'Good', sources: { name: 'CNN', bias: 'lean-left' } },
+      { title: 'Bad', sources: null },
+    ]
+    const builder = createMockQueryBuilder(mockHeadlines)
+    const client = createMockClient(builder)
+
+    const result = await queryHeadlinesForStory(client, 'story-1')
+    expect(result).toHaveLength(1)
+  })
+
+  it('deduplicates by source name keeping first (most recent) entry', async () => {
+    const mockHeadlines = [
+      { title: 'CNN Update 2', sources: { name: 'CNN', bias: 'lean-left' } },
+      { title: 'CNN Update 1', sources: { name: 'CNN', bias: 'lean-left' } },
+      { title: 'Fox Headline', sources: { name: 'Fox News', bias: 'right' } },
+    ]
+    const builder = createMockQueryBuilder(mockHeadlines)
+    const client = createMockClient(builder)
+
+    const result = await queryHeadlinesForStory(client, 'story-1')
+
+    expect(result).toHaveLength(2)
+    expect(result.find((h) => h.sourceName === 'CNN')?.title).toBe('CNN Update 2')
+    expect(result.find((h) => h.sourceName === 'Fox News')?.title).toBe('Fox Headline')
+  })
+
+  it('keeps first row per outlet even with identical published_at', async () => {
+    // Rows arrive pre-sorted by published_at DESC, created_at DESC from query
+    // First row per source is the most recently created
+    const mockHeadlines = [
+      { title: 'Reuters Latest', sources: { name: 'Reuters', bias: 'center' } },
+      { title: 'Reuters Older', sources: { name: 'Reuters', bias: 'center' } },
+    ]
+    const builder = createMockQueryBuilder(mockHeadlines)
+    const client = createMockClient(builder)
+
+    const result = await queryHeadlinesForStory(client, 'story-1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].title).toBe('Reuters Latest')
+  })
+
+  it('throws on query error', async () => {
+    const builder = createMockQueryBuilder(null, 0, { message: 'DB error' })
+    const client = createMockClient(builder)
+
+    await expect(queryHeadlinesForStory(client, 'story-1')).rejects.toThrow('Failed to fetch headlines for story')
   })
 })
 

@@ -111,17 +111,29 @@ function createMockClient(overrides: {
     }
     if (table === 'stories') {
       return {
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            order: vi.fn().mockReturnValue({
-              order: vi.fn().mockReturnValue({
-                limit: vi.fn().mockReturnValue({
-                  returns: storyReturns,
+        select: vi.fn().mockImplementation((columns: string) => {
+          if (columns === 'first_published') {
+            return {
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { first_published: '2026-03-22T10:00:00Z' },
+                  error: null,
                 }),
               }),
+            }
+          }
+          return {
+            eq: vi.fn().mockReturnValue({
+              order: vi.fn().mockReturnValue({
+                order: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockReturnValue({
+                    returns: storyReturns,
+                  }),
+                }),
+              }),
+              returns: storyReturns,
             }),
-            returns: storyReturns,
-          }),
+          }
         }),
         update: updateFn,
       }
@@ -139,8 +151,8 @@ describe('assembleSingleStory', () => {
 
   it('generates headline, topic, and summary for a story', async () => {
     const articles = [
-      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: 'img.jpg' },
-      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null },
+      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: 'img.jpg', published_at: '2026-03-22T10:00:00Z' },
+      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
     ]
     const sources = [
       { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
@@ -151,9 +163,10 @@ describe('assembleSingleStory', () => {
     mockTopic.mockResolvedValue(topicResult('politics'))
     mockRegion.mockResolvedValue(regionResult('us'))
     mockSummary.mockResolvedValue({
-      commonGround: 'CG',
-      leftFraming: 'LF',
-      rightFraming: 'RF',
+      aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
+      sentiment: null,
+      keyQuotes: null,
+      keyClaims: null,
     })
     mockSpectrum.mockReturnValue([
       { bias: 'left', percentage: 50 },
@@ -225,7 +238,7 @@ describe('assembleSingleStory', () => {
 
   it('throws on sources fetch error', async () => {
     const articles = [
-      { id: 'a1', title: 'Title', description: null, source_id: 's1', image_url: null },
+      { id: 'a1', title: 'Title', description: null, source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
     ]
 
     const client = createMockClient({
@@ -240,8 +253,8 @@ describe('assembleSingleStory', () => {
 
   it('does not throw when tag upsert fails', async () => {
     const articles = [
-      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: null },
-      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null },
+      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
+      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
     ]
     const sources = [
       { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
@@ -251,7 +264,7 @@ describe('assembleSingleStory', () => {
     mockHeadline.mockResolvedValue(headlineResult('Headline'))
     mockTopic.mockResolvedValue(topicResult('politics'))
     mockRegion.mockResolvedValue(regionResult('us'))
-    mockSummary.mockResolvedValue({ commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' })
+    mockSummary.mockResolvedValue({ aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' }, sentiment: null, keyQuotes: null, keyClaims: null })
     mockSpectrum.mockReturnValue([
       { bias: 'left', percentage: 50 },
       { bias: 'right', percentage: 50 },
@@ -274,7 +287,7 @@ describe('assembleSingleStory', () => {
 
   it('throws on update error', async () => {
     const articles = [
-      { id: 'a1', title: 'Title', description: null, source_id: 's1', image_url: null },
+      { id: 'a1', title: 'Title', description: null, source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
     ]
     const sources = [
       { id: 's1', bias: 'center', factuality: 'high', ownership: 'corporate' },
@@ -283,7 +296,7 @@ describe('assembleSingleStory', () => {
     mockHeadline.mockResolvedValue(headlineResult('Headline'))
     mockTopic.mockResolvedValue(topicResult('politics'))
     mockRegion.mockResolvedValue(regionResult('us'))
-    mockSummary.mockResolvedValue({ commonGround: '', leftFraming: '', rightFraming: '' })
+    mockSummary.mockResolvedValue({ aiSummary: { commonGround: '', leftFraming: '', rightFraming: '' }, sentiment: null, keyQuotes: null, keyClaims: null })
     mockSpectrum.mockReturnValue([])
     mockBlindspot.mockReturnValue(false)
     mockExtractEntities.mockResolvedValue([])
@@ -340,8 +353,8 @@ describe('assembleStories', () => {
 
   it('claims pending stories by assembly status and tracks publish counts', async () => {
     const articles = [
-      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: 'img.jpg' },
-      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null },
+      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: 'img.jpg', published_at: '2026-03-22T10:00:00Z' },
+      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
     ]
     const sources = [
       { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
@@ -352,9 +365,10 @@ describe('assembleStories', () => {
     mockTopic.mockResolvedValue(topicResult('politics'))
     mockRegion.mockResolvedValue(regionResult('us'))
     mockSummary.mockResolvedValue({
-      commonGround: 'CG',
-      leftFraming: 'LF',
-      rightFraming: 'RF',
+      aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
+      sentiment: null,
+      keyQuotes: null,
+      keyClaims: null,
     })
     mockSpectrum.mockReturnValue([
       { bias: 'left', percentage: 50 },
@@ -365,7 +379,7 @@ describe('assembleStories', () => {
     mockUpsertStoryTags.mockResolvedValue(undefined)
 
     const client = createMockClient({
-      stories: { data: [{ id: 'story-1' }], error: null },
+      stories: { data: [{ id: 'story-1', first_published: '2026-03-22T10:00:00Z' }], error: null },
       articles: { data: articles, error: null },
       sources: { data: sources, error: null },
     })
@@ -380,8 +394,8 @@ describe('assembleStories', () => {
 
   it('skips freshly claimed pending stories but processes stale claims', async () => {
     const articles = [
-      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: 'img.jpg' },
-      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null },
+      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: 'img.jpg', published_at: '2026-03-22T10:00:00Z' },
+      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
     ]
     const sources = [
       { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
@@ -392,9 +406,10 @@ describe('assembleStories', () => {
     mockTopic.mockResolvedValue(topicResult('politics'))
     mockRegion.mockResolvedValue(regionResult('us'))
     mockSummary.mockResolvedValue({
-      commonGround: 'CG',
-      leftFraming: 'LF',
-      rightFraming: 'RF',
+      aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
+      sentiment: null,
+      keyQuotes: null,
+      keyClaims: null,
     })
     mockSpectrum.mockReturnValue([
       { bias: 'left', percentage: 50 },
@@ -407,9 +422,9 @@ describe('assembleStories', () => {
     const client = createMockClient({
       stories: {
         data: [
-          { id: 'story-1', assembly_claimed_at: null },
-          { id: 'story-2', assembly_claimed_at: '2026-03-22T10:45:00Z' },
-          { id: 'story-3', assembly_claimed_at: '2026-03-22T11:45:00Z' },
+          { id: 'story-1', assembly_claimed_at: null, first_published: '2026-03-22T10:00:00Z' },
+          { id: 'story-2', assembly_claimed_at: '2026-03-22T10:45:00Z', first_published: '2026-03-22T10:00:00Z' },
+          { id: 'story-3', assembly_claimed_at: '2026-03-22T11:45:00Z', first_published: '2026-03-22T10:00:00Z' },
         ],
         error: null,
       },
@@ -426,14 +441,14 @@ describe('assembleStories', () => {
 
   it('processes multiple stories concurrently when a concurrency cap is provided', async () => {
     const articles = [
-      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: 'img.jpg' },
-      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null },
+      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: 'img.jpg', published_at: '2026-03-22T10:00:00Z' },
+      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
     ]
     const sources = [
       { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
       { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
     ]
-    const summaryResolvers: Array<(value: { commonGround: string; leftFraming: string; rightFraming: string }) => void> = []
+    const summaryResolvers: Array<(value: { aiSummary: { commonGround: string; leftFraming: string; rightFraming: string }; sentiment: null; keyQuotes: null; keyClaims: null }) => void> = []
 
     mockHeadline.mockResolvedValue(headlineResult('Generated Headline'))
     mockTopic.mockResolvedValue(topicResult('politics'))
@@ -455,8 +470,8 @@ describe('assembleStories', () => {
     const client = createMockClient({
       stories: {
         data: [
-          { id: 'story-1', assembly_claimed_at: null },
-          { id: 'story-2', assembly_claimed_at: null },
+          { id: 'story-1', assembly_claimed_at: null, first_published: '2026-03-22T10:00:00Z' },
+          { id: 'story-2', assembly_claimed_at: null, first_published: '2026-03-22T10:00:00Z' },
         ],
         error: null,
       },
@@ -472,7 +487,7 @@ describe('assembleStories', () => {
     expect(mockSummary).toHaveBeenCalledTimes(2)
 
     for (const resolve of summaryResolvers) {
-      resolve({ commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' })
+      resolve({ aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' }, sentiment: null, keyQuotes: null, keyClaims: null })
     }
 
     const result = await resultPromise

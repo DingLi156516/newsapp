@@ -23,11 +23,14 @@
 
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import type { StorySentiment } from '@/lib/types'
+import { SentimentIndicator } from '@/components/atoms/SentimentIndicator'
 
 interface Props {
   commonGround: string  // Bullet list string, newline-delimited
   leftFraming: string
   rightFraming: string
+  sentiment?: StorySentiment | null
 }
 
 /** Discriminated union for tab IDs — TypeScript catches invalid tab names at compile time */
@@ -58,7 +61,7 @@ function ContentBlock({ content }: { content: string }) {
   )
 }
 
-export function AISummaryTabs({ commonGround, leftFraming, rightFraming }: Props) {
+export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentiment }: Props) {
   /** Currently active tab — controls both the underline position and the rendered content */
   const [activeTab, setActiveTab] = useState<TabId>('common')
 
@@ -93,7 +96,15 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming }: Props
                 : 'text-white/70 hover:text-white hover:bg-white/[0.04]'
             }`}
           >
-            {tab.label}
+            <span className="flex items-center justify-center gap-1.5">
+              {tab.label}
+              {sentiment && tab.id === 'left' && (
+                <SentimentIndicator sentiment={sentiment.left} side="left" />
+              )}
+              {sentiment && tab.id === 'right' && (
+                <SentimentIndicator sentiment={sentiment.right} side="right" />
+              )}
+            </span>
             {/* Shared layout animation: the underline span "moves" between buttons
                 because all three share the same layoutId. Framer Motion interpolates
                 the position/size via a FLIP animation under the hood. */}

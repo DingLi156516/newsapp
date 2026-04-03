@@ -17,6 +17,10 @@ import type {
   Topic,
   SpectrumSegment,
   AISummary,
+  StoryVelocity,
+  StorySentiment,
+  KeyQuote,
+  KeyClaim,
 } from '@/lib/types'
 
 // ---------------------------------------------------------------------------
@@ -89,6 +93,13 @@ export interface DbStory {
   review_status: 'pending' | 'approved' | 'rejected'
   reviewed_by: string | null
   reviewed_at: string | null
+  story_velocity: StoryVelocity | null
+  impact_score: number | null
+  source_diversity: number | null
+  controversy_score: number | null
+  sentiment: StorySentiment | null
+  key_quotes: KeyQuote[] | null
+  key_claims: KeyClaim[] | null
   first_published: string
   last_updated: string
   created_at: string
@@ -115,6 +126,13 @@ export interface DbStoryInsert {
   assembled_at?: string | null
   published_at?: string | null
   assembly_claimed_at?: string | null
+  story_velocity?: StoryVelocity | null
+  impact_score?: number | null
+  source_diversity?: number | null
+  controversy_score?: number | null
+  sentiment?: StorySentiment | null
+  key_quotes?: KeyQuote[] | null
+  key_claims?: KeyClaim[] | null
   first_published: string
 }
 

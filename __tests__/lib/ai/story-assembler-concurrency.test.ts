@@ -7,6 +7,7 @@ vi.mock('@/lib/ai/headline-generator', () => ({
 
 vi.mock('@/lib/ai/summary-generator', () => ({
   generateAISummary: vi.fn(),
+  isFallbackSummary: vi.fn(() => false),
 }))
 
 vi.mock('@/lib/ai/topic-classifier', () => ({
@@ -73,22 +74,34 @@ function createMockClient() {
     from: vi.fn().mockImplementation((table: string) => {
       if (table === 'stories') {
         return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              order: vi.fn().mockReturnValue({
+          select: vi.fn().mockImplementation((columns: string) => {
+            if (columns === 'first_published') {
+              return {
+                eq: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({
+                    data: { first_published: '2026-03-22T10:00:00Z' },
+                    error: null,
+                  }),
+                }),
+              }
+            }
+            return {
+              eq: vi.fn().mockReturnValue({
                 order: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockReturnValue({
-                    returns: vi.fn().mockResolvedValue({
-                      data: [
-                        { id: 'story-1', assembly_claimed_at: null },
-                        { id: 'story-2', assembly_claimed_at: null },
-                      ],
-                      error: null,
+                  order: vi.fn().mockReturnValue({
+                    limit: vi.fn().mockReturnValue({
+                      returns: vi.fn().mockResolvedValue({
+                        data: [
+                          { id: 'story-1', assembly_claimed_at: null, first_published: '2026-03-22T10:00:00Z' },
+                          { id: 'story-2', assembly_claimed_at: null, first_published: '2026-03-22T10:00:00Z' },
+                        ],
+                        error: null,
+                      }),
                     }),
                   }),
                 }),
               }),
-            }),
+            }
           }),
           update: updateFn,
         }
@@ -102,8 +115,8 @@ function createMockClient() {
                 order: vi.fn().mockReturnValue({
                   returns: vi.fn().mockResolvedValue({
                     data: [
-                      { id: 'a1', title: 'One', description: 'Desc', source_id: 'source-1', image_url: null },
-                      { id: 'a2', title: 'Two', description: 'Desc', source_id: 'source-2', image_url: null },
+                      { id: 'a1', title: 'One', description: 'Desc', source_id: 'source-1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
+                      { id: 'a2', title: 'Two', description: 'Desc', source_id: 'source-2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
                     ],
                     error: null,
                   }),
@@ -138,7 +151,7 @@ function createMockClient() {
 describe('assembleStories concurrency', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockSummary.mockResolvedValue({ commonGround: 'cg', leftFraming: 'lf', rightFraming: 'rf' })
+    mockSummary.mockResolvedValue({ aiSummary: { commonGround: 'cg', leftFraming: 'lf', rightFraming: 'rf' }, sentiment: null, keyQuotes: null, keyClaims: null })
     mockTopic.mockResolvedValue(topicResult('politics'))
     mockRegion.mockResolvedValue(regionResult('us'))
   })

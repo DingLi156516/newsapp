@@ -30,6 +30,12 @@ import { ShareButton } from '@/components/atoms/ShareButton'
 import { AISummaryTabs } from '@/components/organisms/AISummaryTabs'
 import { CoverageIntelligence } from '@/components/organisms/CoverageIntelligence'
 import { StoryTimeline } from '@/components/organisms/StoryTimeline'
+import { MomentumBadge } from '@/components/atoms/MomentumBadge'
+import { StoryTagsRow } from '@/components/molecules/StoryTagsRow'
+import { HeadlineComparisonList } from '@/components/organisms/HeadlineComparisonList'
+import { KeyQuotesCarousel } from '@/components/organisms/KeyQuotesCarousel'
+import { ClaimsComparison } from '@/components/organisms/ClaimsComparison'
+import { StoryScores } from '@/components/molecules/StoryScores'
 
 export default function StoryDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -135,6 +141,7 @@ export default function StoryDetailScreen() {
             </View>
             <CoverageCount count={story.sourceCount} />
             {story.isBlindspot && <BlindspotBadge />}
+            {story.storyVelocity && <MomentumBadge phase={story.storyVelocity.phase} />}
             <FactualityBar level={story.factuality} />
             <GuideLink />
           </View>
@@ -143,6 +150,11 @@ export default function StoryDetailScreen() {
           <Text testID="story-headline" style={{ fontFamily: 'DMSerifDisplay', fontSize: 26, lineHeight: 34, color: 'white' }}>
             {story.headline}
           </Text>
+
+          {/* Tags */}
+          {story.tags && story.tags.length > 0 && (
+            <StoryTagsRow tags={story.tags} />
+          )}
 
           {/* Spectrum bar */}
           <SpectrumBar segments={story.spectrumSegments} height={14} showLabels />
@@ -167,6 +179,23 @@ export default function StoryDetailScreen() {
             commonGround={story.aiSummary.commonGround}
             leftFraming={story.aiSummary.leftFraming}
             rightFraming={story.aiSummary.rightFraming}
+            sentiment={story.sentiment}
+          />
+
+          {/* Headline Comparison */}
+          {story.headlines && <HeadlineComparisonList headlines={story.headlines} />}
+
+          {/* Key Quotes */}
+          {story.keyQuotes && <KeyQuotesCarousel quotes={story.keyQuotes} />}
+
+          {/* Claims */}
+          {story.keyClaims && <ClaimsComparison claims={story.keyClaims} />}
+
+          {/* Story Scores */}
+          <StoryScores
+            impactScore={story.impactScore}
+            sourceDiversity={story.sourceDiversity}
+            controversyScore={story.controversyScore}
           />
 
           {/* Coverage Intelligence */}

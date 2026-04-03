@@ -125,6 +125,59 @@ export interface NewsSource {
   articleUrl?: string
 }
 
+// ---------------------------------------------------------------------------
+// Enrichment types
+// ---------------------------------------------------------------------------
+
+export type SentimentLabel = 'angry' | 'fearful' | 'hopeful' | 'neutral' | 'critical' | 'celebratory'
+
+export type NarrativePhase = 'breaking' | 'developing' | 'analysis' | 'aftermath'
+
+export type TagType = 'person' | 'organization' | 'location' | 'event' | 'topic'
+
+export interface StoryVelocity {
+  readonly articles_24h: number
+  readonly articles_48h: number
+  readonly articles_7d: number
+  readonly phase: NarrativePhase
+}
+
+export interface StorySentiment {
+  readonly left: SentimentLabel
+  readonly right: SentimentLabel
+}
+
+export interface KeyQuote {
+  readonly text: string
+  readonly sourceName: string
+  readonly sourceBias: string
+}
+
+export interface KeyClaim {
+  readonly claim: string
+  readonly side: 'left' | 'right' | 'both'
+  readonly disputed: boolean
+  readonly counterClaim?: string
+}
+
+export interface HeadlineComparison {
+  readonly title: string
+  readonly sourceName: string
+  readonly sourceBias: string
+}
+
+export interface StoryTag {
+  readonly slug: string
+  readonly label: string
+  readonly type: TagType
+  readonly storyCount: number
+  readonly relevance?: number
+}
+
+// ---------------------------------------------------------------------------
+// Main article interface
+// ---------------------------------------------------------------------------
+
 export interface NewsArticle {
   id: string
   headline: string
@@ -139,6 +192,15 @@ export interface NewsArticle {
   aiSummary: AISummary
   timestamp: string
   region: Region
+  storyVelocity?: StoryVelocity | null
+  impactScore?: number | null
+  sourceDiversity?: number | null
+  controversyScore?: number | null
+  sentiment?: StorySentiment | null
+  keyQuotes?: KeyQuote[] | null
+  keyClaims?: KeyClaim[] | null
+  headlines?: HeadlineComparison[]
+  tags?: StoryTag[]
 }
 
 // ---------------------------------------------------------------------------
@@ -322,3 +384,29 @@ export const ALL_OWNERSHIPS: OwnershipType[] = [
   'independent', 'corporate', 'non-profit', 'state-funded',
   'private-equity', 'telecom', 'government', 'other',
 ]
+
+// ---------------------------------------------------------------------------
+// Enrichment display lookup tables
+// ---------------------------------------------------------------------------
+
+export const SENTIMENT_EMOJI: Record<SentimentLabel, string> = {
+  angry: '\u{1F620}', fearful: '\u{1F628}', hopeful: '\u{1F31F}',
+  neutral: '\u{1F610}', critical: '\u{1F50D}', celebratory: '\u{1F389}',
+}
+
+export const SENTIMENT_LABELS: Record<SentimentLabel, string> = {
+  angry: 'Angry', fearful: 'Fearful', hopeful: 'Hopeful',
+  neutral: 'Neutral', critical: 'Critical', celebratory: 'Celebratory',
+}
+
+export const PHASE_LABELS: Record<NarrativePhase, string> = {
+  breaking: 'Breaking', developing: 'Developing', analysis: 'Analysis', aftermath: 'Aftermath',
+}
+
+export const PHASE_COLORS: Record<NarrativePhase, string> = {
+  breaking: '#EF4444', developing: '#F59E0B', analysis: '#3B82F6', aftermath: '#6B7280',
+}
+
+export const TAG_TYPE_COLORS: Record<TagType, string> = {
+  person: '#8B5CF6', organization: '#3B82F6', location: '#10B981', event: '#F59E0B', topic: '#6B7280',
+}

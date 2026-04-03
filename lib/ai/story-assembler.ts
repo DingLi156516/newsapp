@@ -10,7 +10,14 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, DbSource } from '@/lib/supabase/types'
 import type { BiasCategory, FactualityLevel, OwnershipType } from '@/lib/types'
 import { generateNeutralHeadline } from '@/lib/ai/headline-generator'
-import { generateAISummary, isFallbackSummary } from '@/lib/ai/summary-generator'
+import { generateAISummary, isFallbackSummary, type ExpandedSummaryResult } from '@/lib/ai/summary-generator'
+import {
+  computeStoryVelocity,
+  computeSourceDiversity,
+  computeImpactScore,
+  computeControversyScore,
+  computeCoverageDurationHours,
+} from '@/lib/ai/story-metrics'
 import { classifyTopic } from '@/lib/ai/topic-classifier'
 import { classifyRegion } from '@/lib/ai/region-classifier'
 import { calculateSpectrum } from '@/lib/ai/spectrum-calculator'
@@ -26,6 +33,7 @@ interface StoryArticle {
   description: string | null
   source_id: string
   image_url: string | null
+  published_at: string | null
 }
 
 export interface AssemblyResult {
@@ -48,6 +56,7 @@ export interface AssembleStoriesOptions {
 interface PendingStory {
   id: string
   assembly_claimed_at: string | null
+  first_published: string
 }
 
 interface SingleStoryAssemblyResult {
@@ -157,7 +166,8 @@ async function mapWithConcurrency<T, R>(
 
 export async function assembleSingleStory(
   client: SupabaseClient<Database>,
-  storyId: string
+  storyId: string,
+  firstPublished?: string
 ): Promise<SingleStoryAssemblyResult> {
   let dbTimeMs = 0
   let modelTimeMs = 0
@@ -165,7 +175,7 @@ export async function assembleSingleStory(
   const articlesStartedAt = Date.now()
   const { data: articles, error: articlesError } = await client
     .from('articles')
-    .select('id, title, description, source_id, image_url')
+    .select('id, title, description, source_id, image_url, published_at')
     .eq('story_id', storyId)
     .order('published_at', { ascending: false })
     .order('id', { ascending: true })
@@ -202,8 +212,32 @@ export async function assembleSingleStory(
 
   const entitiesPromise = extractEntities(titles, descriptions)
 
+  // Compute pre-AI metrics (velocity, diversity) from article timestamps
+  const articlesWithTimestamps = articles
+    .filter((a) => a.published_at !== null)
+    .map((a) => ({ published_at: a.published_at! }))
+
+  // Use first_published from caller when available (batch assembly path),
+  // fall back to a DB query for direct calls (e.g., admin reprocess)
+  let storyCreatedAt: string = firstPublished ?? ''
+  if (!storyCreatedAt) {
+    const storyMetaStartedAt = Date.now()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: storyMeta } = await (client.from('stories') as any)
+      .select('first_published')
+      .eq('id', storyId)
+      .single()
+    dbTimeMs += Date.now() - storyMetaStartedAt
+    storyCreatedAt = storyMeta?.first_published ?? new Date().toISOString()
+  }
+  const assemblyNow = new Date()
+  const storyVelocity = computeStoryVelocity(articlesWithTimestamps, storyCreatedAt, assemblyNow)
+
+  const ownerships = (sources ?? []).map((source) => source.ownership)
+  const sourceDiversity = computeSourceDiversity(ownerships)
+
   const modelStartedAt = Date.now()
-  const [headlineResult, topicResult, regionResult, aiSummary] = await Promise.all([
+  const [headlineResult, topicResult, regionResult, summaryResult] = await Promise.all([
     generateNeutralHeadline(titles),
     classifyTopic(titles),
     classifyRegion(titles),
@@ -220,12 +254,23 @@ export async function assembleSingleStory(
   const normalizedHeadline = headlineResult
   const normalizedTopic = topicResult
   const normalizedRegion = regionResult
+  const { aiSummary, sentiment, keyQuotes, keyClaims } = summaryResult
 
   const spectrumSegments = calculateSpectrum(biases)
   const blindspot = isBlindspot(spectrumSegments)
   const factualities = (sources ?? []).map((source) => source.factuality)
-  const ownerships = (sources ?? []).map((source) => source.ownership)
   const imageUrl = articles.find((article) => article.image_url)?.image_url ?? null
+
+  // Compute post-AI metrics (impact, controversy)
+  const coverageDuration = computeCoverageDurationHours(articlesWithTimestamps)
+  const impactScore = computeImpactScore(
+    sourceIds.length,
+    storyVelocity.articles_24h,
+    coverageDuration,
+    sourceDiversity
+  )
+  const controversyScore = computeControversyScore(aiSummary)
+
   const publicationDecision = decideStoryPublication({
     articleCount: articles.length,
     sourceCount: sourceIds.length,
@@ -261,6 +306,13 @@ export async function assembleSingleStory(
       ownership: dominantValue<OwnershipType>(ownerships, 'other'),
       spectrum_segments: spectrumSegments,
       ai_summary: aiSummary,
+      story_velocity: storyVelocity,
+      impact_score: impactScore,
+      source_diversity: sourceDiversity,
+      controversy_score: controversyScore,
+      sentiment,
+      key_quotes: keyQuotes,
+      key_claims: keyClaims,
       assembly_status: 'completed',
       publication_status: publicationDecision.publicationStatus,
       review_status: publicationDecision.reviewStatus,
@@ -291,7 +343,7 @@ export async function assembleSingleStory(
       (normalizedHeadline.usedFallback ? 1 : 0)
       + (normalizedTopic.usedFallback ? 1 : 0)
       + (normalizedRegion.usedFallback ? 1 : 0),
-    summaryFallback: isFallbackSummary(aiSummary),
+    summaryFallback: isFallbackSummary(summaryResult),
     tagError,
   }
 }
@@ -303,7 +355,7 @@ export async function assembleStories(
 ): Promise<AssemblyResult> {
   const { data: fetchedStories, error: fetchError } = await client
     .from('stories')
-    .select('id, assembly_claimed_at')
+    .select('id, assembly_claimed_at, first_published')
     .eq('assembly_status', 'pending')
     .order('first_published', { ascending: true })
     .order('id', { ascending: true })
@@ -373,7 +425,7 @@ export async function assembleStories(
     concurrency,
     async (story) => {
       try {
-        const result = await assembleSingleStory(client, story.id)
+        const result = await assembleSingleStory(client, story.id, story.first_published)
         return { storyId: story.id, result }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)

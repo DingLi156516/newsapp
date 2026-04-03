@@ -38,8 +38,16 @@ function makeStoryRow(overrides: Record<string, unknown> = {}) {
     ownership: 'corporate',
     spectrum_segments: [{ bias: 'center', percentage: 100 }],
     ai_summary: { commonGround: '', leftFraming: '', rightFraming: '' },
+    published_at: new Date().toISOString(),
     first_published: new Date().toISOString(),
     last_updated: new Date().toISOString(),
+    story_velocity: null,
+    impact_score: null,
+    source_diversity: null,
+    controversy_score: null,
+    sentiment: null,
+    key_quotes: null,
+    key_claims: null,
     ...overrides,
   }
 }

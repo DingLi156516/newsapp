@@ -40,10 +40,14 @@ import { SourceList } from '@/components/molecules/SourceList'
 import { AISummaryTabs } from '@/components/organisms/AISummaryTabs'
 import { BookmarkButton } from '@/components/atoms/BookmarkButton'
 import { BlindspotBadge } from '@/components/atoms/BlindspotBadge'
+import { MomentumBadge } from '@/components/atoms/MomentumBadge'
 import { CoverageCount } from '@/components/atoms/CoverageCount'
 import { FactualityBar } from '@/components/atoms/FactualityBar'
 import { GuideLink } from '@/components/atoms/GuideLink'
 import { StoryTimeline } from '@/components/organisms/StoryTimeline'
+import { HeadlineComparison } from '@/components/organisms/HeadlineComparison'
+import { KeyQuotes } from '@/components/organisms/KeyQuotes'
+import { ClaimsComparison } from '@/components/organisms/ClaimsComparison'
 import { UserMenu } from '@/components/organisms/UserMenu'
 import { CoverageIntelligence } from '@/components/organisms/CoverageIntelligence'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
@@ -148,6 +152,9 @@ export default function StoryPage({ params }: Props) {
         {/* Metadata badges row */}
         <div className="flex items-center flex-wrap gap-2">
           {article.isBlindspot && <BlindspotBadge />}
+          {article.storyVelocity && article.storyVelocity.phase !== 'aftermath' && (
+            <MomentumBadge phase={article.storyVelocity.phase} />
+          )}
           <CoverageCount count={article.sourceCount} />
           <span className="glass-pill px-2.5 py-1 text-xs text-white/70">
             {TOPIC_LABELS[article.topic]}
@@ -198,8 +205,24 @@ export default function StoryPage({ params }: Props) {
             commonGround={article.aiSummary.commonGround}
             leftFraming={article.aiSummary.leftFraming}
             rightFraming={article.aiSummary.rightFraming}
+            sentiment={article.sentiment}
           />
         </div>
+
+        {/* Headline comparison */}
+        {article.headlines && article.headlines.length > 0 && (
+          <HeadlineComparison headlines={article.headlines} />
+        )}
+
+        {/* Key quotes */}
+        {article.keyQuotes && article.keyQuotes.length > 0 && (
+          <KeyQuotes quotes={article.keyQuotes} />
+        )}
+
+        {/* Claims comparison */}
+        {article.keyClaims && article.keyClaims.length > 0 && (
+          <ClaimsComparison claims={article.keyClaims} />
+        )}
 
         <CoverageIntelligence article={article} timeline={timeline} />
 

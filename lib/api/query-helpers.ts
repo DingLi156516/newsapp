@@ -24,8 +24,16 @@ interface StoryRow {
   ownership: string
   spectrum_segments: unknown
   ai_summary: unknown
+  published_at: string
   first_published: string
   last_updated: string
+  story_velocity: unknown
+  impact_score: number | null
+  source_diversity: number | null
+  controversy_score: number | null
+  sentiment: unknown
+  key_quotes: unknown
+  key_claims: unknown
 }
 
 interface SourceRow {
@@ -111,7 +119,7 @@ export async function queryStories(
   }
 
   const hasTagFilter = tagIds.length > 0
-  const baseColumns = 'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, first_published, last_updated'
+  const baseColumns = 'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, published_at, first_published, last_updated, story_velocity, impact_score, source_diversity, controversy_score, sentiment, key_quotes, key_claims'
   const selectStr = hasTagFilter ? `${baseColumns}, story_tags!inner(tag_id)` : baseColumns
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -160,11 +168,11 @@ export async function queryStories(
   if (sort === 'source_count') {
     query = query
       .order('source_count', { ascending: false })
-      .order('first_published', { ascending: false })
+      .order('published_at', { ascending: false })
       .order('id', { ascending: false })
   } else {
     query = query
-      .order('first_published', { ascending: false })
+      .order('published_at', { ascending: false })
       .order('id', { ascending: false })
   }
 
@@ -199,7 +207,7 @@ export async function queryStories(
       const countDiff = b.source_count - a.source_count
       if (countDiff !== 0) return countDiff
     }
-    return new Date(b.first_published).getTime() - new Date(a.first_published).getTime()
+    return new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
   })
 
   return { data: filteredStories, count: count ?? 0 }
@@ -228,7 +236,7 @@ export async function queryStoryById(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (client.from('stories') as any)
     .select(
-      'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, first_published, last_updated'
+      'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, published_at, first_published, last_updated, story_velocity, impact_score, source_diversity, controversy_score, sentiment, key_quotes, key_claims'
     )
     .eq('id', storyId)
     .eq('publication_status', 'published')
@@ -275,6 +283,48 @@ export async function querySourceBySlug(
   }
 
   return data
+}
+
+// ---------------------------------------------------------------------------
+// Headline comparison: article titles with source bias for a story
+// ---------------------------------------------------------------------------
+
+interface HeadlineRow {
+  title: string
+  sources: { name: string; bias: string } | null
+}
+
+export async function queryHeadlinesForStory(
+  client: SupabaseClient<Database>,
+  storyId: string
+): Promise<Array<{ title: string; sourceName: string; sourceBias: string }>> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client.from('articles') as any)
+    .select('title, sources!articles_source_id_fkey(name, bias)')
+    .eq('story_id', storyId)
+    .order('published_at', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    throw new Error(`Failed to fetch headlines for story: ${error.message}`)
+  }
+
+  if (!data || data.length === 0) return []
+
+  const biasOrder: Record<string, number> = {
+    'far-left': 0, 'left': 1, 'lean-left': 2, 'center': 3,
+    'lean-right': 4, 'right': 5, 'far-right': 6,
+  }
+
+  return (data as HeadlineRow[])
+    .filter((row) => row.sources !== null)
+    .map((row) => ({
+      title: row.title,
+      sourceName: row.sources!.name,
+      sourceBias: row.sources!.bias,
+    }))
+    .filter((item, index, arr) => arr.findIndex((h) => h.sourceName === item.sourceName) === index)
+    .sort((a, b) => (biasOrder[a.sourceBias] ?? 3) - (biasOrder[b.sourceBias] ?? 3))
 }
 
 interface ArticleSourceJoin {
