@@ -70,4 +70,45 @@ describe('AISummaryTabs', () => {
     expect(tabs[1].props.accessibilityState).toEqual({ selected: true })
     expect(tabs[2].props.accessibilityState).toEqual({ selected: false })
   })
+
+  describe('single-source mode', () => {
+    it('renders only 1 "Summary" tab when sourceCount is 1', () => {
+      render(<AISummaryTabs {...defaultProps} sourceCount={1} />)
+
+      expect(screen.getByText('Summary')).toBeTruthy()
+      expect(screen.queryByText('Common Ground')).toBeNull()
+      expect(screen.queryByText('Left')).toBeNull()
+      expect(screen.queryByText('Right')).toBeNull()
+    })
+
+    it('shows common ground content in the Summary tab', () => {
+      render(<AISummaryTabs {...defaultProps} sourceCount={1} />)
+
+      expect(screen.getByText(/Both sides agree/)).toBeTruthy()
+    })
+
+    it('has only 1 tab element', () => {
+      render(<AISummaryTabs {...defaultProps} sourceCount={1} />)
+
+      const tabs = screen.getAllByRole('tab')
+      expect(tabs).toHaveLength(1)
+    })
+  })
+
+  describe('backward compatibility', () => {
+    it('renders 3 tabs when sourceCount is undefined', () => {
+      render(<AISummaryTabs {...defaultProps} />)
+
+      const tabs = screen.getAllByRole('tab')
+      expect(tabs).toHaveLength(3)
+    })
+
+    it('renders 3 tabs when sourceCount > 1', () => {
+      render(<AISummaryTabs {...defaultProps} sourceCount={5} />)
+
+      const tabs = screen.getAllByRole('tab')
+      expect(tabs).toHaveLength(3)
+      expect(screen.getByText('Common Ground')).toBeTruthy()
+    })
+  })
 })

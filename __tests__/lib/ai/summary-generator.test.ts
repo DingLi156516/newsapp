@@ -1,6 +1,7 @@
 vi.mock('@/lib/ai/gemini-client', () => ({
   generateText: vi.fn(),
   SUMMARY_GENERATION_MODEL: 'models/gemini-2.5-flash',
+  CHEAP_GENERATION_MODEL: 'models/gemini-2.5-flash-lite',
 }))
 
 describe('generateAISummary', () => {
@@ -138,5 +139,111 @@ describe('isFallbackSummary', () => {
       rightFraming: '• Right view',
     })
     expect(result).toBe(false)
+  })
+})
+
+describe('generateSingleSourceSummary', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('returns summary with empty leftFraming and rightFraming', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockResolvedValue({
+      text: JSON.stringify({
+        summary: '• Key facts from the article',
+        keyQuotes: [],
+        keyClaims: [{ claim: 'A claim', side: 'both', disputed: false }],
+      }),
+    })
+
+    const { generateSingleSourceSummary } = await import('@/lib/ai/summary-generator')
+    const result = await generateSingleSourceSummary({
+      title: 'Test Article',
+      description: 'Description here',
+      bias: 'left',
+    })
+
+    expect(result.aiSummary.commonGround).toBe('• Key facts from the article')
+    expect(result.aiSummary.leftFraming).toBe('')
+    expect(result.aiSummary.rightFraming).toBe('')
+    expect(result.sentiment).toBeNull()
+  })
+
+  it('uses CHEAP_GENERATION_MODEL', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockResolvedValue({
+      text: JSON.stringify({
+        summary: '• Facts',
+        keyQuotes: [],
+        keyClaims: [],
+      }),
+    })
+
+    const { generateSingleSourceSummary } = await import('@/lib/ai/summary-generator')
+    await generateSingleSourceSummary({
+      title: 'Test',
+      description: null,
+      bias: 'center',
+    })
+
+    expect(generateText).toHaveBeenCalledWith(expect.any(String), {
+      jsonMode: true,
+      model: 'models/gemini-2.5-flash-lite',
+    })
+  })
+
+  it('returns fallback with sentinel marker when API returns empty response', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockResolvedValue({ text: '' })
+
+    const { generateSingleSourceSummary, isFallbackSummary } = await import('@/lib/ai/summary-generator')
+    const result = await generateSingleSourceSummary({
+      title: 'Fallback Test',
+      description: 'Desc',
+      bias: 'right',
+    })
+
+    expect(result.aiSummary.commonGround).toContain('Fallback Test')
+    expect(result.aiSummary.leftFraming).toBe('[single-source-fallback]')
+    expect(result.aiSummary.rightFraming).toBe('')
+    expect(isFallbackSummary(result)).toBe(true)
+  })
+
+  it('returns fallback with sentinel marker when API throws', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockRejectedValue(new Error('API error'))
+
+    const { generateSingleSourceSummary, isFallbackSummary } = await import('@/lib/ai/summary-generator')
+    const result = await generateSingleSourceSummary({
+      title: 'Error Test',
+      description: null,
+      bias: 'center',
+    })
+
+    expect(result.aiSummary.commonGround).toContain('Error Test')
+    expect(isFallbackSummary(result)).toBe(true)
+    expect(result.sentiment).toBeNull()
+  })
+
+  it('successful single-source summary is NOT detected as fallback', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockResolvedValue({
+      text: JSON.stringify({
+        summary: '• Key facts',
+        keyQuotes: [],
+        keyClaims: [],
+      }),
+    })
+
+    const { generateSingleSourceSummary, isFallbackSummary } = await import('@/lib/ai/summary-generator')
+    const result = await generateSingleSourceSummary({
+      title: 'Good Article',
+      description: 'Desc',
+      bias: 'center',
+    })
+
+    expect(result.aiSummary.leftFraming).toBe('')
+    expect(isFallbackSummary(result)).toBe(false)
   })
 })

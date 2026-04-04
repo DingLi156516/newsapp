@@ -10,6 +10,7 @@ vi.mock('@/lib/ai/headline-generator', () => ({
 
 vi.mock('@/lib/ai/summary-generator', () => ({
   generateAISummary: vi.fn(),
+  generateSingleSourceSummary: vi.fn(),
   isFallbackSummary: vi.fn(() => false),
 }))
 
@@ -40,7 +41,7 @@ vi.mock('@/lib/ai/tag-upsert', () => ({
 import type { Region, Topic } from '@/lib/types'
 import { assembleSingleStory, assembleStories } from '@/lib/ai/story-assembler'
 import { generateNeutralHeadline } from '@/lib/ai/headline-generator'
-import { generateAISummary } from '@/lib/ai/summary-generator'
+import { generateAISummary, generateSingleSourceSummary } from '@/lib/ai/summary-generator'
 import { classifyTopic } from '@/lib/ai/topic-classifier'
 import { classifyRegion } from '@/lib/ai/region-classifier'
 import { calculateSpectrum } from '@/lib/ai/spectrum-calculator'
@@ -50,6 +51,7 @@ import { upsertStoryTags } from '@/lib/ai/tag-upsert'
 
 const mockHeadline = vi.mocked(generateNeutralHeadline)
 const mockSummary = vi.mocked(generateAISummary)
+const mockSingleSourceSummary = vi.mocked(generateSingleSourceSummary)
 const mockTopic = vi.mocked(classifyTopic)
 const mockRegion = vi.mocked(classifyRegion)
 const mockSpectrum = vi.mocked(calculateSpectrum)
@@ -212,6 +214,55 @@ describe('assembleSingleStory', () => {
         assembled_at: expect.any(String),
         published_at: expect.any(String),
         confidence_score: expect.any(Number),
+      })
+    )
+  })
+
+  it('uses original title and single-source summary for single-source stories', async () => {
+    const articles = [
+      { id: 'a1', title: 'Original Article Title', description: 'Desc', source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
+    ]
+    const sources = [
+      { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
+    ]
+
+    mockTopic.mockResolvedValue(topicResult('politics'))
+    mockRegion.mockResolvedValue(regionResult('us'))
+    mockSingleSourceSummary.mockResolvedValue({
+      aiSummary: { commonGround: '• Key facts here', leftFraming: '', rightFraming: '' },
+      sentiment: null,
+      keyQuotes: null,
+      keyClaims: [{ claim: 'A claim', side: 'both', disputed: false }],
+    })
+    mockSpectrum.mockReturnValue([{ bias: 'left', percentage: 100 }])
+    mockExtractEntities.mockResolvedValue([])
+    mockUpsertStoryTags.mockResolvedValue(undefined)
+
+    const client = createMockClient({
+      articles: { data: articles, error: null },
+      sources: { data: sources, error: null },
+    })
+
+    await assembleSingleStory(client as never, 'story-1')
+
+    // Should NOT call generateNeutralHeadline or generateAISummary
+    expect(mockHeadline).not.toHaveBeenCalled()
+    expect(mockSummary).not.toHaveBeenCalled()
+
+    // Should call single-source summary
+    expect(mockSingleSourceSummary).toHaveBeenCalledWith({
+      title: 'Original Article Title',
+      description: 'Desc',
+      bias: 'left',
+    })
+
+    // Should use original title as headline
+    expect(client._updateFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headline: 'Original Article Title',
+        is_blindspot: false,
+        controversy_score: 0,
+        source_count: 1,
       })
     )
   })

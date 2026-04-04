@@ -1,11 +1,9 @@
 /**
- * StoryTagsRow — Horizontal scrolling row of entity tag pills.
- * Sorted by relevance descending, capped at max (default 8).
+ * components/molecules/StoryTagsRow.tsx — Horizontal row of entity tag pills.
  */
 
-import { ScrollView } from 'react-native'
+import type { StoryTag } from '@/lib/types'
 import { TagPill } from '@/components/atoms/TagPill'
-import type { StoryTag } from '@/lib/shared/types'
 
 interface Props {
   readonly tags: readonly StoryTag[]
@@ -21,14 +19,10 @@ export function StoryTagsRow({ tags, max = DEFAULT_MAX }: Props) {
   const visible = sorted.slice(0, max)
 
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={{ gap: 8 }}
-    >
+    <div className="flex flex-wrap gap-2">
       {visible.map((tag) => (
         <TagPill key={tag.slug} label={tag.label} type={tag.type} />
       ))}
-    </ScrollView>
+    </div>
   )
 }

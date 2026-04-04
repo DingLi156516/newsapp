@@ -113,6 +113,23 @@ npx tsx scripts/backfill-tags.ts --batch-size 10
 
 The script queries published stories with zero `story_tags` rows, runs `extractEntities` on their articles, and calls `upsertStoryTags`. A `.backfill-empty-ids` skip file tracks stories that yielded no entities so repeated runs skip them.
 
+### Backfill Single-Source Stories
+
+Re-assembles single-source stories to fix AI-rewritten headlines and fabricated cross-spectrum perspectives from the old pipeline. Apply migration 029 first for instant metadata fixes (`is_blindspot`, `controversy_score`, `sentiment`), then run the backfill script to re-generate headlines and summaries via `assembleSingleStory`:
+
+```bash
+# Dry run — preview headline changes and fabricated framing
+npx tsx scripts/backfill-single-source.ts --dry-run
+
+# Run for real (default batch size 5, 500ms delay between batches)
+npx tsx scripts/backfill-single-source.ts
+
+# Custom batch size (lower = safer, each story makes AI calls)
+npx tsx scripts/backfill-single-source.ts --batch-size 3
+```
+
+The script queries completed single-source stories (`source_count = 1`), calls `assembleSingleStory` to replace AI headlines with the original article title, regenerate summaries via flash-lite, and recompute all metrics. Failed stories are logged but don't stop the batch. Safe to re-run — already-fixed stories will be re-assembled idempotently, though LLM-generated text (summaries) may differ slightly between runs due to non-zero temperature.
+
 ## Running the Pipeline Locally
 
 ### 1. Start the dev server

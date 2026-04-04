@@ -6,9 +6,9 @@
  */
 
 import type { AISummary, StorySentiment, KeyQuote, KeyClaim, SentimentLabel } from '@/lib/types'
-import { generateText, SUMMARY_GENERATION_MODEL } from '@/lib/ai/gemini-client'
+import { generateText, SUMMARY_GENERATION_MODEL, CHEAP_GENERATION_MODEL } from '@/lib/ai/gemini-client'
 
-interface ArticleWithBias {
+export interface ArticleWithBias {
   readonly title: string
   readonly description: string | null
   readonly bias: string
@@ -28,6 +28,7 @@ const VALID_SENTIMENTS = new Set<string>([
 const FALLBACK_COMMON_GROUND = 'AI summary generation failed. Manual review needed.'
 const FALLBACK_LEFT = 'Analysis unavailable.'
 const FALLBACK_RIGHT = 'Analysis unavailable.'
+const SINGLE_SOURCE_FALLBACK_LEFT = '[single-source-fallback]'
 
 export async function generateAISummary(
   articles: readonly ArticleWithBias[]
@@ -87,6 +88,74 @@ Include 1-3 key quotes and 1-3 key claims. Return ONLY valid JSON.`
   } catch (err) {
     console.error('[summary-generator] Failed:', err instanceof Error ? err.message : String(err))
     return retryWithFewerArticles(articles)
+  }
+}
+
+export async function generateSingleSourceSummary(
+  article: ArticleWithBias
+): Promise<ExpandedSummaryResult> {
+  const articleBlock = `${article.title}${article.description ? ` — ${article.description}` : ''}`
+
+  const prompt = `You are a media analyst. Summarize this single news article's key facts, claims, and notable quotes.
+
+Article:
+${articleBlock}
+
+Return JSON with this exact structure (no markdown, no code blocks):
+{
+  "summary": "bullet points of the article's key facts and claims, each starting with •",
+  "keyQuotes": [
+    { "text": "exact notable quote from the article", "sourceName": "outlet name", "sourceBias": "${article.bias}" }
+  ],
+  "keyClaims": [
+    { "claim": "a factual claim made in the article", "side": "both", "disputed": false }
+  ]
+}
+
+Include 2-4 summary bullet points, 0-2 key quotes, and 1-3 key claims. Return ONLY valid JSON.`
+
+  try {
+    const response = await generateText(prompt, {
+      jsonMode: true,
+      model: CHEAP_GENERATION_MODEL,
+    })
+
+    if (!response.text.trim()) {
+      return singleSourceFallback(article)
+    }
+
+    return parseSingleSourceSummary(response.text.trim())
+  } catch (err) {
+    console.error('[summary-generator] Single-source failed:', err instanceof Error ? err.message : String(err))
+    return singleSourceFallback(article)
+  }
+}
+
+function parseSingleSourceSummary(text: string): ExpandedSummaryResult {
+  const parsed = JSON.parse(text) as Record<string, unknown>
+
+  const aiSummary: AISummary = {
+    commonGround: String(parsed.summary ?? 'Summary pending.'),
+    leftFraming: '',
+    rightFraming: '',
+  }
+
+  const keyQuotes = parseResponseQuotes(parsed)
+  const keyClaims = parseResponseClaims(parsed)
+
+  return { aiSummary, sentiment: null, keyQuotes, keyClaims }
+}
+
+function singleSourceFallback(article: ArticleWithBias): ExpandedSummaryResult {
+  return {
+    aiSummary: {
+      commonGround: `• ${article.title}${article.description ? `\n• ${article.description}` : ''}`,
+      leftFraming: SINGLE_SOURCE_FALLBACK_LEFT,
+      rightFraming: '',
+    },
+    sentiment: null,
+    keyQuotes: null,
+    keyClaims: null,
   }
 }
 
@@ -152,9 +221,11 @@ function parseResponseClaims(parsed: Record<string, unknown>): KeyClaim[] | null
 
 export function isFallbackSummary(summary: AISummary | ExpandedSummaryResult): boolean {
   const s = 'aiSummary' in summary ? summary.aiSummary : summary
-  return s.commonGround === FALLBACK_COMMON_GROUND
+  const isMultiSourceFallback = s.commonGround === FALLBACK_COMMON_GROUND
     && s.leftFraming === FALLBACK_LEFT
     && s.rightFraming === FALLBACK_RIGHT
+  const isSingleSourceFallback = s.leftFraming === SINGLE_SOURCE_FALLBACK_LEFT
+  return isMultiSourceFallback || isSingleSourceFallback
 }
 
 function sampleArticles(

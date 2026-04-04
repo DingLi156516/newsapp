@@ -76,4 +76,41 @@ describe('AISummaryTabs', () => {
       'AI perspective summaries',
     )
   })
+
+  describe('single-source mode (sourceCount=1)', () => {
+    it('renders only 1 "Summary" tab', () => {
+      render(<AISummaryTabs {...props} sourceCount={1} />)
+      expect(screen.getByRole('tab', { name: 'Summary' })).toBeInTheDocument()
+      expect(screen.queryByRole('tab', { name: 'Left ↗' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('tab', { name: 'Right ↗' })).not.toBeInTheDocument()
+    })
+
+    it('shows common ground content in the Summary tab', () => {
+      render(<AISummaryTabs {...props} sourceCount={1} />)
+      expect(screen.getByRole('tabpanel')).toHaveTextContent('Common ground content here')
+    })
+
+    it('has only 1 tab element', () => {
+      render(<AISummaryTabs {...props} sourceCount={1} />)
+      expect(screen.getAllByRole('tab')).toHaveLength(1)
+    })
+
+    it('uses "AI summary" aria-label', () => {
+      render(<AISummaryTabs {...props} sourceCount={1} />)
+      expect(screen.getByRole('tablist')).toHaveAttribute('aria-label', 'AI summary')
+    })
+  })
+
+  describe('multi-source mode (backward compat)', () => {
+    it('renders 3 tabs when sourceCount is undefined', () => {
+      render(<AISummaryTabs {...props} />)
+      expect(screen.getAllByRole('tab')).toHaveLength(3)
+    })
+
+    it('renders 3 tabs when sourceCount > 1', () => {
+      render(<AISummaryTabs {...props} sourceCount={5} />)
+      expect(screen.getAllByRole('tab')).toHaveLength(3)
+      expect(screen.getByRole('tab', { name: 'Common Ground' })).toBeInTheDocument()
+    })
+  })
 })

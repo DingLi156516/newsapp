@@ -10,7 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, DbSource } from '@/lib/supabase/types'
 import type { BiasCategory, FactualityLevel, OwnershipType } from '@/lib/types'
 import { generateNeutralHeadline } from '@/lib/ai/headline-generator'
-import { generateAISummary, isFallbackSummary, type ExpandedSummaryResult } from '@/lib/ai/summary-generator'
+import { generateAISummary, generateSingleSourceSummary, isFallbackSummary, type ExpandedSummaryResult } from '@/lib/ai/summary-generator'
 import {
   computeStoryVelocity,
   computeSourceDiversity,
@@ -236,28 +236,56 @@ export async function assembleSingleStory(
   const ownerships = (sources ?? []).map((source) => source.ownership)
   const sourceDiversity = computeSourceDiversity(ownerships)
 
+  const isSingleSource = sourceIds.length === 1
   const modelStartedAt = Date.now()
-  const [headlineResult, topicResult, regionResult, summaryResult] = await Promise.all([
-    generateNeutralHeadline(titles),
-    classifyTopic(titles),
-    classifyRegion(titles),
-    generateAISummary(
-      articles.map((article) => ({
+
+  let normalizedHeadline: { headline: string; usedCheapModel: boolean; usedFallback: boolean }
+  let normalizedTopic: { topic: string; usedCheapModel: boolean; usedFallback: boolean }
+  let normalizedRegion: { region: string; usedCheapModel: boolean; usedFallback: boolean }
+  let summaryResult: ExpandedSummaryResult
+
+  if (isSingleSource) {
+    // Single-source path: skip headline generation, use lightweight summary
+    const article = articles[0]
+    const [topicRes, regionRes, singleSummary] = await Promise.all([
+      classifyTopic(titles),
+      classifyRegion(titles),
+      generateSingleSourceSummary({
         title: article.title,
         description: article.description,
         bias: sourceMap.get(article.source_id)?.bias ?? 'center',
-      }))
-    ),
-  ])
+      }),
+    ])
+    normalizedHeadline = { headline: article.title, usedCheapModel: false, usedFallback: false }
+    normalizedTopic = topicRes
+    normalizedRegion = regionRes
+    summaryResult = singleSummary
+  } else {
+    // Multi-source path: full AI pipeline
+    const [headlineRes, topicRes, regionRes, fullSummary] = await Promise.all([
+      generateNeutralHeadline(titles),
+      classifyTopic(titles),
+      classifyRegion(titles),
+      generateAISummary(
+        articles.map((article) => ({
+          title: article.title,
+          description: article.description,
+          bias: sourceMap.get(article.source_id)?.bias ?? 'center',
+        }))
+      ),
+    ])
+    normalizedHeadline = headlineRes
+    normalizedTopic = topicRes
+    normalizedRegion = regionRes
+    summaryResult = fullSummary
+  }
+
   modelTimeMs += Date.now() - modelStartedAt
 
-  const normalizedHeadline = headlineResult
-  const normalizedTopic = topicResult
-  const normalizedRegion = regionResult
   const { aiSummary, sentiment, keyQuotes, keyClaims } = summaryResult
 
   const spectrumSegments = calculateSpectrum(biases)
-  const blindspot = isBlindspot(spectrumSegments)
+  const blindspot = isSingleSource ? false : isBlindspot(spectrumSegments)
   const factualities = (sources ?? []).map((source) => source.factuality)
   const imageUrl = articles.find((article) => article.image_url)?.image_url ?? null
 
@@ -269,7 +297,7 @@ export async function assembleSingleStory(
     coverageDuration,
     sourceDiversity
   )
-  const controversyScore = computeControversyScore(aiSummary)
+  const controversyScore = isSingleSource ? 0 : computeControversyScore(aiSummary)
 
   const publicationDecision = decideStoryPublication({
     articleCount: articles.length,

@@ -36,6 +36,7 @@ const SUMMARY_FALLBACK_PATTERNS = [
   'AI summary generation failed. Manual review needed.',
   'Analysis unavailable.',
   'Analysis pending.',
+  '[single-source-fallback]',
 ] as const
 
 export function isAiSummaryFallback(summary: AISummary): boolean {

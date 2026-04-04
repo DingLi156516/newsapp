@@ -14,8 +14,8 @@ export const reviewActionSchema = z.object({
   headline: z.string().min(1).max(500).optional(),
   ai_summary: z.object({
     commonGround: z.string().min(1),
-    leftFraming: z.string().min(1),
-    rightFraming: z.string().min(1),
+    leftFraming: z.string(),
+    rightFraming: z.string(),
   }).optional(),
 })
 

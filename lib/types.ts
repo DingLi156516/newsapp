@@ -289,6 +289,15 @@ export const TAG_TYPE_LABELS: Record<TagType, string> = {
   'topic': 'Topic',
 }
 
+/** Colors for each tag type, used in tag pill accents. */
+export const TAG_TYPE_COLORS: Record<TagType, string> = {
+  person: '#8B5CF6',
+  organization: '#3B82F6',
+  location: '#10B981',
+  event: '#F59E0B',
+  topic: '#6B7280',
+}
+
 // ---------------------------------------------------------------------------
 // Display label lookup tables
 // The Record<EnumType, string> pattern maps every enum value to a UI label,

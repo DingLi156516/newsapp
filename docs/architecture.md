@@ -353,7 +353,7 @@ Six tables:
 |-------|------|---------|
 | **sources** | 55 | News outlet metadata: name, bias rating, factuality, ownership, RSS URL |
 | **articles** | ~1,600+ | Raw articles from RSS: title, URL, content, embedding vector, which story they belong to |
-| **stories** | 22+ | Clustered stories: AI headline, topic, spectrum, AI summary, blindspot flag, and explicit pipeline/publication state (migrations 010 + 013 + 016 + 017). `source_count` = unique sources (not article count), recalculated by migration 017 |
+| **stories** | 22+ | Clustered stories: AI headline, topic, spectrum, AI summary, blindspot flag, and explicit pipeline/publication state (migrations 010 + 013 + 016 + 017 + 029). `source_count` = unique sources (not article count), recalculated by migration 017. Migration 029 fixes single-source metadata (blindspot, controversy, sentiment) |
 | **bookmarks** | per-user | user_id FK, story_id FK, created_at (migration 003) |
 | **reading_history** | per-user | user_id FK, story_id FK, read_at, is_read (migration 003) |
 | **user_preferences** | per-user | user_id FK, followed_topics, default_region, default_perspective, factuality_minimum, blindspot_digest_enabled (migrations 004, 009) |

@@ -16,7 +16,7 @@ import { useStoryTimeline } from '@/lib/hooks/use-story-timeline'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
 import { useToast } from '@/lib/hooks/use-toast'
-import { TOPIC_LABELS } from '@/lib/shared/types'
+import { TOPIC_LABELS, BIAS_LABELS, BIAS_COLOR } from '@/lib/shared/types'
 import { SEMANTIC, FONT, SPACING } from '@/lib/shared/design'
 import { GlassView } from '@/components/ui/GlassView'
 import { SpectrumBar } from '@/components/molecules/SpectrumBar'
@@ -140,7 +140,7 @@ export default function StoryDetailScreen() {
               </Text>
             </View>
             <CoverageCount count={story.sourceCount} />
-            {story.isBlindspot && <BlindspotBadge />}
+            {story.sourceCount > 1 && story.isBlindspot && <BlindspotBadge />}
             {story.storyVelocity && <MomentumBadge phase={story.storyVelocity.phase} />}
             <FactualityBar level={story.factuality} />
             <GuideLink />
@@ -156,8 +156,29 @@ export default function StoryDetailScreen() {
             <StoryTagsRow tags={story.tags} />
           )}
 
-          {/* Spectrum bar */}
-          <SpectrumBar segments={story.spectrumSegments} height={14} showLabels />
+          {/* Spectrum bar (multi-source) or bias pill (single-source) */}
+          {story.sourceCount > 1 ? (
+            <SpectrumBar segments={story.spectrumSegments} height={14} showLabels />
+          ) : story.sources[0] && (
+            <View style={{ gap: 4 }}>
+              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', letterSpacing: 1 }}>
+                Source Bias
+              </Text>
+              <View style={{
+                alignSelf: 'flex-start',
+                backgroundColor: 'rgba(26, 26, 26, 0.6)',
+                borderRadius: 9999,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderWidth: 0.5,
+                borderColor: BIAS_COLOR[story.sources[0].bias] + '40',
+              }}>
+                <Text style={{ fontFamily: 'Inter', fontSize: 12, color: BIAS_COLOR[story.sources[0].bias] }}>
+                  {BIAS_LABELS[story.sources[0].bias]} source
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* Single-source coverage notice */}
           {story.sourceCount === 1 && (
@@ -180,10 +201,11 @@ export default function StoryDetailScreen() {
             leftFraming={story.aiSummary.leftFraming}
             rightFraming={story.aiSummary.rightFraming}
             sentiment={story.sentiment}
+            sourceCount={story.sourceCount}
           />
 
-          {/* Headline Comparison */}
-          {story.headlines && <HeadlineComparisonList headlines={story.headlines} />}
+          {/* Headline Comparison (multi-source only) */}
+          {story.sourceCount > 1 && story.headlines && <HeadlineComparisonList headlines={story.headlines} />}
 
           {/* Key Quotes */}
           {story.keyQuotes && <KeyQuotesCarousel quotes={story.keyQuotes} />}
@@ -191,18 +213,21 @@ export default function StoryDetailScreen() {
           {/* Claims */}
           {story.keyClaims && <ClaimsComparison claims={story.keyClaims} />}
 
-          {/* Story Scores */}
+          {/* Story Scores (hides diversity/controversy for single-source internally) */}
           <StoryScores
             impactScore={story.impactScore}
             sourceDiversity={story.sourceDiversity}
             controversyScore={story.controversyScore}
+            sourceCount={story.sourceCount}
           />
 
-          {/* Coverage Intelligence */}
-          <CoverageIntelligence article={story} timeline={timeline} />
+          {/* Coverage Intelligence (multi-source only) */}
+          {story.sourceCount > 1 && (
+            <CoverageIntelligence article={story} timeline={timeline} />
+          )}
 
-          {/* Timeline */}
-          {timeline && timeline.events.length > 0 && (
+          {/* Timeline (multi-source only) */}
+          {story.sourceCount > 1 && timeline && timeline.events.length > 0 && (
             <View style={{ gap: 8 }}>
               <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: 'white' }}>
                 Coverage Timeline
@@ -221,6 +246,13 @@ export default function StoryDetailScreen() {
             </Text>
             <SourceList sources={story.sources} />
           </GlassView>
+
+          {/* Single-source CTA */}
+          {story.sourceCount === 1 && (
+            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255, 255, 255, 0.35)', textAlign: 'center', paddingVertical: 8 }}>
+              Check back as more outlets cover this story
+            </Text>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>

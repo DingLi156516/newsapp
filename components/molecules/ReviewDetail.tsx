@@ -156,11 +156,18 @@ export function ReviewDetail({ story, onApprove, onReject, onReprocess, isLoadin
         <MonochromeSpectrumBar segments={spectrum} />
       )}
 
-      {/* AI Summary sections */}
+      {/* AI Summary sections — skip left/right for single-source stories */}
       <div className="space-y-3">
-        {(['commonGround', 'leftFraming', 'rightFraming'] as const).map((key) => {
+        {(['commonGround', 'leftFraming', 'rightFraming'] as const)
+          .filter((key) => {
+            if (story.source_count <= 1 && (key === 'leftFraming' || key === 'rightFraming')) {
+              return false
+            }
+            return true
+          })
+          .map((key) => {
           const labels = {
-            commonGround: 'Common Ground',
+            commonGround: story.source_count <= 1 ? 'Summary' : 'Common Ground',
             leftFraming: 'Left Perspective',
             rightFraming: 'Right Perspective',
           }

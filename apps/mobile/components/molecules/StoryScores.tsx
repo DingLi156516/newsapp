@@ -12,24 +12,30 @@ interface Props {
   readonly impactScore: number | null | undefined
   readonly sourceDiversity: number | null | undefined
   readonly controversyScore: number | null | undefined
+  readonly sourceCount?: number
 }
 
-export function StoryScores({ impactScore, sourceDiversity, controversyScore }: Props) {
-  if (impactScore == null && sourceDiversity == null && controversyScore == null) {
+export function StoryScores({ impactScore, sourceDiversity, controversyScore, sourceCount }: Props) {
+  const isSingleSource = sourceCount === 1
+  const hasImpact = impactScore != null
+  const hasDiversity = !isSingleSource && sourceDiversity != null
+  const hasControversy = !isSingleSource && controversyScore != null
+
+  if (!hasImpact && !hasDiversity && !hasControversy) {
     return null
   }
 
   return (
     <CollapsibleSection title="Story Scores">
       <View style={{ padding: SPACING.lg, gap: SPACING.md }}>
-        {impactScore != null && (
-          <ScoreGauge label="Impact" value={impactScore} color="#8B5CF6" />
+        {hasImpact && (
+          <ScoreGauge label="Impact" value={impactScore} max={100} color="#8B5CF6" />
         )}
-        {sourceDiversity != null && (
-          <ScoreGauge label="Source Diversity" value={sourceDiversity} color="#3B82F6" />
+        {hasDiversity && (
+          <ScoreGauge label="Source Diversity" value={sourceDiversity} max={8} color="#3B82F6" />
         )}
-        {controversyScore != null && (
-          <ScoreGauge label="Controversy" value={controversyScore} color="#EF4444" />
+        {hasControversy && (
+          <ScoreGauge label="Controversy" value={controversyScore} max={1} color="#EF4444" />
         )}
       </View>
     </CollapsibleSection>

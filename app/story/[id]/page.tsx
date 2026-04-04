@@ -33,7 +33,7 @@ import Image from 'next/image'
 import { ArrowLeft } from 'lucide-react'
 import { useStory } from '@/lib/hooks/use-story'
 import { useStoryTimeline } from '@/lib/hooks/use-story-timeline'
-import { TOPIC_LABELS } from '@/lib/types'
+import { TOPIC_LABELS, BIAS_LABELS, BIAS_CSS_CLASS } from '@/lib/types'
 import { Skeleton } from '@/components/atoms/Skeleton'
 import { MonochromeSpectrumBar } from '@/components/molecules/MonochromeSpectrumBar'
 import { SourceList } from '@/components/molecules/SourceList'
@@ -50,6 +50,8 @@ import { KeyQuotes } from '@/components/organisms/KeyQuotes'
 import { ClaimsComparison } from '@/components/organisms/ClaimsComparison'
 import { UserMenu } from '@/components/organisms/UserMenu'
 import { CoverageIntelligence } from '@/components/organisms/CoverageIntelligence'
+import { StoryTagsRow } from '@/components/molecules/StoryTagsRow'
+import { StoryScores } from '@/components/molecules/StoryScores'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
 
@@ -151,7 +153,7 @@ export default function StoryPage({ params }: Props) {
 
         {/* Metadata badges row */}
         <div className="flex items-center flex-wrap gap-2">
-          {article.isBlindspot && <BlindspotBadge />}
+          {article.sourceCount > 1 && article.isBlindspot && <BlindspotBadge />}
           {article.storyVelocity && article.storyVelocity.phase !== 'aftermath' && (
             <MomentumBadge phase={article.storyVelocity.phase} />
           )}
@@ -174,19 +176,34 @@ export default function StoryPage({ params }: Props) {
           {article.headline}
         </h1>
 
-        {/* Coverage spectrum section */}
-        <div className="space-y-2">
-          <p className="text-xs text-white/60 uppercase tracking-widest">
-            Coverage Spectrum
-          </p>
-          {/* showLegend=true adds the ℹ info button to open the BiasLegend popup */}
-          <MonochromeSpectrumBar
-            segments={article.spectrumSegments}
-            showLegend
-            showLabels
-            height="md"
-          />
-        </div>
+        {/* Entity tags */}
+        {article.tags && article.tags.length > 0 && (
+          <StoryTagsRow tags={article.tags} />
+        )}
+
+        {/* Coverage spectrum — full bar for multi-source, single bias pill for single-source */}
+        {article.sourceCount > 1 ? (
+          <div className="space-y-2">
+            <p className="text-xs text-white/60 uppercase tracking-widest">
+              Coverage Spectrum
+            </p>
+            <MonochromeSpectrumBar
+              segments={article.spectrumSegments}
+              showLegend
+              showLabels
+              height="md"
+            />
+          </div>
+        ) : article.sources[0] && (
+          <div className="space-y-2">
+            <p className="text-xs text-white/60 uppercase tracking-widest">
+              Source Bias
+            </p>
+            <span className={`glass-pill px-2.5 py-1 text-xs ${BIAS_CSS_CLASS[article.sources[0].bias]}`}>
+              {BIAS_LABELS[article.sources[0].bias]} source
+            </span>
+          </div>
+        )}
 
         {/* Single-source coverage notice */}
         {article.sourceCount === 1 && (
@@ -199,18 +216,19 @@ export default function StoryPage({ params }: Props) {
         {/* AI summary section */}
         <div className="space-y-2">
           <p className="text-xs text-white/60 uppercase tracking-widest">
-            AI Perspectives
+            {article.sourceCount === 1 ? 'AI Summary' : 'AI Perspectives'}
           </p>
           <AISummaryTabs
             commonGround={article.aiSummary.commonGround}
             leftFraming={article.aiSummary.leftFraming}
             rightFraming={article.aiSummary.rightFraming}
             sentiment={article.sentiment}
+            sourceCount={article.sourceCount}
           />
         </div>
 
-        {/* Headline comparison */}
-        {article.headlines && article.headlines.length > 0 && (
+        {/* Headline comparison (multi-source only) */}
+        {article.sourceCount > 1 && article.headlines && article.headlines.length > 0 && (
           <HeadlineComparison headlines={article.headlines} />
         )}
 
@@ -224,10 +242,21 @@ export default function StoryPage({ params }: Props) {
           <ClaimsComparison claims={article.keyClaims} />
         )}
 
-        <CoverageIntelligence article={article} timeline={timeline} />
+        {/* Story scores */}
+        <StoryScores
+          impactScore={article.impactScore}
+          sourceDiversity={article.sourceDiversity}
+          controversyScore={article.controversyScore}
+          sourceCount={article.sourceCount}
+        />
 
-        {/* Coverage timeline */}
-        {(timelineLoading || (timeline && timeline.events.length > 0)) && (
+        {/* Coverage intelligence (multi-source only) */}
+        {article.sourceCount > 1 && (
+          <CoverageIntelligence article={article} timeline={timeline} />
+        )}
+
+        {/* Coverage timeline (multi-source only) */}
+        {article.sourceCount > 1 && (timelineLoading || (timeline && timeline.events.length > 0)) && (
           <div className="space-y-2">
             <p className="text-xs text-white/60 uppercase tracking-widest">
               Coverage Timeline
@@ -243,10 +272,17 @@ export default function StoryPage({ params }: Props) {
           </p>
           <SourceList
             sources={article.sources}
-            defaultExpanded    // Prop without a value is shorthand for defaultExpanded={true}
+            defaultExpanded
             maxVisible={5}
           />
         </div>
+
+        {/* Single-source CTA */}
+        {article.sourceCount === 1 && (
+          <div className="glass-sm px-4 py-3 text-center text-sm text-white/50">
+            Check back as more outlets cover this story
+          </div>
+        )}
       </div>
     </div>
   )

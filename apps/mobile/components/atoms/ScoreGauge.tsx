@@ -34,7 +34,7 @@ export function ScoreGauge({ label, value, max = 100, color = '#3B82F6' }: Props
           {label}
         </Text>
         <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 12, color: 'rgba(255, 255, 255, 0.8)' }}>
-          {Math.round(value)}
+          {Number.isInteger(value) ? value : value.toFixed(1)}{max !== 100 ? `/${max}` : ''}
         </Text>
       </View>
       <View style={{

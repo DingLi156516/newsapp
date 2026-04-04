@@ -15,14 +15,19 @@ interface Props {
   readonly leftFraming: string
   readonly rightFraming: string
   readonly sentiment?: StorySentiment | null
+  readonly sourceCount?: number
 }
 
 type TabId = 'common' | 'left' | 'right'
 
-const TABS: { id: TabId; label: string }[] = [
+const MULTI_SOURCE_TABS: { id: TabId; label: string }[] = [
   { id: 'common', label: 'Common Ground' },
   { id: 'left', label: 'Left' },
   { id: 'right', label: 'Right' },
+]
+
+const SINGLE_SOURCE_TABS: { id: TabId; label: string }[] = [
+  { id: 'common', label: 'Summary' },
 ]
 
 const SPRING_CONFIG = { stiffness: 300, damping: 30 }
@@ -40,7 +45,7 @@ function ContentBlock({ content }: { content: string }) {
   )
 }
 
-export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentiment }: Props) {
+export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentiment, sourceCount }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('common')
   const underlineX = useSharedValue(0)
   const underlineWidth = useSharedValue(0)
@@ -70,6 +75,8 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentime
     setActiveTab(tabId)
   }, [underlineX, underlineWidth])
 
+  const tabs = sourceCount === 1 ? SINGLE_SOURCE_TABS : MULTI_SOURCE_TABS
+
   const content: Record<TabId, string> = {
     common: commonGround,
     left: leftFraming,
@@ -85,7 +92,7 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentime
         borderBottomColor: 'rgba(255, 255, 255, 0.06)',
         position: 'relative',
       }}>
-        {TABS.map((tab) => {
+        {tabs.map((tab) => {
           const isActive = activeTab === tab.id
           return (
             <Pressable

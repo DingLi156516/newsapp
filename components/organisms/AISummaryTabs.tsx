@@ -31,16 +31,21 @@ interface Props {
   leftFraming: string
   rightFraming: string
   sentiment?: StorySentiment | null
+  sourceCount?: number
 }
 
 /** Discriminated union for tab IDs — TypeScript catches invalid tab names at compile time */
 type TabId = 'common' | 'left' | 'right'
 
 /** Static tab config — label and ID for each tab. Defined outside the component. */
-const TABS: { id: TabId; label: string }[] = [
+const MULTI_SOURCE_TABS: { id: TabId; label: string }[] = [
   { id: 'common', label: 'Common Ground' },
   { id: 'left', label: 'Left ↗' },
   { id: 'right', label: 'Right ↗' },
+]
+
+const SINGLE_SOURCE_TABS: { id: TabId; label: string }[] = [
+  { id: 'common', label: 'Summary' },
 ]
 
 /**
@@ -61,9 +66,11 @@ function ContentBlock({ content }: { content: string }) {
   )
 }
 
-export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentiment }: Props) {
+export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentiment, sourceCount }: Props) {
   /** Currently active tab — controls both the underline position and the rendered content */
   const [activeTab, setActiveTab] = useState<TabId>('common')
+
+  const tabs = sourceCount === 1 ? SINGLE_SOURCE_TABS : MULTI_SOURCE_TABS
 
   /** Map of tab ID → content string, for clean lookup without switch/if chains */
   const content: Record<TabId, string> = {
@@ -77,10 +84,10 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentime
       {/* Tab header row */}
       <div
         role="tablist"
-        aria-label="AI perspective summaries"
+        aria-label={sourceCount === 1 ? 'AI summary' : 'AI perspective summaries'}
         className="flex items-center border-b border-white/[0.06]"
       >
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             role="tab"

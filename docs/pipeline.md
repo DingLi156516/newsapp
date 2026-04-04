@@ -118,11 +118,9 @@ The process runner's `clusterMadeProgress` function intentionally does **not** c
 1. Fetch stories where `assembly_status = 'pending'`, scanning 3x batch, filtering to unclaimed (claim TTL = 60 min)
 2. Claim stories (`assembly_status = 'processing'`, `assembly_claimed_at = now`)
 3. For each story, fetch all articles and source metadata
-4. Start entity extraction in parallel, then run 4 primary model calls with `Promise.all(...)`:
-   - `generateNeutralHeadline` -- bias-neutral headline
-   - `classifyTopic` -- topic classification (politics, tech, health, etc.)
-   - `classifyRegion` -- region classification (us, international, uk, etc.)
-   - `generateAISummary` -- spectrum-aware summary with `leftFraming`, `rightFraming`, `commonGround`
+4. Start entity extraction in parallel, then run model calls with `Promise.all(...)`:
+   - **Multi-source path** (≥2 sources): 4 calls — `generateNeutralHeadline`, `classifyTopic`, `classifyRegion`, `generateAISummary` (spectrum-aware with `leftFraming`, `rightFraming`, `commonGround`)
+   - **Single-source path** (1 source): 3 calls — `classifyTopic`, `classifyRegion`, `generateSingleSourceSummary` (flash-lite). Headline = original article title (no generation). Sets `is_blindspot = false`, `controversy_score = 0`, `sentiment = null`
 5. Compute deterministic metadata: spectrum distribution, blindspot flag, factuality, ownership
 6. Best-effort upsert entity tags before publication; tagging failures are logged but do not block story updates
 7. **Publication decision:**
@@ -323,3 +321,4 @@ The approved plan in `.omx/plans/prd-pipeline-throughput-scale-20260402.md` keep
 | `app/api/cron/ingest/route.ts` | Ingest cron endpoint |
 | `app/api/cron/process/route.ts` | Process cron endpoint |
 | `app/api/admin/pipeline/trigger/route.ts` | Admin manual trigger |
+| `scripts/backfill-single-source.ts` | Re-assemble single-source stories (fix headlines + fabricated perspectives) |

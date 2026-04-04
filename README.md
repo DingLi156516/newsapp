@@ -46,6 +46,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | `npm run test:e2e:ui` | Playwright interactive UI mode |
 | `npm run test:e2e:headed` | Playwright with visible browser |
 | `npx tsx scripts/backfill-tags.ts` | Backfill entity tags for existing published stories |
+| `npx tsx scripts/backfill-single-source.ts` | Re-assemble single-source stories (fix headlines + perspectives) |
 
 ---
 
