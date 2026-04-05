@@ -1,8 +1,8 @@
 /**
- * app/admin/pipeline/page.tsx — Admin pipeline dashboard.
+ * app/admin/sources/page.tsx — Admin source management page.
  *
- * Protected by useRequireAuth + useAdmin. Shows pipeline controls,
- * run history, and source health.
+ * Protected by useRequireAuth + useAdmin. Split-panel CRUD interface
+ * for managing news sources, including CSV import and RSS discovery.
  */
 'use client'
 
@@ -12,13 +12,10 @@ import { ArrowLeft, ShieldCheck, Activity, Database } from 'lucide-react'
 import { useRequireAuth } from '@/lib/hooks/use-require-auth'
 import { useAdmin } from '@/lib/hooks/use-admin'
 import { UserMenu } from '@/components/organisms/UserMenu'
-import { PipelineControls } from '@/components/organisms/PipelineControls'
-import { PipelineSummaryStats } from '@/components/organisms/PipelineSummaryStats'
-import { PipelineRunHistory } from '@/components/organisms/PipelineRunHistory'
-import { SourceHealthTable } from '@/components/organisms/SourceHealthTable'
+import { SourceAdminManager } from '@/components/organisms/SourceAdminManager'
 import { Skeleton } from '@/components/atoms/Skeleton'
 
-export default function AdminPipelinePage() {
+export default function AdminSourcesPage() {
   const router = useRouter()
   useRequireAuth()
   const { isAdmin, isLoading } = useAdmin()
@@ -74,13 +71,13 @@ export default function AdminPipelinePage() {
             </button>
             <div className="flex items-center gap-2">
               <div className="flex items-center justify-center w-8 h-8 rounded-full bg-white/10 border border-white/10">
-                <Activity size={16} className="text-white/80" />
+                <Database size={16} className="text-white/80" />
               </div>
               <h1
                 className="text-xl font-bold text-white"
                 style={{ fontFamily: 'DM Serif Display, Georgia, serif' }}
               >
-                Pipeline Dashboard
+                Source Management
               </h1>
             </div>
             <Link
@@ -91,20 +88,17 @@ export default function AdminPipelinePage() {
               Review
             </Link>
             <Link
-              href="/admin/sources"
+              href="/admin/pipeline"
               className="glass-pill flex items-center gap-1.5 px-3 py-2 text-sm text-white/80 hover:text-white transition-colors"
             >
-              <Database size={14} />
-              Sources
+              <Activity size={14} />
+              Pipeline
             </Link>
           </div>
           <UserMenu />
         </div>
 
-        <PipelineControls />
-        <PipelineSummaryStats />
-        <PipelineRunHistory />
-        <SourceHealthTable />
+        <SourceAdminManager />
       </div>
     </div>
   )

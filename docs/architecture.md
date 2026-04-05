@@ -140,6 +140,7 @@ Every page uses **SWR** (a caching library) to fetch data. While the API loads, 
 | **Settings** | `/settings` | User preferences form (topics, perspective, factuality, email digest) |
 | **Admin Review** | `/admin/review` | Manual review queue for AI-generated story summaries (admin only) |
 | **Admin Pipeline** | `/admin/pipeline` | Pipeline admin dashboard with live stats, run history, source health, and manual triggers (admin only) |
+| **Admin Sources** | `/admin/sources` | Source CRUD management with CSV import and RSS discovery (admin only) |
 
 #### Key UI components
 
@@ -193,7 +194,7 @@ lib/auth/        — Authentication (3 files)
   validation.ts     — Zod schemas for login/signup form validation
   auth-provider.tsx  — React context provider; wraps app with Supabase onAuthStateChange listener
 
-lib/api/         — API utilities (16+ files)
+lib/api/         — API utilities (18+ files)
   query-helpers.ts  — Supabase query builders; functions: queryStories(), queryStoryById(),
                       querySourceBySlug(), querySourcesForStory(), queryRecentStoriesForSource(),
                       querySources()
@@ -222,12 +223,16 @@ lib/supabase/    — Database layer (4 files)
                       Database (full type map for SupabaseClient<Database>)
   seed-sources.ts   — One-time script to seed sources table
 
-lib/rss/         — Ingestion pipeline (5 files)
+lib/rss/         — Ingestion pipeline (6 files)
   feed-registry.ts  — Static list of RSS feeds to ingest
   parser.ts         — Parses RSS feeds into DbArticleInsert records
   normalization.ts  — URL normalization for dedup (canonical URL extraction)
   dedup.ts          — Detects duplicate articles by canonical URL plus legacy raw URL compatibility checks
   ingest.ts         — Orchestrates fetch → parse → dedup → insert pipeline
+  discover.ts       — RSS auto-discovery: parse HTML <link> tags + probe common feed paths
+
+lib/utils/       — Client-side utilities
+  csv-parser.ts     — CSV parsing for admin source bulk import (no external deps)
 
 lib/pipeline/    — Pipeline orchestration helpers (6 files)
   backlog.ts         — Counts unembedded, unclustered, pending-assembly, and review backlog
@@ -323,6 +328,11 @@ lib/hooks/       — SWR data-fetching hooks + auth hooks + utilities (23 files)
 | `GET` | `/api/admin/pipeline/stats` | Pipeline statistics (admin required) |
 | `POST` | `/api/admin/pipeline/trigger` | Trigger pipeline run manually (admin required) |
 | `POST` | `/api/cron/digest` | Weekly blindspot digest email (protected by CRON_SECRET) |
+| `GET` | `/api/admin/sources` | List all sources with filters (admin required) |
+| `POST` | `/api/admin/sources` | Create new source (admin required) |
+| `PATCH` | `/api/admin/sources/[id]` | Update source (admin required) |
+| `POST` | `/api/admin/sources/import` | Bulk CSV import of sources (admin required) |
+| `POST` | `/api/admin/sources/discover-rss` | Discover RSS feeds from URL (admin required) |
 All responses follow `{ success: boolean, data: T, meta?: { total, page, limit } }`.
 
 ### Query Parameters

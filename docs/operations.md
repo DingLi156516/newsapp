@@ -484,6 +484,38 @@ Expected response:
 }
 ```
 
+#### Admin Source Management
+
+```bash
+# List all sources (with filters)
+curl -s "http://localhost:3000/api/admin/sources?search=reuters&is_active=true&page=1&limit=50" \
+  -H "Cookie: <auth-cookies>" | jq .
+
+# Create a new source
+curl -s -X POST "http://localhost:3000/api/admin/sources" \
+  -H "Cookie: <auth-cookies>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Reuters", "url": "https://reuters.com", "rss_url": "https://feeds.reuters.com/reuters/topNews", "bias": "center", "factuality": "very-high", "ownership": "corporate", "region": "international"}' | jq .
+
+# Update a source
+curl -s -X PATCH "http://localhost:3000/api/admin/sources/{source-id}" \
+  -H "Cookie: <auth-cookies>" \
+  -H "Content-Type: application/json" \
+  -d '{"is_active": false}' | jq .
+
+# Discover RSS feeds from a website
+curl -s -X POST "http://localhost:3000/api/admin/sources/discover-rss" \
+  -H "Cookie: <auth-cookies>" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}' | jq .
+
+# Bulk import sources (pre-parsed CSV rows)
+curl -s -X POST "http://localhost:3000/api/admin/sources/import" \
+  -H "Cookie: <auth-cookies>" \
+  -H "Content-Type: application/json" \
+  -d '{"rows": [{"name": "Source A", "bias": "center", "factuality": "high", "ownership": "corporate"}]}' | jq .
+```
+
 ### Admin Setup
 
 To grant admin access, add the user's UUID to the `admin_users` table:

@@ -8,7 +8,7 @@
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, ShieldCheck, Activity } from 'lucide-react'
+import { ArrowLeft, ShieldCheck, Activity, Database } from 'lucide-react'
 import { useRequireAuth } from '@/lib/hooks/use-require-auth'
 import { useAdmin } from '@/lib/hooks/use-admin'
 import { UserMenu } from '@/components/organisms/UserMenu'
@@ -86,6 +86,13 @@ export default function AdminReviewPage() {
             >
               <Activity size={14} />
               Pipeline
+            </Link>
+            <Link
+              href="/admin/sources"
+              className="glass-pill flex items-center gap-1.5 px-3 py-2 text-sm text-white/80 hover:text-white transition-colors"
+            >
+              <Database size={14} />
+              Sources
             </Link>
           </div>
           <UserMenu />

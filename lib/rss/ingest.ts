@@ -12,6 +12,7 @@ import { getActiveFeeds, type FeedEntry } from '@/lib/rss/feed-registry'
 import { parseFeed, categorizeFeedError, type ParsedFeedItem, type FeedErrorType } from '@/lib/rss/parser'
 import { filterNewArticles } from '@/lib/rss/dedup'
 import { createTitleFingerprint, normalizeArticleUrl } from '@/lib/rss/normalization'
+import { validatePublicUrl } from '@/lib/rss/discover'
 
 export interface IngestionResult {
   readonly totalFeeds: number
@@ -62,6 +63,21 @@ async function processInBatches<T, R>(
 async function fetchFeed(
   feed: FeedEntry
 ): Promise<{ items: readonly ParsedFeedItem[]; error: FeedError | null }> {
+  try {
+    validatePublicUrl(feed.rssUrl)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      items: [],
+      error: {
+        slug: feed.slug,
+        name: feed.name,
+        error: `URL validation failed for ${feed.rssUrl}: ${message}`,
+        errorType: 'unknown',
+      },
+    }
+  }
+
   try {
     const items = await parseFeed(feed.rssUrl)
     return { items, error: null }

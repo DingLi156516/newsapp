@@ -27,6 +27,7 @@
 | `ForYouCta` | `@/components/molecules/ForYouCta` |
 | `ReviewListItem` | `@/components/molecules/ReviewListItem` — Row in the review queue showing headline, status badge, topic, source count |
 | `ReviewDetail` | `@/components/molecules/ReviewDetail` — Expanded detail panel for reviewing AI summary, spectrum, and blindspot data |
+| `AdminSourceListItem` | `@/components/molecules/AdminSourceListItem` — Single row in admin source list showing name, bias badge, region, active status, and health indicators |
 
 ## Organisms (`components/organisms/`)
 
@@ -56,6 +57,11 @@
 | `PipelineRunHistory` | `@/components/organisms/PipelineRunHistory` — Inline run metrics with backlog deltas and per-stage skip/pass diagnostics |
 | `PipelineSummaryStats` | `@/components/organisms/PipelineSummaryStats` — Live DB counts (published, articles, review, unembedded, unclustered) for pipeline admin |
 | `SourceHealthTable` | `@/components/organisms/SourceHealthTable` — Source health monitoring table for pipeline admin dashboard |
+| `SourceAdminManager` | `@/components/organisms/SourceAdminManager` — Main orchestrator for admin sources split-panel (list + detail/create/import) |
+| `AdminSourceList` | `@/components/organisms/AdminSourceList` — Left panel: search, filter pills, paginated source list with action buttons |
+| `AdminSourceDetail` | `@/components/organisms/AdminSourceDetail` — Right panel: view/edit source with health metrics and form fields |
+| `AdminSourceCreate` | `@/components/organisms/AdminSourceCreate` — Right panel: new source form with RSS auto-discovery |
+| `AdminSourceImport` | `@/components/organisms/AdminSourceImport` — Right panel: CSV upload → preview → import flow |
 
 ## Pages (`components/pages/`)
 

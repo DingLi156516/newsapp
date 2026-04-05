@@ -34,6 +34,7 @@ Single source of truth for PRD implementation status. See `PRD_Axiom_News.md` fo
 | F-04 | Blindspot Digest Email (weekly email via Resend) | §2 F-04 |
 | F-08 | Region Classification (Gemini-powered, UI region filter) | §2 F-08 |
 | F-09 | Offline / PWA (service worker, cache API for saved stories) | §2 F-09 |
+| F-12 | Admin Source Management (CRUD, CSV bulk import, RSS auto-discovery) | §5 Phase 8A |
 
 ---
 
@@ -43,6 +44,7 @@ Single source of truth for PRD implementation status. See `PRD_Axiom_News.md` fo
 
 | Item | PRD Ref | Status | What's Left |
 |------|---------|--------|-------------|
+| Admin Source Management (CRUD + CSV import + RSS discovery) | §5 Phase 8A | ✅ Complete | `/admin/sources` — split-panel UI, API routes, CSV bulk import, RSS auto-discovery |
 | Browser extension (Chrome/Firefox) | §5 Phase 3 | Not started | Full extension for in-browser bias overlay |
 | Stripe subscription tiers (Free/Pro/Premium) | §5 Phase 4 | Not started | Payment integration, tier-gated features |
 | React Native mobile app (iOS + Android) | §5 Phase 4 | ⏳ Phase 1-5 substantially complete | `apps/mobile/` — Expo SDK 54, 65 source files, 43 test files, 16 Maestro E2E flows |
