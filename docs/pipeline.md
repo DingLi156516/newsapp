@@ -95,7 +95,7 @@ The most complex stage. Groups articles by cosine similarity into story clusters
 
 7. **Queue reassembly:** All stories that received new articles get `assembly_status = 'pending'` so the assembler regenerates their headline/summary.
 
-8. **Expiry sweep:** Articles older than 7 days still in `pending` status are marked `clustering_status = 'expired'`. The sweep uses a bounded SELECT+UPDATE pattern with WHERE guards (`clustering_status = 'pending'` AND `story_id IS NULL`) to prevent TOCTOU races with concurrent workers.
+8. **Expiry:** Articles older than 7 days are excluded from candidate selection (step 1) by the `ARTICLE_EXPIRY_DAYS` filter. No explicit sweep updates their status — they age out naturally by never being fetched again. `expiredArticles` is reported as `0` in clustering metrics (reserved for a future explicit sweep if needed).
 
 ### Singleton Lifecycle
 
@@ -118,11 +118,11 @@ The process runner's `clusterMadeProgress` function intentionally does **not** c
 1. Fetch stories where `assembly_status = 'pending'`, scanning 3x batch, filtering to unclaimed (claim TTL = 60 min)
 2. Claim stories (`assembly_status = 'processing'`, `assembly_claimed_at = now`)
 3. For each story, fetch all articles and source metadata
-4. Start entity extraction in parallel, then run model calls with `Promise.all(...)`:
-   - **Multi-source path** (≥2 sources): 4 calls — `generateNeutralHeadline`, `classifyTopic`, `classifyRegion`, `generateAISummary` (spectrum-aware with `leftFraming`, `rightFraming`, `commonGround`)
-   - **Single-source path** (1 source): 3 calls — `classifyTopic`, `classifyRegion`, `generateSingleSourceSummary` (flash-lite). Headline = original article title (no generation). Sets `is_blindspot = false`, `controversy_score = 0`, `sentiment = null`
+4. Run model calls with `Promise.all(...)`:
+   - **Multi-source path** (≥2 sources): 2 calls — `classifyStory` (generates headline, topic, region), `generateAISummary` (spectrum-aware with `leftFraming`, `rightFraming`, `commonGround`)
+   - **Single-source path** (1 source): 2 calls — `classifyStory` (generates topic, region), `generateSingleSourceSummary` (flash-lite). Headline = original article title (no generation). Sets `is_blindspot = false`, `controversy_score = 0`, `sentiment = null`
 5. Compute deterministic metadata: spectrum distribution, blindspot flag, factuality, ownership
-6. Best-effort upsert entity tags before publication; tagging failures are logged but do not block story updates
+6. Update story publication status and start background entity tag extraction. Tag extraction promises are collected and awaited at the end of the batch to ensure completion before the function exits. Tagging failures are logged but do not fail the story.
 7. **Publication decision:**
    - **Auto-publish** if: >= 2 articles, >= 2 sources, good AI summary, confidence >= 0.25
    - **Needs review** if any condition fails. Review reasons:
@@ -132,7 +132,7 @@ The process runner's `clusterMadeProgress` function intentionally does **not** c
 8. Update story with all generated fields, set final `publication_status`
 9. On error: set `assembly_status = 'failed'`, `publication_status = 'needs_review'`
 
-Claiming is batched. Story assembly runs with bounded concurrency (default 3, env: PIPELINE_ASSEMBLY_CONCURRENCY).
+Claiming is batched. Story assembly runs with bounded concurrency (default 6, env: PIPELINE_ASSEMBLY_CONCURRENCY).
 
 **Batch size:** 25 stories per pass (env: `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`)
 
@@ -164,7 +164,7 @@ Each iteration attempts all three stages in order. The loop continues as long as
 
 | Parameter | Default | Env Override |
 |-----------|---------|-------------|
-| Total budget | 100s | `PIPELINE_PROCESS_TIME_BUDGET_MS` |
+| Total budget | 280s | `PIPELINE_PROCESS_TIME_BUDGET_MS` |
 | Cluster reserve | 25s | `PIPELINE_PROCESS_CLUSTER_RESERVE_MS` |
 | Assembly reserve | 15s | `PIPELINE_PROCESS_ASSEMBLE_RESERVE_MS` |
 

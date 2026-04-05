@@ -9,7 +9,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, DbSource } from '@/lib/supabase/types'
 import type { BiasCategory, FactualityLevel, OwnershipType } from '@/lib/types'
-import { generateNeutralHeadline } from '@/lib/ai/headline-generator'
+import { classifyStory } from '@/lib/ai/story-classifier'
 import { generateAISummary, generateSingleSourceSummary, isFallbackSummary, type ExpandedSummaryResult } from '@/lib/ai/summary-generator'
 import {
   computeStoryVelocity,
@@ -18,14 +18,29 @@ import {
   computeControversyScore,
   computeCoverageDurationHours,
 } from '@/lib/ai/story-metrics'
-import { classifyTopic } from '@/lib/ai/topic-classifier'
-import { classifyRegion } from '@/lib/ai/region-classifier'
 import { calculateSpectrum } from '@/lib/ai/spectrum-calculator'
 import { isBlindspot } from '@/lib/ai/blindspot-detector'
 import { extractEntities } from '@/lib/ai/entity-extractor'
 import { upsertStoryTags } from '@/lib/ai/tag-upsert'
 import { ASSEMBLY_CLAIM_TTL_MS, isClaimAvailable } from '@/lib/pipeline/claim-utils'
 import { decideStoryPublication } from '@/lib/pipeline/story-state'
+
+export function scheduleTagExtraction(
+  client: SupabaseClient<Database>,
+  storyId: string,
+  titles: readonly string[],
+  descriptions: readonly (string | null)[]
+): Promise<void> {
+  return extractEntities(titles, descriptions)
+    .then((entities) => upsertStoryTags(client, storyId, entities))
+    .then(() => {})
+    .catch((err) => {
+      console.error(
+        `[tag-processor] Tag extraction failed for ${storyId}:`,
+        err instanceof Error ? err.message : String(err)
+      )
+    })
+}
 
 interface StoryArticle {
   id: string
@@ -66,7 +81,7 @@ interface SingleStoryAssemblyResult {
   readonly cheapModelTasks?: number
   readonly cheapModelFallbacks?: number
   readonly summaryFallback?: boolean
-  readonly tagError?: string
+  readonly tagPromise?: Promise<void>
 }
 
 interface StoryAssemblyBatchResult {
@@ -79,7 +94,7 @@ interface StoryAssemblyBatchResult {
 const CLAIM_SCAN_MULTIPLIER = 3
 const DEFAULT_STORY_ASSEMBLY_CONCURRENCY = Math.max(
   1,
-  Number(process.env.PIPELINE_ASSEMBLY_CONCURRENCY ?? 3)
+  Number(process.env.PIPELINE_ASSEMBLY_CONCURRENCY ?? 6)
 )
 
 function dominantValue<T extends string>(values: readonly T[], fallback: T): T {
@@ -210,8 +225,6 @@ export async function assembleSingleStory(
     .filter((bias): bias is BiasCategory => bias !== undefined)
   const descriptions = articles.map((article) => article.description)
 
-  const entitiesPromise = extractEntities(titles, descriptions)
-
   // Compute pre-AI metrics (velocity, diversity) from article timestamps
   const articlesWithTimestamps = articles
     .filter((a) => a.published_at !== null)
@@ -245,11 +258,9 @@ export async function assembleSingleStory(
   let summaryResult: ExpandedSummaryResult
 
   if (isSingleSource) {
-    // Single-source path: skip headline generation, use lightweight summary
     const article = articles[0]
-    const [topicRes, regionRes, singleSummary] = await Promise.all([
-      classifyTopic(titles),
-      classifyRegion(titles),
+    const [classificationRes, singleSummary] = await Promise.all([
+      classifyStory(titles),
       generateSingleSourceSummary({
         title: article.title,
         description: article.description,
@@ -257,15 +268,12 @@ export async function assembleSingleStory(
       }),
     ])
     normalizedHeadline = { headline: article.title, usedCheapModel: false, usedFallback: false }
-    normalizedTopic = topicRes
-    normalizedRegion = regionRes
+    normalizedTopic = { topic: classificationRes.topic, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.topicFallback }
+    normalizedRegion = { region: classificationRes.region, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.regionFallback }
     summaryResult = singleSummary
   } else {
-    // Multi-source path: full AI pipeline
-    const [headlineRes, topicRes, regionRes, fullSummary] = await Promise.all([
-      generateNeutralHeadline(titles),
-      classifyTopic(titles),
-      classifyRegion(titles),
+    const [classificationRes, fullSummary] = await Promise.all([
+      classifyStory(titles),
       generateAISummary(
         articles.map((article) => ({
           title: article.title,
@@ -274,9 +282,9 @@ export async function assembleSingleStory(
         }))
       ),
     ])
-    normalizedHeadline = headlineRes
-    normalizedTopic = topicRes
-    normalizedRegion = regionRes
+    normalizedHeadline = { headline: classificationRes.headline, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.headlineFallback }
+    normalizedTopic = { topic: classificationRes.topic, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.topicFallback }
+    normalizedRegion = { region: classificationRes.region, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.regionFallback }
     summaryResult = fullSummary
   }
 
@@ -308,16 +316,6 @@ export async function assembleSingleStory(
     processingError: null,
   })
   const now = new Date().toISOString()
-
-  let tagError: string | undefined
-  try {
-    const entities = await entitiesPromise
-    const tagsStartedAt = Date.now()
-    await upsertStoryTags(client, storyId, entities)
-    dbTimeMs += Date.now() - tagsStartedAt
-  } catch (tagErr) {
-    tagError = `Entity tagging failed for ${storyId}: ${tagErr instanceof Error ? tagErr.message : String(tagErr)}`
-  }
 
   const updateStartedAt = Date.now()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -359,10 +357,17 @@ export async function assembleSingleStory(
     throw new Error(`Failed to update story ${storyId}: ${updateError.message}`)
   }
 
+  const tagPromise = scheduleTagExtraction(client, storyId, titles, descriptions)
+
   return {
     publicationStatus: publicationDecision.publicationStatus,
     dbTimeMs,
     modelTimeMs,
+    // Note: cheapModelTasks counts logical tasks (headline, topic, region).
+    // Because classifyStory batches these into a single API call, this metric
+    // will count 3 tasks for multi-source and 2 tasks for single-source
+    // even though only 1 Gemini API request was made. This accurately reflects
+    // "work done by cheap models" rather than "number of API requests".
     cheapModelTasks:
       (normalizedHeadline.usedCheapModel ? 1 : 0)
       + (normalizedTopic.usedCheapModel ? 1 : 0)
@@ -372,7 +377,7 @@ export async function assembleSingleStory(
       + (normalizedTopic.usedFallback ? 1 : 0)
       + (normalizedRegion.usedFallback ? 1 : 0),
     summaryFallback: isFallbackSummary(summaryResult),
-    tagError,
+    tagPromise,
   }
 }
 
@@ -476,6 +481,8 @@ export async function assembleStories(
     }
   )
 
+  const tagPromises: Promise<void>[] = []
+
   for (const batchResult of batchResults) {
     if (batchResult.error) {
       errors.push(batchResult.error)
@@ -494,8 +501,8 @@ export async function assembleStories(
     cheapModelFallbacks += batchResult.result.cheapModelFallbacks ?? 0
     summaryFallbacks += batchResult.result.summaryFallback ? 1 : 0
 
-    if (batchResult.result.tagError) {
-      errors.push(batchResult.result.tagError)
+    if (batchResult.result.tagPromise) {
+      tagPromises.push(batchResult.result.tagPromise)
     }
 
     if (batchResult.result.publicationStatus === 'published') {
@@ -504,6 +511,12 @@ export async function assembleStories(
       sentToReview += 1
     }
   }
+
+  // Await all tag extractions at the end of the batch.
+  // This ensures the serverless function (Vercel) doesn't terminate and kill
+  // the promises before they complete, while still allowing the main story
+  // assemblies and DB updates to proceed without blocking on tags.
+  await Promise.all(tagPromises)
 
   return {
     storiesProcessed,

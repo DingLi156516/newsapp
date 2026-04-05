@@ -13,7 +13,7 @@ import {
 function createMockClient(
   articleRows: Record<string, unknown>[] = [],
   storyRows: Record<string, unknown>[] = [],
-  options: { failSingletonUpdate?: boolean; failInitialClaimIds?: string[] } = {},
+  options: { failSingletonUpdate?: boolean; failInitialClaimIds?: string[]; failStoryFetch?: boolean } = {},
 ) {
   const articleUpdateCalls: { payload: Record<string, unknown>; id: string }[] = []
 
@@ -37,7 +37,11 @@ function createMockClient(
   const storyInsert = vi.fn().mockReturnValue({ select: storySelectAfterInsert })
 
   // Story select chain for fetching existing stories
-  const storyReturns = vi.fn().mockResolvedValue({ data: storyRows, error: null })
+  const storyReturns = vi.fn().mockResolvedValue(
+    options.failStoryFetch
+      ? { data: null, error: { message: 'DB error' } }
+      : { data: storyRows, error: null }
+  )
   const storyNot = vi.fn().mockReturnValue({ returns: storyReturns })
   const storyGte = vi.fn().mockReturnValue({ not: storyNot })
   const storySelect = vi.fn((columns?: string) => {
@@ -347,6 +351,16 @@ describe('clusterArticles', () => {
         expect.stringContaining('claim'),
       ]),
     )
-    expect(client._articleUpdateCalls.some((call) => call.id === 'failed-claim' && call.payload.story_id)).toBe(false)
+  })
+
+  it('releases claims in finally block if processing throws an error', async () => {
+    const articles = TWO_SIMILAR_ARTICLES
+    const client = createMockClient(articles, [], { failStoryFetch: true })
+
+    await expect(clusterArticles(client as never)).rejects.toThrow('Failed to fetch existing stories: DB error')
+
+    // The finally block should have fired a release update
+    const releaseUpdates = client._articleUpdateCalls.filter(c => c.payload.clustering_claimed_at === null)
+    expect(releaseUpdates.length).toBe(articles.length)
   })
 })

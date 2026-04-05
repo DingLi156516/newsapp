@@ -4,22 +4,14 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-vi.mock('@/lib/ai/headline-generator', () => ({
-  generateNeutralHeadline: vi.fn(),
+vi.mock('@/lib/ai/story-classifier', () => ({
+  classifyStory: vi.fn(),
 }))
 
 vi.mock('@/lib/ai/summary-generator', () => ({
   generateAISummary: vi.fn(),
   generateSingleSourceSummary: vi.fn(),
   isFallbackSummary: vi.fn(() => false),
-}))
-
-vi.mock('@/lib/ai/topic-classifier', () => ({
-  classifyTopic: vi.fn(),
-}))
-
-vi.mock('@/lib/ai/region-classifier', () => ({
-  classifyRegion: vi.fn(),
 }))
 
 vi.mock('@/lib/ai/spectrum-calculator', () => ({
@@ -39,36 +31,32 @@ vi.mock('@/lib/ai/tag-upsert', () => ({
 }))
 
 import type { Region, Topic } from '@/lib/types'
-import { assembleSingleStory, assembleStories } from '@/lib/ai/story-assembler'
-import { generateNeutralHeadline } from '@/lib/ai/headline-generator'
+import { assembleSingleStory, assembleStories, scheduleTagExtraction } from '@/lib/ai/story-assembler'
+import { classifyStory } from '@/lib/ai/story-classifier'
 import { generateAISummary, generateSingleSourceSummary } from '@/lib/ai/summary-generator'
-import { classifyTopic } from '@/lib/ai/topic-classifier'
-import { classifyRegion } from '@/lib/ai/region-classifier'
 import { calculateSpectrum } from '@/lib/ai/spectrum-calculator'
 import { isBlindspot } from '@/lib/ai/blindspot-detector'
 import { extractEntities } from '@/lib/ai/entity-extractor'
 import { upsertStoryTags } from '@/lib/ai/tag-upsert'
 
-const mockHeadline = vi.mocked(generateNeutralHeadline)
+const mockClassifyStory = vi.mocked(classifyStory)
 const mockSummary = vi.mocked(generateAISummary)
 const mockSingleSourceSummary = vi.mocked(generateSingleSourceSummary)
-const mockTopic = vi.mocked(classifyTopic)
-const mockRegion = vi.mocked(classifyRegion)
 const mockSpectrum = vi.mocked(calculateSpectrum)
 const mockBlindspot = vi.mocked(isBlindspot)
 const mockExtractEntities = vi.mocked(extractEntities)
 const mockUpsertStoryTags = vi.mocked(upsertStoryTags)
 
-function headlineResult(headline: string) {
-  return { headline, usedCheapModel: true, usedFallback: false }
-}
-
-function topicResult(topic: Topic) {
-  return { topic, usedCheapModel: true, usedFallback: false }
-}
-
-function regionResult(region: Region) {
-  return { region, usedCheapModel: true, usedFallback: false }
+function classificationResult(headline: string, topic: Topic = 'politics', region: Region = 'us') {
+  return { 
+    headline, 
+    topic, 
+    region, 
+    usedCheapModel: true, 
+    headlineFallback: false,
+    topicFallback: false,
+    regionFallback: false
+  }
 }
 
 function createMockClient(overrides: {
@@ -161,9 +149,7 @@ describe('assembleSingleStory', () => {
       { id: 's2', bias: 'right', factuality: 'mixed', ownership: 'independent' },
     ]
 
-    mockHeadline.mockResolvedValue(headlineResult('Generated Headline'))
-    mockTopic.mockResolvedValue(topicResult('politics'))
-    mockRegion.mockResolvedValue(regionResult('us'))
+    mockClassifyStory.mockResolvedValue(classificationResult('Generated Headline', 'politics', 'us'))
     mockSummary.mockResolvedValue({
       aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
       sentiment: null,
@@ -187,17 +173,11 @@ describe('assembleSingleStory', () => {
 
     await assembleSingleStory(client as never, 'story-1')
 
-    expect(mockHeadline).toHaveBeenCalledWith(['Article One', 'Article Two'])
-    expect(mockTopic).toHaveBeenCalledWith(['Article One', 'Article Two'])
+    expect(mockClassifyStory).toHaveBeenCalledWith(['Article One', 'Article Two'])
     expect(mockSummary).toHaveBeenCalledOnce()
     expect(mockExtractEntities).toHaveBeenCalledWith(
       ['Article One', 'Article Two'],
       ['Desc 1', 'Desc 2']
-    )
-    expect(mockUpsertStoryTags).toHaveBeenCalledWith(
-      expect.anything(),
-      'story-1',
-      [{ label: 'Test Entity', type: 'person', relevance: 0.9 }]
     )
     expect(client._updateFn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -226,8 +206,7 @@ describe('assembleSingleStory', () => {
       { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
     ]
 
-    mockTopic.mockResolvedValue(topicResult('politics'))
-    mockRegion.mockResolvedValue(regionResult('us'))
+    mockClassifyStory.mockResolvedValue(classificationResult('Generated Headline', 'politics', 'us'))
     mockSingleSourceSummary.mockResolvedValue({
       aiSummary: { commonGround: '• Key facts here', leftFraming: '', rightFraming: '' },
       sentiment: null,
@@ -245,18 +224,14 @@ describe('assembleSingleStory', () => {
 
     await assembleSingleStory(client as never, 'story-1')
 
-    // Should NOT call generateNeutralHeadline or generateAISummary
-    expect(mockHeadline).not.toHaveBeenCalled()
     expect(mockSummary).not.toHaveBeenCalled()
 
-    // Should call single-source summary
     expect(mockSingleSourceSummary).toHaveBeenCalledWith({
       title: 'Original Article Title',
       description: 'Desc',
       bias: 'left',
     })
 
-    // Should use original title as headline
     expect(client._updateFn).toHaveBeenCalledWith(
       expect.objectContaining({
         headline: 'Original Article Title',
@@ -302,40 +277,6 @@ describe('assembleSingleStory', () => {
     ).rejects.toThrow('Failed to fetch sources for story story-1')
   })
 
-  it('does not throw when tag upsert fails', async () => {
-    const articles = [
-      { id: 'a1', title: 'Article One', description: 'Desc 1', source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
-      { id: 'a2', title: 'Article Two', description: 'Desc 2', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
-    ]
-    const sources = [
-      { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
-      { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
-    ]
-
-    mockHeadline.mockResolvedValue(headlineResult('Headline'))
-    mockTopic.mockResolvedValue(topicResult('politics'))
-    mockRegion.mockResolvedValue(regionResult('us'))
-    mockSummary.mockResolvedValue({ aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' }, sentiment: null, keyQuotes: null, keyClaims: null })
-    mockSpectrum.mockReturnValue([
-      { bias: 'left', percentage: 50 },
-      { bias: 'right', percentage: 50 },
-    ])
-    mockBlindspot.mockReturnValue(false)
-    mockExtractEntities.mockResolvedValue([{ label: 'Test', type: 'person', relevance: 0.9 }])
-    mockUpsertStoryTags.mockRejectedValue(new Error('Tag DB error'))
-
-    const client = createMockClient({
-      articles: { data: articles, error: null },
-      sources: { data: sources, error: null },
-    })
-
-    // Should not throw even though upsertStoryTags fails
-    const result = await assembleSingleStory(client as never, 'story-1')
-    expect(result.publicationStatus).toBe('published')
-    expect(result.tagError).toBe('Entity tagging failed for story-1: Tag DB error')
-    expect(mockUpsertStoryTags).toHaveBeenCalledOnce()
-  })
-
   it('throws on update error', async () => {
     const articles = [
       { id: 'a1', title: 'Title', description: null, source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
@@ -344,9 +285,7 @@ describe('assembleSingleStory', () => {
       { id: 's1', bias: 'center', factuality: 'high', ownership: 'corporate' },
     ]
 
-    mockHeadline.mockResolvedValue(headlineResult('Headline'))
-    mockTopic.mockResolvedValue(topicResult('politics'))
-    mockRegion.mockResolvedValue(regionResult('us'))
+    mockClassifyStory.mockResolvedValue(classificationResult('Headline'))
     mockSummary.mockResolvedValue({ aiSummary: { commonGround: '', leftFraming: '', rightFraming: '' }, sentiment: null, keyQuotes: null, keyClaims: null })
     mockSpectrum.mockReturnValue([])
     mockBlindspot.mockReturnValue(false)
@@ -362,6 +301,89 @@ describe('assembleSingleStory', () => {
     await expect(
       assembleSingleStory(client as never, 'story-1')
     ).rejects.toThrow('Failed to update story story-1')
+  })
+
+  it('publishes successfully even if tag extraction fails', async () => {
+    const articles = [
+      { id: 'a1', title: 'Title', description: null, source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
+    ]
+    const sources = [
+      { id: 's1', bias: 'center', factuality: 'high', ownership: 'corporate' },
+    ]
+
+    mockClassifyStory.mockResolvedValue(classificationResult('Headline'))
+    mockSummary.mockResolvedValue({ aiSummary: { commonGround: '', leftFraming: '', rightFraming: '' }, sentiment: null, keyQuotes: null, keyClaims: null })
+    mockSpectrum.mockReturnValue([])
+    mockBlindspot.mockReturnValue(false)
+    mockExtractEntities.mockRejectedValue(new Error('Tagging error'))
+
+    const client = createMockClient({
+      articles: { data: articles, error: null },
+      sources: { data: sources, error: null },
+    })
+
+    const result = await assembleSingleStory(client as never, 'story-1')
+    expect(result.publicationStatus).toBe('published')
+  })
+})
+
+describe('scheduleTagExtraction', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('calls extractEntities and upsertStoryTags on success', async () => {
+    mockExtractEntities.mockResolvedValue([
+      { label: 'Entity', type: 'person', relevance: 0.9 },
+    ])
+    mockUpsertStoryTags.mockResolvedValue(undefined)
+
+    const client = { from: vi.fn() }
+    scheduleTagExtraction(client as never, 'story-1', ['Title 1'], ['Desc 1'])
+
+    await vi.waitFor(() => {
+      expect(mockExtractEntities).toHaveBeenCalledWith(['Title 1'], ['Desc 1'])
+    })
+    await vi.waitFor(() => {
+      expect(mockUpsertStoryTags).toHaveBeenCalledWith(
+        client,
+        'story-1',
+        [{ label: 'Entity', type: 'person', relevance: 0.9 }]
+      )
+    })
+  })
+
+  it('logs error when extractEntities rejects', async () => {
+    mockExtractEntities.mockRejectedValue(new Error('AI failure'))
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    scheduleTagExtraction({} as never, 'story-1', ['Title'], [null])
+
+    await vi.waitFor(() => {
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[tag-processor] Tag extraction failed for story-1:',
+        'AI failure'
+      )
+    })
+
+    consoleSpy.mockRestore()
+  })
+
+  it('logs error when upsertStoryTags rejects', async () => {
+    mockExtractEntities.mockResolvedValue([])
+    mockUpsertStoryTags.mockRejectedValue(new Error('DB failure'))
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    scheduleTagExtraction({} as never, 'story-1', ['Title'], [null])
+
+    await vi.waitFor(() => {
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[tag-processor] Tag extraction failed for story-1:',
+        'DB failure'
+      )
+    })
+
+    consoleSpy.mockRestore()
   })
 })
 
@@ -412,9 +434,7 @@ describe('assembleStories', () => {
       { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
     ]
 
-    mockHeadline.mockResolvedValue(headlineResult('Generated Headline'))
-    mockTopic.mockResolvedValue(topicResult('politics'))
-    mockRegion.mockResolvedValue(regionResult('us'))
+    mockClassifyStory.mockResolvedValue(classificationResult('Generated Headline', 'politics', 'us'))
     mockSummary.mockResolvedValue({
       aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
       sentiment: null,
@@ -453,9 +473,7 @@ describe('assembleStories', () => {
       { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
     ]
 
-    mockHeadline.mockResolvedValue(headlineResult('Generated Headline'))
-    mockTopic.mockResolvedValue(topicResult('politics'))
-    mockRegion.mockResolvedValue(regionResult('us'))
+    mockClassifyStory.mockResolvedValue(classificationResult('Generated Headline', 'politics', 'us'))
     mockSummary.mockResolvedValue({
       aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
       sentiment: null,
@@ -501,9 +519,7 @@ describe('assembleStories', () => {
     ]
     const summaryResolvers: Array<(value: { aiSummary: { commonGround: string; leftFraming: string; rightFraming: string }; sentiment: null; keyQuotes: null; keyClaims: null }) => void> = []
 
-    mockHeadline.mockResolvedValue(headlineResult('Generated Headline'))
-    mockTopic.mockResolvedValue(topicResult('politics'))
-    mockRegion.mockResolvedValue(regionResult('us'))
+    mockClassifyStory.mockResolvedValue(classificationResult('Generated Headline', 'politics', 'us'))
     mockSummary.mockImplementation(
       () =>
         new Promise((resolve) => {

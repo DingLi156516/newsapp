@@ -70,23 +70,21 @@ This runs three sub-stages in fair, freshness-first rounds:
 
 #### 2a. Assembly (`lib/ai/story-assembler.ts`)
 
-For each pending story (`assembly_status = 'pending'`), the system claims a bounded batch, starts entity extraction concurrently, and runs **4 primary model calls in parallel**:
+For each pending story (`assembly_status = 'pending'`), the system claims a bounded batch, and runs **2 primary model calls in parallel**:
 
 | Operation | File | What it does |
 |-----------|------|-------------|
-| **Headline** | `headline-generator.ts` | Writes one neutral headline from all article titles |
-| **Topic** | `topic-classifier.ts` | Picks one of 9 categories (politics, world, tech, etc.) |
+| **Classification** | `story-classifier.ts` | Writes one neutral headline from all article titles, picks one of 9 categories (politics, world, tech, etc.), and classifies story into a geographic region (us, uk, etc.) |
 | **AI Summary** | `summary-generator.ts` | Produces 3 perspectives: Common Ground, Left Framing, Right Framing |
-| **Region** | `region-classifier.ts` | Classifies story into a geographic region (us, uk, etc.) |
 | **Spectrum** | `spectrum-calculator.ts` | Deterministically calculates % breakdown by political leaning |
 | **Blindspot** | `blindspot-detector.ts` | Deterministically flags stories where >80% coverage is from one side |
-| **Entity Tags** | `entity-extractor.ts` + `tag-upsert.ts` | Starts async entity extraction and writes `story_tags` before publication when possible |
+| **Entity Tags** | `entity-extractor.ts` + `tag-upsert.ts` | Starts async entity extraction after update and awaits completion at the end of the batch; writes `story_tags` |
 
 The headline prompt explicitly tells Gemini: *"avoid loaded language or bias framing."*
 
 The summary prompt labels each article's source bias (e.g., `[LEFT] CNN: ...`, `[RIGHT] Fox News: ...`) so Gemini can distinguish perspectives.
 
-Entity tags are attempted before the publication decision is applied, but tagging failures are swallowed so they never block publication or retries. After assembly, a pure publication-decision layer scores the story and either auto-publishes it or routes it to manual review. Sparse clusters (fewer than 2 articles or sources) go to review. Stories that fail assembly move to `assembly_status = 'failed'` and stay out of the public feed until reprocessed. Story claiming is batched. Story assembly runs with bounded concurrency (default 3, env: PIPELINE_ASSEMBLY_CONCURRENCY).
+Entity tag extraction is scheduled after the story update and runs concurrently with other stories in the batch; all tag promises are awaited at the end of the batch to prevent serverless termination before completion. Tagging failures are swallowed so they never block publication or retries. A pure publication-decision layer scores the story and either auto-publishes it or routes it to manual review. Sparse clusters (fewer than 2 articles or sources) go to review. Stories that fail assembly move to `assembly_status = 'failed'` and stay out of the public feed until reprocessed. Story claiming is batched. Story assembly runs with bounded concurrency (default 6, env: PIPELINE_ASSEMBLY_CONCURRENCY).
 `assembly_claimed_at` acts as the in-flight lease for this stage; claims older than 60 minutes are treated as stale and can be reclaimed.
 
 #### 2b. Clustering (`lib/ai/clustering.ts`)
@@ -248,11 +246,11 @@ lib/ai/          — AI processing (12 files)
   embeddings.ts         — Generates vector embeddings for articles
   clustering.ts         — Groups articles into story clusters by embedding similarity; singletons stay unclustered and expire after 7 days
   spectrum-calculator.ts — Computes bias distribution (SpectrumSegment[]) per story cluster
-  topic-classifier.ts   — Classifies a story cluster into a Topic
-  headline-generator.ts — Synthesises a neutral headline from cluster headlines
+  topic-classifier.ts   — Provides deterministic fallback topic logic
+  region-classifier.ts  — Provides deterministic fallback region logic
+  story-classifier.ts   — Synthesises a neutral headline, topic and region from cluster headlines in a single Gemini call
   summary-generator.ts  — Generates cross-spectrum AISummary (commonGround, leftFraming, rightFraming)
   blindspot-detector.ts — Flags stories with skewed left/right coverage as blindspots
-  region-classifier.ts  — Classifies a story cluster into a Region via Gemini
   entity-extractor.ts   — Extracts named entities (people, orgs, locations, topics) from article titles/descriptions via Gemini
   tag-upsert.ts         — Upserts extracted entities into story_tags table
   story-assembler.ts    — Coordinates the above modules to produce a complete DbStoryInsert

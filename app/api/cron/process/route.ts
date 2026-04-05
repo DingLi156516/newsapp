@@ -1,7 +1,7 @@
 /**
  * app/api/cron/process/route.ts — AI processing cron endpoint.
  *
- * Runs the round-based assemble → cluster → embed process pipeline.
+ * Runs the round-based embed → cluster → assemble process pipeline.
  * Called 5 minutes after ingestion (staggered schedule).
  * Logs run details to pipeline_runs table via PipelineLogger.
  */
@@ -16,7 +16,7 @@ import { countPipelineBacklog } from '@/lib/pipeline/backlog'
 import { runProcessPipeline } from '@/lib/pipeline/process-runner'
 
 export const runtime = 'nodejs'
-export const maxDuration = 120
+export const maxDuration = 300
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const authHeader = request.headers.get('authorization')
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       assemble: (maxStories) => assembleStories(client, maxStories),
       logStep: <T,>(step: string, fn: () => Promise<T>) =>
         logger.logStep(step, () => fn() as unknown as Promise<Record<string, unknown>>) as Promise<T>,
-    }, { timeBudgetMs: 100_000 })
+    }, { timeBudgetMs: 280_000 })
     await logger.complete(summary as unknown as Record<string, unknown>)
 
     return NextResponse.json({

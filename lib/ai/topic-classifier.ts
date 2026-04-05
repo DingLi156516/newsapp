@@ -1,23 +1,10 @@
 /**
  * lib/ai/topic-classifier.ts — Topic classification for article clusters.
  *
- * Uses Gemini to classify a group of article titles into one of the
- * predefined topic categories (politics, world, technology, etc.).
+ * Provides deterministic keyword-based topic fallback classification.
  */
 
 import type { Topic } from '@/lib/types'
-import { CHEAP_GENERATION_MODEL, generateText } from '@/lib/ai/gemini-client'
-
-const VALID_TOPICS: readonly Topic[] = [
-  'politics', 'world', 'technology', 'business',
-  'science', 'health', 'culture', 'sports', 'environment',
-]
-
-export interface TopicClassificationResult {
-  readonly topic: Topic
-  readonly usedCheapModel: boolean
-  readonly usedFallback: boolean
-}
 
 const TOPIC_KEYWORDS: ReadonlyArray<readonly [Topic, readonly string[]]> = [
   ['technology', ['ai', 'artificial intelligence', 'technology', 'tech', 'software', 'chip', 'cyber', 'startup']],
@@ -42,7 +29,7 @@ function matchesKeyword(normalizedTitles: string, keyword: string): boolean {
   return new RegExp(`\\b${escapeRegExp(keyword)}\\b`).test(normalizedTitles)
 }
 
-function fallbackTopic(articleTitles: readonly string[]): Topic {
+export function fallbackTopic(articleTitles: readonly string[]): Topic {
   const normalizedTitles = articleTitles.join(' ').toLowerCase()
 
   for (const [topic, keywords] of TOPIC_KEYWORDS) {
@@ -52,40 +39,4 @@ function fallbackTopic(articleTitles: readonly string[]): Topic {
   }
 
   return 'politics'
-}
-
-export async function classifyTopic(
-  articleTitles: readonly string[]
-): Promise<TopicClassificationResult> {
-  if (articleTitles.length === 0) {
-    return { topic: 'politics', usedCheapModel: false, usedFallback: true }
-  }
-
-  const titlesBlock = articleTitles.join('\n')
-
-  const prompt = `Classify these news article titles into exactly ONE topic category.
-
-Article titles:
-${titlesBlock}
-
-Valid categories: ${VALID_TOPICS.join(', ')}
-
-Return ONLY the category name, nothing else.`
-
-  try {
-    const response = await generateText(prompt, { model: CHEAP_GENERATION_MODEL })
-    const topic = response.text.trim().toLowerCase() as Topic
-
-    if (VALID_TOPICS.includes(topic)) {
-      return { topic, usedCheapModel: true, usedFallback: false }
-    }
-  } catch {
-    // fall through to deterministic fallback
-  }
-
-  return {
-    topic: fallbackTopic(articleTitles),
-    usedCheapModel: true,
-    usedFallback: true,
-  }
 }

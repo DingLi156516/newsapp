@@ -84,9 +84,9 @@ __tests__/
       gemini-client.test.ts  gemini-client-model-routing.test.ts
       clustering.test.ts  clustering-stage.test.ts
       embeddings.test.ts
-      spectrum-calculator.test.ts  topic-classifier.test.ts
-      headline-generator.test.ts  summary-generator.test.ts
-      blindspot-detector.test.ts  region-classifier.test.ts
+      spectrum-calculator.test.ts  story-classifier.test.ts
+      summary-generator.test.ts
+      blindspot-detector.test.ts
       story-assembler.test.ts  story-assembler-concurrency.test.ts
     email/
       send-digest.test.ts

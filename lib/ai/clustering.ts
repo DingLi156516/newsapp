@@ -288,17 +288,6 @@ export async function clusterArticles(
     }
   }
 
-  const { data: existingStoryRows, error: storyError } = await client
-    .from('stories')
-    .select('id, cluster_centroid, last_updated')
-    .gte('last_updated', broadCutoff)
-    .not('cluster_centroid', 'is', null)
-    .returns<StoryWithCentroidRow[]>()
-
-  if (storyError) {
-    throw new Error(`Failed to fetch existing stories: ${storyError.message}`)
-  }
-
   let newStories = 0
   let assignedArticles = 0
   let unmatchedSingletons = 0
@@ -307,7 +296,21 @@ export async function clusterArticles(
   const storyMap = new Map<string, StoryTracker>()
   const storiesNeedingReassembly = new Set<string>()
 
-  const existingStories: StoryWithCentroid[] = (existingStoryRows ?? [])
+  const unhandledArticleIds = new Set(claimableArticles.map(a => a.id))
+
+  try {
+    const { data: existingStoryRows, error: storyError } = await client
+      .from('stories')
+      .select('id, cluster_centroid, last_updated')
+      .gte('last_updated', broadCutoff)
+      .not('cluster_centroid', 'is', null)
+      .returns<StoryWithCentroidRow[]>()
+
+    if (storyError) {
+      throw new Error(`Failed to fetch existing stories: ${storyError.message}`)
+    }
+
+    const existingStories: StoryWithCentroid[] = (existingStoryRows ?? [])
     .filter((row) => row.cluster_centroid !== null)
     .filter((row) => shouldStoryBeMatchable(row.last_updated, now))
     .map((row) => ({
@@ -323,6 +326,8 @@ export async function clusterArticles(
   }
 
   const newClusters: ClusterCandidate[] = []
+
+  const pass1Assignments = new Map<string, string[]>()
 
   for (const article of claimableArticles) {
     let bestStoryId: string | null = null
@@ -340,21 +345,11 @@ export async function clusterArticles(
       const tracker = storyMap.get(bestStoryId)
       tracker?.articleIds.push(article.id)
 
-      const assignStartedAt = Date.now()
-      const { failedIds, message } = await bulkUpdateArticles(client, [article.id], {
-        story_id: bestStoryId,
-        clustering_claimed_at: null,
-        clustering_status: 'clustered',
-      })
-      dbTimeMs += Date.now() - assignStartedAt
-
-      if (failedIds.length > 0) {
-        errors.push(`Failed to assign article ${article.id}: ${message ?? 'unknown error'}`)
-        await clearClusteringClaim(client, article.id)
+      const batch = pass1Assignments.get(bestStoryId)
+      if (batch) {
+        batch.push(article.id)
       } else {
-        assignedArticles++
-
-        storiesNeedingReassembly.add(bestStoryId)
+        pass1Assignments.set(bestStoryId, [article.id])
       }
 
       continue
@@ -381,6 +376,37 @@ export async function clusterArticles(
         embeddings: [article.embedding],
         imageUrl: article.image_url,
       })
+    }
+  }
+
+  for (const [storyId, articleIds] of pass1Assignments) {
+    const batchStartedAt = Date.now()
+    const { failedIds, message } = await bulkUpdateArticles(client, articleIds, {
+      story_id: storyId,
+      clustering_claimed_at: null,
+      clustering_status: 'clustered',
+    })
+    dbTimeMs += Date.now() - batchStartedAt
+
+    if (failedIds.length > 0) {
+      const failedSet = new Set(failedIds)
+      for (const aid of articleIds) {
+        if (failedSet.has(aid)) {
+          errors.push(`Failed to assign article ${aid}: ${message ?? 'unknown error'}`)
+          await clearClusteringClaim(client, aid)
+          unhandledArticleIds.delete(aid)
+        } else {
+          assignedArticles++
+          unhandledArticleIds.delete(aid)
+        }
+      }
+    } else {
+      assignedArticles += articleIds.length
+      articleIds.forEach(id => unhandledArticleIds.delete(id))
+    }
+
+    if (articleIds.length > failedIds.length) {
+      storiesNeedingReassembly.add(storyId)
     }
   }
 
@@ -430,9 +456,11 @@ export async function clusterArticles(
             newStories++
             storyMap.set(singletonStoryData.id, { centroid, articleIds: [article.id] })
           }
+          unhandledArticleIds.delete(article.id)
         } else {
           errors.push(`Failed to promote singleton ${article.id}: ${insertError?.message}`)
           await clearClusteringClaim(client, article.id)
+          unhandledArticleIds.delete(article.id)
         }
       } else {
         // Increment counter and release back to pool
@@ -441,6 +469,7 @@ export async function clusterArticles(
           .update({ clustering_claimed_at: null, clustering_attempts: newAttempts })
           .eq('id', article.id)
         unmatchedSingletons++
+        unhandledArticleIds.delete(article.id)
       }
       continue
     }
@@ -470,17 +499,24 @@ export async function clusterArticles(
         for (const articleId of failedIds) {
           errors.push(`Failed to assign article ${articleId} to existing story: ${message ?? 'unknown error'}`)
           await clearClusteringClaim(client, articleId)
+          unhandledArticleIds.delete(articleId)
         }
         assignedArticles += cluster.articleIds.length - failedIds.length
+        cluster.articleIds.filter(id => !failedIds.includes(id)).forEach(id => unhandledArticleIds.delete(id))
       } else {
         assignedArticles += cluster.articleIds.length
+        cluster.articleIds.forEach(id => unhandledArticleIds.delete(id))
       }
 
-      const existing = storyMap.get(duplicateStoryId)
-      if (existing) {
-        existing.articleIds.push(...cluster.articleIds)
+      if (cluster.articleIds.length > failedIds.length) {
+        const existing = storyMap.get(duplicateStoryId)
+        if (existing) {
+          // Only add the successfully assigned articles to the existing centroid's articleIds
+          const successfulIds = cluster.articleIds.filter((id) => !failedIds.includes(id))
+          existing.articleIds.push(...successfulIds)
+        }
+        storiesNeedingReassembly.add(duplicateStoryId)
       }
-      storiesNeedingReassembly.add(duplicateStoryId)
       continue
     }
 
@@ -509,6 +545,7 @@ export async function clusterArticles(
       errors.push(`Failed to create story: ${insertError?.message ?? 'no data returned'}`)
       for (const articleId of cluster.articleIds) {
         await clearClusteringClaim(client, articleId)
+        unhandledArticleIds.delete(articleId)
       }
       continue
     }
@@ -527,10 +564,13 @@ export async function clusterArticles(
       for (const articleId of failedIds) {
         errors.push(`Failed to assign article ${articleId}: ${message ?? 'unknown error'}`)
         await clearClusteringClaim(client, articleId)
+        unhandledArticleIds.delete(articleId)
       }
       assignedArticles += cluster.articleIds.length - failedIds.length
+      cluster.articleIds.filter(id => !failedIds.includes(id)).forEach(id => unhandledArticleIds.delete(id))
     } else {
       assignedArticles += cluster.articleIds.length
+      cluster.articleIds.forEach(id => unhandledArticleIds.delete(id))
     }
 
     storyMap.set(storyData.id, {
@@ -544,6 +584,12 @@ export async function clusterArticles(
     const { error } = await queueStoryForReassembly(client, storyId, nowIso)
     if (error) {
       errors.push(`Failed to queue story ${storyId} for reassembly: ${error.message}`)
+    }
+  }
+  } finally {
+    if (unhandledArticleIds.size > 0) {
+      await bulkUpdateArticles(client, Array.from(unhandledArticleIds), { clustering_claimed_at: null })
+        .catch(err => console.error('Failed to release claims in finally block', err))
     }
   }
 

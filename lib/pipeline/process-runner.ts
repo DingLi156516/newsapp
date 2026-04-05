@@ -105,7 +105,7 @@ const DEFAULT_OPTIONS: Required<ProcessPipelineOptions> = {
   assembleBatchSize: Number(process.env.PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE ?? 25),
   timeBudgetMs: process.env.PIPELINE_PROCESS_TIME_BUDGET_MS
     ? Number(process.env.PIPELINE_PROCESS_TIME_BUDGET_MS)
-    : Infinity,
+    : 280_000,
   clusterReserveMs: Number(process.env.PIPELINE_PROCESS_CLUSTER_RESERVE_MS ?? 25_000),
   assembleReserveMs: Number(process.env.PIPELINE_PROCESS_ASSEMBLE_RESERVE_MS ?? 15_000),
 }
