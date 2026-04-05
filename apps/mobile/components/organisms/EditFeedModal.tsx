@@ -1,15 +1,15 @@
 /**
  * EditFeedModal — Full-screen modal for customizing visible feed tabs and sort order.
- * Receives state from parent (lifted from useFeedConfig) and calls back to update.
+ * Now includes a TRENDING TOPICS section for hiding/showing promoted tags.
  */
 
 import { View, Text, ScrollView, Pressable, Switch, Modal } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import type { FeedSort, UnifiedTab } from '@/lib/shared/types'
+import type { FeedSort, UnifiedTab, StoryTag } from '@/lib/shared/types'
 import type { FeedConfig } from '@/lib/hooks/use-feed-config'
 import {
   ALL_FEED_TABS, ALL_TOPICS, FEED_TAB_LABELS, TOPIC_LABELS,
-  FEED_SORT_LABELS,
+  FEED_SORT_LABELS, TAG_TYPE_COLORS,
 } from '@/lib/shared/types'
 import { GlassView } from '@/components/ui/GlassView'
 
@@ -18,14 +18,19 @@ interface Props {
   readonly onClose: () => void
   readonly visibleFeeds: readonly UnifiedTab[]
   readonly feedSort: FeedSort
+  readonly hiddenPromotedTags: readonly string[]
+  readonly promotedTags?: readonly StoryTag[]
   readonly onUpdateConfig: (updates: Partial<FeedConfig>) => void
 }
 
 const SORT_OPTIONS: FeedSort[] = ['most-covered', 'most-recent']
 
-export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, onUpdateConfig }: Props) {
+export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hiddenPromotedTags, promotedTags, onUpdateConfig }: Props) {
   const visibleSet = new Set<string>(visibleFeeds)
   const enabledCount = visibleSet.size
+  const hiddenSet = new Set<string>(hiddenPromotedTags)
+
+  const tagKey = (slug: string, type: string) => `${slug}:${type}`
 
   const toggleFeed = (tab: UnifiedTab) => {
     const isEnabled = visibleSet.has(tab)
@@ -35,6 +40,15 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, onUpda
       ? visibleFeeds.filter((t) => t !== tab)
       : [...visibleFeeds, tab]
     onUpdateConfig({ visibleFeeds: updated })
+  }
+
+  const togglePromotedTag = (slug: string, type: string) => {
+    const key = tagKey(slug, type)
+    const isHidden = hiddenSet.has(key)
+    const updated = isHidden
+      ? hiddenPromotedTags.filter((s) => s !== key)
+      : [...hiddenPromotedTags, key]
+    onUpdateConfig({ hiddenPromotedTags: updated })
   }
 
   const setSortOrder = (sort: FeedSort) => {
@@ -111,6 +125,44 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, onUpda
               )
             })}
           </GlassView>
+
+          {/* Trending topics section */}
+          {promotedTags && promotedTags.length > 0 && (
+            <GlassView style={{ padding: 16, gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: 1 }}>
+                  TRENDING TOPICS
+                </Text>
+                <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.25)' }}>
+                  auto-detected
+                </Text>
+              </View>
+              {promotedTags.map((tag) => {
+                const isEnabled = !hiddenSet.has(tagKey(tag.slug, tag.type))
+                const dotColor = TAG_TYPE_COLORS[tag.type]
+                return (
+                  <View key={`${tag.slug}:${tag.type}`} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />
+                      <Text style={{ fontFamily: 'Inter', fontSize: 15, color: 'white' }}>
+                        {tag.label}
+                      </Text>
+                      <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.3)' }}>
+                        ({tag.storyCount})
+                      </Text>
+                    </View>
+                    <Switch
+                      testID={`edit-feed-toggle-ptag-${tag.slug}`}
+                      value={isEnabled}
+                      onValueChange={() => togglePromotedTag(tag.slug, tag.type)}
+                      trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.3)' }}
+                      thumbColor="white"
+                    />
+                  </View>
+                )
+              })}
+            </GlassView>
+          )}
 
           {/* Sort section */}
           <GlassView style={{ padding: 16, gap: 12 }}>

@@ -72,6 +72,32 @@ describe('useFeedConfig', () => {
     expect(result.current.feedSort).toBe('most-recent')
   })
 
+  it('filters out legacy slug-only entries from hiddenPromotedTags', async () => {
+    mockGetItem.mockImplementation(async (key) => {
+      if (key === '@axiom/hidden_promoted_tags') return JSON.stringify(['tech', 'nato:organization'])
+      return null
+    })
+
+    const { result } = renderHook(() => useFeedConfig())
+
+    await act(async () => {})
+
+    expect(result.current.hiddenPromotedTags).toEqual(['nato:organization'])
+  })
+
+  it('loads valid composite keys from hiddenPromotedTags', async () => {
+    mockGetItem.mockImplementation(async (key) => {
+      if (key === '@axiom/hidden_promoted_tags') return JSON.stringify(['tech:topic', 'nato:organization'])
+      return null
+    })
+
+    const { result } = renderHook(() => useFeedConfig())
+
+    await act(async () => {})
+
+    expect(result.current.hiddenPromotedTags).toEqual(['tech:topic', 'nato:organization'])
+  })
+
   it('handles AsyncStorage errors gracefully', async () => {
     mockGetItem.mockRejectedValue(new Error('Storage error'))
 

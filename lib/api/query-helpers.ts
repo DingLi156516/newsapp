@@ -524,6 +524,16 @@ export async function querySources(
 }
 
 // ---------------------------------------------------------------------------
+// Promoted tag constants
+// ---------------------------------------------------------------------------
+
+/** Minimum story_count for a tag to appear in feed navigation. */
+export const PROMOTED_TAG_THRESHOLD = 3
+
+/** Maximum number of promoted tags to display. */
+export const PROMOTED_TAG_LIMIT = 15
+
+// ---------------------------------------------------------------------------
 // Tag queries
 // ---------------------------------------------------------------------------
 
@@ -631,6 +641,31 @@ export async function queryRelatedTags(
 
   if (error) {
     throw new Error(`Failed to fetch related tags: ${error.message}`)
+  }
+
+  return (data as TagRow[]) ?? []
+}
+
+// ---------------------------------------------------------------------------
+// Promoted tags — tags with enough stories to appear in feed navigation
+// ---------------------------------------------------------------------------
+
+export async function queryPromotedTags(
+  client: SupabaseClient<Database>,
+  options?: { threshold?: number; limit?: number }
+): Promise<TagRow[]> {
+  const threshold = options?.threshold ?? PROMOTED_TAG_THRESHOLD
+  const limit = options?.limit ?? PROMOTED_TAG_LIMIT
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (client.from('tags') as any)
+    .select('id, slug, label, description, tag_type, story_count, created_at')
+    .gte('story_count', threshold)
+    .order('story_count', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    throw new Error(`Failed to query promoted tags: ${error.message}`)
   }
 
   return (data as TagRow[]) ?? []

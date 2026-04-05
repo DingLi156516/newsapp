@@ -5,30 +5,28 @@
  * The active pill gets a sliding frosted-glass background using Framer Motion's
  * `layoutId="topic-pill-highlight"` shared layout animation.
  *
- * `overflow-x-auto scrollbar-hide` allows the pill row to scroll horizontally on
- * mobile when there are more topics than fit on screen, without showing a scrollbar.
- *
- * The `null` topic value means "no filter / show all topics". TypeScript allows null
- * in the array via `(Topic | null)[]`. When `selected === null`, the "All" pill is active.
- *
- * This is a controlled component — the parent (app/page.tsx) owns the `selected` state
- * and updates it via the `onChange` callback.
+ * Promoted tags (dynamic trending topics) render after a subtle divider,
+ * with colored dots matching their entity type.
  */
 'use client'
 
 import { motion } from 'framer-motion'
-import type { Topic } from '@/lib/types'
-import { TOPIC_LABELS } from '@/lib/types'
+import type { Topic, StoryTag } from '@/lib/types'
+import { TOPIC_LABELS, TAG_TYPE_COLORS } from '@/lib/types'
 
-interface Props {
-  selected: Topic | null                 // null = "All topics" selected
-  onChange: (t: Topic | null) => void    // Callback to update parent state
+interface SelectedTag {
+  readonly slug: string
+  readonly type?: string
 }
 
-/**
- * All topic options including null ("All") at the start.
- * Defined outside the component so the array isn't re-created on every render.
- */
+interface Props {
+  readonly selected: Topic | null
+  readonly onChange: (t: Topic | null) => void
+  readonly promotedTags?: readonly StoryTag[]
+  readonly selectedTag?: SelectedTag | null
+  readonly onTagChange?: (tag: SelectedTag | null) => void
+}
+
 const TOPICS: (Topic | null)[] = [
   null,
   'politics',
@@ -42,40 +40,34 @@ const TOPICS: (Topic | null)[] = [
   'environment',
 ]
 
-/**
- * Converts a topic value to its display label.
- * null → "All"; everything else → the TOPIC_LABELS lookup.
- */
 function getLabel(topic: Topic | null): string {
   if (topic === null) return 'All'
   return TOPIC_LABELS[topic]
 }
 
-export function TopicPills({ selected, onChange }: Props) {
+export function TopicPills({ selected, onChange, promotedTags, selectedTag, onTagChange }: Props) {
+  const hasPromotedTags = promotedTags && promotedTags.length > 0
+  const isTagActive = selectedTag !== null && selectedTag !== undefined
+
   return (
     <div
       className="flex items-center gap-2 overflow-x-auto scrollbar-hide"
       aria-label="Filter by topic"
     >
       {TOPICS.map((topic) => {
-        const isActive = selected === topic
+        const isActive = !isTagActive && selected === topic
         return (
           <button
-            // `topic ?? 'all'` — the nullish coalescing operator: if topic is null/undefined,
-            // use 'all' as the key. React requires a unique `key` for each list item.
             key={topic ?? 'all'}
             data-testid={`topic-pill-${topic ?? 'all'}`}
             onClick={() => onChange(topic)}
-            // All color/opacity via Tailwind — no inline styles — so hover states work
             className={`flex-shrink-0 relative rounded-full px-4 py-1.5 text-sm transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
               isActive
                 ? 'text-white'
                 : 'text-white/70 ring-1 ring-white/[0.08] hover:text-white hover:ring-white/20 hover:bg-white/[0.05]'
             }`}
-            aria-pressed={isActive}  // ARIA toggle state for screen readers
+            aria-pressed={isActive}
           >
-            {/* The sliding glass background pill — only rendered for the active option.
-                Framer Motion animates it between pill positions via layoutId. */}
             {isActive && (
               <motion.span
                 layoutId="topic-pill-highlight"
@@ -83,11 +75,51 @@ export function TopicPills({ selected, onChange }: Props) {
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
               />
             )}
-            {/* `relative z-10` ensures the label text renders above the background span */}
             <span className="relative z-10">{getLabel(topic)}</span>
           </button>
         )
       })}
+
+      {/* Promoted tags divider + pills */}
+      {hasPromotedTags && (
+        <>
+          <span className="flex-shrink-0 text-white/20 text-sm select-none" aria-hidden="true">|</span>
+          {promotedTags.map((tag) => {
+            const isActive = isTagActive && selectedTag?.slug === tag.slug && selectedTag?.type === tag.type
+            const dotColor = TAG_TYPE_COLORS[tag.type]
+            return (
+              <button
+                key={`tag-${tag.slug}:${tag.type}`}
+                data-testid={`promoted-tag-${tag.slug}`}
+                onClick={() => {
+                  if (onTagChange) {
+                    onTagChange(isActive ? null : { slug: tag.slug, type: tag.type })
+                  }
+                }}
+                className={`flex-shrink-0 relative rounded-full px-4 py-1.5 text-sm transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20 inline-flex items-center gap-1.5 ${
+                  isActive
+                    ? 'text-white'
+                    : 'text-white/70 ring-1 ring-white/[0.08] hover:text-white hover:ring-white/20 hover:bg-white/[0.05]'
+                }`}
+                aria-pressed={isActive}
+              >
+                {isActive && (
+                  <motion.span
+                    layoutId="topic-pill-highlight"
+                    className="absolute inset-0 glass-pill"
+                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                  />
+                )}
+                <span
+                  className="relative z-10 inline-block h-1.5 w-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: dotColor }}
+                />
+                <span className="relative z-10">{tag.label}</span>
+              </button>
+            )
+          })}
+        </>
+      )}
     </div>
   )
 }

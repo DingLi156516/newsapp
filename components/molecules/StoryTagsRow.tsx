@@ -21,7 +21,7 @@ export function StoryTagsRow({ tags, max = DEFAULT_MAX }: Props) {
   return (
     <div className="flex flex-wrap gap-2">
       {visible.map((tag) => (
-        <TagPill key={tag.slug} label={tag.label} type={tag.type} />
+        <TagPill key={`${tag.slug}:${tag.type}`} label={tag.label} type={tag.type} />
       ))}
     </div>
   )

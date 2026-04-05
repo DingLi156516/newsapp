@@ -58,6 +58,10 @@ interface Props {
   readonly onMinFactualityChange: (v: FactualityLevel | null) => void
   readonly datePreset: DatePreset
   readonly onDatePresetChange: (v: DatePreset) => void
+  readonly hideTopic?: boolean
+  readonly activeTag?: string | null
+  readonly onClearTag?: () => void
+  readonly onClearAll?: () => void
 }
 
 function countActiveFilters(
@@ -65,7 +69,8 @@ function countActiveFilters(
   region: Region | null,
   biasRange: BiasCategory[],
   minFactuality: FactualityLevel | null,
-  datePreset: DatePreset
+  datePreset: DatePreset,
+  activeTag?: string | null
 ): number {
   let count = 0
   if (topic !== null) count += 1
@@ -73,6 +78,7 @@ function countActiveFilters(
   if (biasRange.length < 7) count += 1
   if (minFactuality !== null) count += 1
   if (datePreset !== 'all') count += 1
+  if (activeTag) count += 1
   return count
 }
 
@@ -87,9 +93,13 @@ export function SearchFilters({
   onMinFactualityChange,
   datePreset,
   onDatePresetChange,
+  hideTopic,
+  activeTag,
+  onClearTag,
+  onClearAll,
 }: Props) {
   const [open, setOpen] = useState(false)
-  const activeCount = countActiveFilters(topic, region, biasRange, minFactuality, datePreset)
+  const activeCount = countActiveFilters(hideTopic ? null : topic, region, biasRange, minFactuality, datePreset, activeTag)
   const activePreset = deriveActivePreset(biasRange)
 
   function handlePreset(preset: PerspectiveFilter) {
@@ -107,11 +117,16 @@ export function SearchFilters({
   }
 
   function handleClear() {
+    if (onClearAll) {
+      onClearAll()
+      return
+    }
     onTopicChange(null)
     onRegionChange(null)
     onBiasRangeChange(ALL_BIASES)
     onMinFactualityChange(null)
     onDatePresetChange('all')
+    if (onClearTag) onClearTag()
   }
 
   return (
@@ -144,44 +159,46 @@ export function SearchFilters({
             className="overflow-hidden"
           >
             <div className="glass-sm rounded-xl p-4 space-y-4">
-              {/* Topic */}
-              <div className="space-y-2">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-white/40">
-                  Topic
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    data-testid="topic-filter-pill-all"
-                    aria-pressed={topic === null}
-                    onClick={() => onTopicChange(null)}
-                    className={`glass-pill px-2.5 py-1 text-xs transition-all ${
-                      topic === null
-                        ? 'bg-white/15 text-white ring-1 ring-white/20'
-                        : 'text-white/40 hover:text-white/60'
-                    }`}
-                  >
-                    All
-                  </button>
-                  {ALL_TOPICS.map((t) => {
-                    const isActive = topic === t
-                    return (
-                      <button
-                        key={t}
-                        data-testid={`topic-filter-pill-${t}`}
-                        aria-pressed={isActive}
-                        onClick={() => onTopicChange(t)}
-                        className={`glass-pill px-2.5 py-1 text-xs transition-all ${
-                          isActive
-                            ? 'bg-white/15 text-white ring-1 ring-white/20'
-                            : 'text-white/40 hover:text-white/60'
-                        }`}
-                      >
-                        {TOPIC_LABELS[t]}
-                      </button>
-                    )
-                  })}
+              {/* Topic — hidden when TopicPills handles topic selection externally */}
+              {!hideTopic && (
+                <div className="space-y-2">
+                  <span className="text-[11px] font-medium uppercase tracking-wider text-white/40">
+                    Topic
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      data-testid="topic-filter-pill-all"
+                      aria-pressed={topic === null}
+                      onClick={() => onTopicChange(null)}
+                      className={`glass-pill px-2.5 py-1 text-xs transition-all ${
+                        topic === null
+                          ? 'bg-white/15 text-white ring-1 ring-white/20'
+                          : 'text-white/40 hover:text-white/60'
+                      }`}
+                    >
+                      All
+                    </button>
+                    {ALL_TOPICS.map((t) => {
+                      const isActive = topic === t
+                      return (
+                        <button
+                          key={t}
+                          data-testid={`topic-filter-pill-${t}`}
+                          aria-pressed={isActive}
+                          onClick={() => onTopicChange(t)}
+                          className={`glass-pill px-2.5 py-1 text-xs transition-all ${
+                            isActive
+                              ? 'bg-white/15 text-white ring-1 ring-white/20'
+                              : 'text-white/40 hover:text-white/60'
+                          }`}
+                        >
+                          {TOPIC_LABELS[t]}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Region */}
               <div className="space-y-2">

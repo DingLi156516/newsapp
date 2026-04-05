@@ -49,6 +49,8 @@ interface StoriesParams {
   readonly biasRange?: BiasCategory[]
   readonly minFactuality?: FactualityLevel | null
   readonly datePreset?: DatePreset
+  readonly tag?: string | null
+  readonly tagType?: string | null
   readonly page?: number
   readonly limit?: number
 }
@@ -81,6 +83,8 @@ function buildStoriesUrl(params: StoriesParams): string {
   }
   if (params.minFactuality) searchParams.set('minFactuality', params.minFactuality)
   if (params.datePreset && params.datePreset !== 'all') searchParams.set('datePreset', params.datePreset)
+  if (params.tag) searchParams.set('tag', params.tag)
+  if (params.tagType) searchParams.set('tag_type', params.tagType)
   if (params.page && params.page > 1) searchParams.set('page', String(params.page))
   if (params.limit) searchParams.set('limit', String(params.limit))
 

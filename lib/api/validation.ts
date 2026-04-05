@@ -84,6 +84,15 @@ export const tagsQuerySchema = z.object({
 
 export type TagsQuery = z.infer<typeof tagsQuerySchema>
 
+const emptyToUndefined = (v: unknown) => (v === '' ? undefined : v)
+
+export const promotedTagsQuerySchema = z.object({
+  threshold: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).optional()),
+  limit: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(100).optional()),
+})
+
+export type PromotedTagsQuery = z.infer<typeof promotedTagsQuerySchema>
+
 export function parseSearchParams(
   searchParams: URLSearchParams,
   schema: z.ZodType

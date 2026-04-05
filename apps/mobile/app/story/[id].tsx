@@ -3,7 +3,7 @@
  * Uses useLocalSearchParams() instead of Next.js use(params).
  */
 
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
@@ -32,6 +32,7 @@ import { CoverageIntelligence } from '@/components/organisms/CoverageIntelligenc
 import { StoryTimeline } from '@/components/organisms/StoryTimeline'
 import { MomentumBadge } from '@/components/atoms/MomentumBadge'
 import { StoryTagsRow } from '@/components/molecules/StoryTagsRow'
+import { usePromotedTags } from '@/lib/hooks/use-promoted-tags'
 import { HeadlineComparisonList } from '@/components/organisms/HeadlineComparisonList'
 import { KeyQuotesCarousel } from '@/components/organisms/KeyQuotesCarousel'
 import { ClaimsComparison } from '@/components/organisms/ClaimsComparison'
@@ -45,6 +46,12 @@ export default function StoryDetailScreen() {
   const { isBookmarked, toggle } = useBookmarks()
   const { markAsRead } = useReadingHistory()
   const { showToast } = useToast()
+  const { tags: promotedTags } = usePromotedTags()
+
+  const promotedSlugs = useMemo(
+    () => new Set(promotedTags.map((t) => `${t.slug}:${t.type}`)),
+    [promotedTags]
+  )
 
   const toggleWithToast = useCallback(async (storyId: string) => {
     const wasSaved = isBookmarked(storyId)
@@ -151,9 +158,13 @@ export default function StoryDetailScreen() {
             {story.headline}
           </Text>
 
-          {/* Tags */}
+          {/* Tags — promoted tags become tappable for feed navigation */}
           {story.tags && story.tags.length > 0 && (
-            <StoryTagsRow tags={story.tags} />
+            <StoryTagsRow
+              tags={story.tags}
+              promotedSlugs={promotedSlugs}
+              onTagPress={(tag) => router.push({ pathname: '/(tabs)', params: { tag: tag.slug, tag_type: tag.type } })}
+            />
           )}
 
           {/* Spectrum bar (multi-source) or bias pill (single-source) */}

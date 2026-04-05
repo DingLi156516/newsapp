@@ -17,7 +17,7 @@ const DEFAULT_GENERATION_MODEL =
 export const SUMMARY_GENERATION_MODEL =
   process.env.GEMINI_SUMMARY_MODEL
   ?? process.env.GEMINI_GENERATION_MODEL
-  ?? 'models/gemini-2.5-flash'
+  ?? 'models/gemini-2.5-flash-lite'
 
 export const CHEAP_GENERATION_MODEL =
   process.env.GEMINI_CHEAP_MODEL
@@ -127,6 +127,7 @@ export async function generateText(
   const generationConfig: Record<string, unknown> = {
     temperature: 0.3,
     maxOutputTokens: 2048,
+    thinkingConfig: { thinkingBudget: 0 },
   }
 
   if (options?.jsonMode) {

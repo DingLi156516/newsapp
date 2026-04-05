@@ -111,7 +111,23 @@ describe('gemini-client', () => {
     const { generateText } = await import('@/lib/ai/gemini-client')
     await generateText('test prompt', { task: 'summary' })
 
-    expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain('models/gemini-2.5-flash:generateContent')
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain('models/gemini-2.5-flash-lite:generateContent')
+  })
+
+  it('generateText includes thinkingConfig with thinkingBudget 0', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          candidates: [{ content: { parts: [{ text: 'Generated response' }] } }],
+        }),
+    } as Response)
+
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    await generateText('test prompt')
+
+    const callBody = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string)
+    expect(callBody.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 })
   })
 
   it('generateText without jsonMode omits responseMimeType', async () => {

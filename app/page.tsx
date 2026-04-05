@@ -27,6 +27,8 @@ import { SearchX, BookOpen } from 'lucide-react'
 import Link from 'next/link'
 import { ViewSwitcher, type AppView } from '@/components/organisms/ViewSwitcher'
 import { SourcesView } from '@/components/organisms/SourcesView'
+import { TopicPills } from '@/components/organisms/TopicPills'
+import { usePromotedTags } from '@/lib/hooks/use-promoted-tags'
 
 export default function HomePage() {
   return (
@@ -47,10 +49,21 @@ function HomePageContent() {
 
   // Filter state persisted in URL search params
   const {
-    feedTab, topic, search, region, biasRange, minFactuality, datePreset,
-    setFeedTab, setTopic, setSearch, setRegion, setBiasRange, setMinFactuality, setDatePreset,
+    feedTab, topic, tag, tagType, search, region, biasRange, minFactuality, datePreset,
+    setFeedTab, setTopic, setTag, setSearch, setRegion, setBiasRange, setMinFactuality, setDatePreset,
     clearAll,
   } = useFilterParams()
+
+  const { tags: promotedTags, isLoading: promotedTagsLoading } = usePromotedTags()
+
+  // Clear tag selection if the promoted tag disappears (dropped below threshold, etc.)
+  useEffect(() => {
+    if (!tag || promotedTagsLoading) return
+    const stillPromoted = promotedTags.some(
+      (t) => t.slug === tag && t.type === tagType
+    )
+    if (!stillPromoted) setTag(null)
+  }, [tag, tagType, promotedTags, promotedTagsLoading, setTag])
 
   // Pagination state (not in URL — ephemeral)
   const [page, setPage] = useState(1)
@@ -68,8 +81,12 @@ function HomePageContent() {
     }
   }, [preferences.default_perspective, setBiasRange])
 
+  const selectedTag = tag ? { slug: tag, type: tagType ?? undefined } : null
+
   const { stories, total, isLoading } = useStories({
-    topic,
+    topic: selectedTag ? undefined : topic,
+    tag: selectedTag?.slug,
+    tagType: selectedTag?.type,
     region,
     search: debouncedSearch,
     blindspot: feedTab === 'blindspot',
@@ -81,8 +98,8 @@ function HomePageContent() {
 
   // Single unified effect: accumulate stories and reset on filter changes
   const filterKey = useMemo(
-    () => JSON.stringify([topic, region, debouncedSearch, feedTab === 'blindspot', biasRange, minFactuality, datePreset]),
-    [topic, region, debouncedSearch, feedTab, biasRange, minFactuality, datePreset]
+    () => JSON.stringify([topic, tag, tagType, region, debouncedSearch, feedTab === 'blindspot', biasRange, minFactuality, datePreset]),
+    [topic, tag, tagType, region, debouncedSearch, feedTab, biasRange, minFactuality, datePreset]
   )
   const prevFilterKeyRef = useRef(filterKey)
 
@@ -143,7 +160,7 @@ function HomePageContent() {
   const handleLoadMore = useCallback(() => setPage(p => p + 1), [])
   const sentinelRef = useInfiniteScroll(handleLoadMore, { enabled: hasMore, isLoading })
 
-  const hasActiveFilters = topic !== null || region !== null || search !== '' ||
+  const hasActiveFilters = topic !== null || tag !== null || region !== null || search !== '' ||
     biasRange.length !== ALL_BIASES.length || minFactuality !== null || datePreset !== 'all'
 
   const showFilters = feedTab !== 'for-you'
@@ -194,6 +211,21 @@ function HomePageContent() {
                 onMinFactualityChange={setMinFactuality}
                 datePreset={datePreset}
                 onDatePresetChange={setDatePreset}
+                hideTopic
+                activeTag={tag}
+                onClearTag={() => setTag(null)}
+                onClearAll={clearAll}
+              />
+            )}
+
+            {/* Topic + promoted tag pills */}
+            {showFilters && (
+              <TopicPills
+                selected={topic}
+                onChange={setTopic}
+                promotedTags={promotedTags}
+                selectedTag={selectedTag}
+                onTagChange={(t) => setTag(t?.slug ?? null, t?.type)}
               />
             )}
 

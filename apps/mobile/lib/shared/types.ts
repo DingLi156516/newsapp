@@ -174,6 +174,12 @@ export interface StoryTag {
   readonly relevance?: number
 }
 
+/** A selected promoted tag for feed filtering. */
+export interface SelectedPromotedTag {
+  readonly slug: string
+  readonly type?: string
+}
+
 // ---------------------------------------------------------------------------
 // Main article interface
 // ---------------------------------------------------------------------------

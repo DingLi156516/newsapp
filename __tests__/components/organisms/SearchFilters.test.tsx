@@ -110,7 +110,37 @@ describe('SearchFilters', () => {
     expect(screen.getByTestId('date-preset-7d')).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('clear filters resets all', () => {
+  it('clear filters calls onClearAll when provided', () => {
+    const onClearAll = vi.fn()
+    const onTopicChange = vi.fn()
+    const onBiasRangeChange = vi.fn()
+    const onMinFactualityChange = vi.fn()
+    const onDatePresetChange = vi.fn()
+    render(
+      <SearchFilters
+        topic="politics"
+        onTopicChange={onTopicChange}
+        region={null}
+        onRegionChange={vi.fn()}
+        biasRange={['left']}
+        onBiasRangeChange={onBiasRangeChange}
+        minFactuality="high"
+        onMinFactualityChange={onMinFactualityChange}
+        datePreset="7d"
+        onDatePresetChange={onDatePresetChange}
+        onClearAll={onClearAll}
+      />
+    )
+    fireEvent.click(screen.getByTestId('search-filters-toggle'))
+    fireEvent.click(screen.getByTestId('clear-filters'))
+    expect(onClearAll).toHaveBeenCalledTimes(1)
+    expect(onTopicChange).not.toHaveBeenCalled()
+    expect(onBiasRangeChange).not.toHaveBeenCalled()
+    expect(onMinFactualityChange).not.toHaveBeenCalled()
+    expect(onDatePresetChange).not.toHaveBeenCalled()
+  })
+
+  it('clear filters falls back to individual callbacks when onClearAll not provided', () => {
     const onTopicChange = vi.fn()
     const onBiasRangeChange = vi.fn()
     const onMinFactualityChange = vi.fn()
@@ -284,5 +314,50 @@ describe('SearchFilters', () => {
     fireEvent.click(screen.getByTestId('search-filters-toggle'))
     fireEvent.click(screen.getByTestId('clear-filters'))
     expect(onRegionChange).toHaveBeenCalledWith(null)
+  })
+
+  // Active tag tests
+  it('includes active tag in filter count', () => {
+    render(
+      <SearchFilters
+        topic={null}
+        onTopicChange={vi.fn()}
+        region={null}
+        onRegionChange={vi.fn()}
+        biasRange={ALL_BIASES}
+        onBiasRangeChange={vi.fn()}
+        minFactuality={null}
+        onMinFactualityChange={vi.fn()}
+        datePreset="all"
+        onDatePresetChange={vi.fn()}
+        activeTag="nato"
+        onClearTag={vi.fn()}
+      />
+    )
+    const badge = screen.getByTestId('filter-count-badge')
+    expect(badge).toHaveTextContent('1')
+  })
+
+  it('clear filters calls onClearTag', () => {
+    const onClearTag = vi.fn()
+    render(
+      <SearchFilters
+        topic="politics"
+        onTopicChange={vi.fn()}
+        region={null}
+        onRegionChange={vi.fn()}
+        biasRange={ALL_BIASES}
+        onBiasRangeChange={vi.fn()}
+        minFactuality={null}
+        onMinFactualityChange={vi.fn()}
+        datePreset="all"
+        onDatePresetChange={vi.fn()}
+        activeTag="nato"
+        onClearTag={onClearTag}
+      />
+    )
+    fireEvent.click(screen.getByTestId('search-filters-toggle'))
+    fireEvent.click(screen.getByTestId('clear-filters'))
+    expect(onClearTag).toHaveBeenCalled()
   })
 })

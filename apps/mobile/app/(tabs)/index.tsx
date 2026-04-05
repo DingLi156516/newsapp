@@ -1,12 +1,12 @@
 /**
- * Home Feed screen — Unified tab bar with feeds and topics as peers.
+ * Home Feed screen — Unified tab bar with feeds, topics, and promoted tags.
  */
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { View, Text, FlatList, RefreshControl, Pressable } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
-import type { NewsArticle, UnifiedTab, FeedSort } from '@/lib/shared/types'
+import { useRouter, useLocalSearchParams } from 'expo-router'
+import type { NewsArticle, UnifiedTab, FeedSort, SelectedPromotedTag } from '@/lib/shared/types'
 import { PERSPECTIVE_BIASES, isTopicTab } from '@/lib/shared/types'
 import { useStories } from '@/lib/hooks/use-stories'
 import { useDebounce } from '@/lib/hooks/use-debounce'
@@ -14,6 +14,7 @@ import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
 import { useForYou } from '@/lib/hooks/use-for-you'
 import { useVisibleTabs } from '@/lib/hooks/use-visible-tabs'
+import { usePromotedTags } from '@/lib/hooks/use-promoted-tags'
 import { NexusCard } from '@/components/organisms/NexusCard'
 import { NexusCardSkeleton, NexusCardSkeletonList } from '@/components/organisms/NexusCardSkeleton'
 import { HeroCard } from '@/components/organisms/HeroCard'
@@ -33,8 +34,10 @@ import { useFeedConfig } from '@/lib/hooks/use-feed-config'
 
 export default function HomeFeedScreen() {
   const router = useRouter()
+  const params = useLocalSearchParams<{ tag?: string; tag_type?: string }>()
 
   const [activeTab, setActiveTab] = useState<UnifiedTab>('trending')
+  const [selectedPromotedTag, setSelectedPromotedTag] = useState<SelectedPromotedTag | null>(null)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [accumulated, setAccumulated] = useState<NewsArticle[]>([])
@@ -47,8 +50,22 @@ export default function HomeFeedScreen() {
   const { isRead } = useReadingHistory()
   const { showToast } = useToast()
   const { preferences } = usePreferences()
-  const { visibleFeeds, feedSort, updateConfig } = useFeedConfig()
+  const { visibleFeeds, feedSort, hiddenPromotedTags, updateConfig } = useFeedConfig()
   const { visibleTabs } = useVisibleTabs(visibleFeeds)
+  const { tags: allPromotedTags, isLoading: promotedTagsLoading } = usePromotedTags()
+
+  // Filter out hidden promoted tags (keyed by slug:type for disambiguation)
+  const promotedTags = useMemo(() => {
+    const hiddenSet = new Set(hiddenPromotedTags)
+    return allPromotedTags.filter((t) => !hiddenSet.has(`${t.slug}:${t.type}`))
+  }, [allPromotedTags, hiddenPromotedTags])
+
+  // Hydrate promoted tag selection from navigation params (e.g., from story detail)
+  useEffect(() => {
+    if (params.tag) {
+      setSelectedPromotedTag({ slug: params.tag, type: params.tag_type })
+    }
+  }, [params.tag, params.tag_type])
 
   // Auto-switch to first tab if current tab was removed from feed
   useEffect(() => {
@@ -56,6 +73,20 @@ export default function HomeFeedScreen() {
       setActiveTab(visibleTabs[0])
     }
   }, [visibleTabs, activeTab])
+
+  // Clear promoted tag selection if the active tag is no longer visible
+  // (hidden by user in EditFeedModal, dropped below threshold, or all tags gone)
+  useEffect(() => {
+    if (!selectedPromotedTag || promotedTagsLoading) return
+    const stillVisible = promotedTags.some((t) => t.slug === selectedPromotedTag.slug && t.type === selectedPromotedTag.type)
+    if (!stillVisible) setSelectedPromotedTag(null)
+  }, [selectedPromotedTag, promotedTags, promotedTagsLoading])
+
+  // Clear promoted tag selection when switching to a feed/topic tab
+  const handleTabChange = useCallback((tab: UnifiedTab) => {
+    setActiveTab(tab)
+    setSelectedPromotedTag(null)
+  }, [])
 
   // Derive bias/factuality from persistent preferences (Settings screen)
   const biasRange = useMemo(
@@ -85,7 +116,9 @@ export default function HomeFeedScreen() {
 
   const { stories, total, isLoading, isError, mutate } = useStories(
     isForYou ? null : {
-      topic: topicFilter,
+      topic: selectedPromotedTag ? undefined : topicFilter,
+      tag: selectedPromotedTag?.slug,
+      tagType: selectedPromotedTag?.type,
       search: debouncedSearch,
       blindspot: activeTab === 'blindspot',
       biasRange,
@@ -97,8 +130,8 @@ export default function HomeFeedScreen() {
 
   // Accumulate stories and reset on filter changes
   const filterKey = useMemo(
-    () => JSON.stringify([activeTab, debouncedSearch, biasRange, minFactuality, feedSort]),
-    [activeTab, debouncedSearch, biasRange, minFactuality, feedSort]
+    () => JSON.stringify([activeTab, selectedPromotedTag, debouncedSearch, biasRange, minFactuality, feedSort]),
+    [activeTab, selectedPromotedTag, debouncedSearch, biasRange, minFactuality, feedSort]
   )
   const prevFilterKeyRef = useRef(filterKey)
 
@@ -202,11 +235,14 @@ export default function HomeFeedScreen() {
         />
       </View>
 
-      {/* Unified tab bar */}
+      {/* Unified tab bar with promoted tags */}
       <UnifiedTabBar
         value={activeTab}
-        onChange={setActiveTab}
+        onChange={handleTabChange}
         visibleTabs={visibleTabs}
+        promotedTags={promotedTags}
+        selectedPromotedTag={selectedPromotedTag}
+        onPromotedTagChange={setSelectedPromotedTag}
       />
 
       {/* For You CTA or Hero card */}
@@ -226,7 +262,7 @@ export default function HomeFeedScreen() {
         ) : null}
       </View>
     </View>
-  ), [search, activeTab, visibleTabs, filtered.length, isAuthenticated, isCurrentlyLoading, isForYou, heroStory, router, toggleWithToast, isBookmarked, isRead])
+  ), [search, activeTab, visibleTabs, promotedTags, selectedPromotedTag, filtered.length, isAuthenticated, isCurrentlyLoading, isForYou, heroStory, router, toggleWithToast, isBookmarked, isRead, handleTabChange])
 
   const ListEmpty = useMemo(() => {
     if (filtered.length > 0) return null
@@ -262,6 +298,8 @@ export default function HomeFeedScreen() {
         onClose={() => setShowEditModal(false)}
         visibleFeeds={visibleFeeds}
         feedSort={feedSort}
+        hiddenPromotedTags={hiddenPromotedTags}
+        promotedTags={allPromotedTags}
         onUpdateConfig={updateConfig}
       />
     </SafeAreaView>
