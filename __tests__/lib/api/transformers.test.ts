@@ -19,6 +19,13 @@ const mockSource: DbSource = {
   total_articles_ingested: 0,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
+  bias_mbfc: null,
+  bias_allsides: null,
+  bias_adfm: null,
+  factuality_mbfc: null,
+  factuality_allsides: null,
+  bias_override: false,
+  bias_sources_synced_at: null,
 }
 
 const mockStory = {

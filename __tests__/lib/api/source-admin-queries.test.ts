@@ -49,6 +49,13 @@ const mockSource = {
   total_articles_ingested: 0,
   created_at: '2024-01-01T00:00:00Z',
   updated_at: '2024-01-01T00:00:00Z',
+  bias_mbfc: null,
+  bias_allsides: null,
+  bias_adfm: null,
+  factuality_mbfc: null,
+  factuality_allsides: null,
+  bias_override: false,
+  bias_sources_synced_at: null,
 }
 
 describe('queryAdminSources', () => {
@@ -246,10 +253,20 @@ describe('updateSource', () => {
 
     const result = await updateSource(client, 'src-1', { name: 'Updated Name', bias: 'left' })
 
-    expect(chain.update).toHaveBeenCalledWith({ name: 'Updated Name', bias: 'left' })
+    expect(chain.update).toHaveBeenCalledWith({ name: 'Updated Name', bias: 'left', bias_override: true })
     expect(chain.eq).toHaveBeenCalledWith('id', 'src-1')
     expect(chain.select).toHaveBeenCalled()
     expect(chain.single).toHaveBeenCalled()
+    expect(result).toEqual(updated)
+  })
+
+  it('respects explicit bias_override: false even when bias changes', async () => {
+    const updated = { ...mockSource, bias: 'left', bias_override: false }
+    chain.single.mockResolvedValue({ data: updated, error: null })
+
+    const result = await updateSource(client, 'src-1', { bias: 'left', bias_override: false })
+
+    expect(chain.update).toHaveBeenCalledWith({ bias: 'left', bias_override: false })
     expect(result).toEqual(updated)
   })
 

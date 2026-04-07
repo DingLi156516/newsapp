@@ -55,6 +55,7 @@ export const updateSourceSchema = z.object({
   region: z.enum(REGIONS).optional(),
   is_active: z.boolean().optional(),
   slug: z.string().max(200).regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens').optional(),
+  bias_override: z.boolean().optional(),
 }).refine((d) => isPublicUrl(d.url), { ...publicUrlCheck, path: ['url'] })
   .refine((d) => isPublicUrl(d.rss_url), { ...publicUrlCheck, path: ['rss_url'] })
 

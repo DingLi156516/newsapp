@@ -8,18 +8,22 @@
 
 import { useState, useCallback } from 'react'
 import { useSWRConfig } from 'swr'
+import { RefreshCw } from 'lucide-react'
 import type { DbSource } from '@/lib/supabase/types'
 import { AdminSourceList } from '@/components/organisms/AdminSourceList'
 import { AdminSourceDetail } from '@/components/organisms/AdminSourceDetail'
 import { AdminSourceCreate } from '@/components/organisms/AdminSourceCreate'
 import { AdminSourceImport } from '@/components/organisms/AdminSourceImport'
+import { useSyncRatings } from '@/lib/hooks/use-admin-sources'
 
 type RightPanel = 'detail' | 'create' | 'import'
 
 export function SourceAdminManager() {
   const [selectedSource, setSelectedSource] = useState<DbSource | null>(null)
   const [rightPanel, setRightPanel] = useState<RightPanel>('detail')
+  const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const { mutate } = useSWRConfig()
+  const { syncRatings, isSyncing } = useSyncRatings()
 
   const revalidateAll = useCallback(() => {
     mutate((key: unknown) => typeof key === 'string' && key.startsWith('/api/admin/sources'))
@@ -63,38 +67,71 @@ export function SourceAdminManager() {
     setRightPanel('detail')
   }, [])
 
+  const handleSyncRatings = useCallback(async () => {
+    setSyncMessage(null)
+    try {
+      const result = await syncRatings({})
+      const data = result.data
+      const parts = [`Synced ${data.synced} sources`]
+      if (data.overridden > 0) parts.push(`${data.overridden} overridden`)
+      if (data.skipped > 0) parts.push(`${data.skipped} skipped`)
+      if (data.unmatched > 0) parts.push(`${data.unmatched} unmatched`)
+      setSyncMessage(parts.join(', '))
+      revalidateAll()
+      setSelectedSource(null)
+    } catch (err) {
+      setSyncMessage(err instanceof Error ? err.message : 'Sync failed')
+    }
+  }, [syncRatings, revalidateAll])
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-      {/* Left panel */}
-      <div className="lg:col-span-2">
-        <AdminSourceList
-          selectedId={selectedSource?.id ?? null}
-          onSelect={handleSelect}
-          onCreateNew={handleCreateNew}
-          onImport={handleImport}
-        />
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSyncRatings}
+          disabled={isSyncing}
+          className="glass-pill flex items-center gap-1.5 px-3 py-1.5 text-xs text-white/70 hover:text-white disabled:opacity-50"
+        >
+          <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
+          {isSyncing ? 'Syncing...' : 'Sync Ratings'}
+        </button>
+        {syncMessage && (
+          <span className="text-xs text-white/50">{syncMessage}</span>
+        )}
       </div>
 
-      {/* Right panel */}
-      <div className="lg:col-span-3">
-        {rightPanel === 'create' && (
-          <AdminSourceCreate
-            onCreated={handleCreated}
-            onCancel={handleCancelCreate}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        {/* Left panel */}
+        <div className="lg:col-span-2">
+          <AdminSourceList
+            selectedId={selectedSource?.id ?? null}
+            onSelect={handleSelect}
+            onCreateNew={handleCreateNew}
+            onImport={handleImport}
           />
-        )}
-        {rightPanel === 'import' && (
-          <AdminSourceImport
-            onImported={handleImported}
-            onCancel={handleCancelImport}
-          />
-        )}
-        {rightPanel === 'detail' && (
-          <AdminSourceDetail
-            source={selectedSource}
-            onUpdated={handleUpdated}
-          />
-        )}
+        </div>
+
+        {/* Right panel */}
+        <div className="lg:col-span-3">
+          {rightPanel === 'create' && (
+            <AdminSourceCreate
+              onCreated={handleCreated}
+              onCancel={handleCancelCreate}
+            />
+          )}
+          {rightPanel === 'import' && (
+            <AdminSourceImport
+              onImported={handleImported}
+              onCancel={handleCancelImport}
+            />
+          )}
+          {rightPanel === 'detail' && (
+            <AdminSourceDetail
+              source={selectedSource}
+              onUpdated={handleUpdated}
+            />
+          )}
+        </div>
       </div>
     </div>
   )

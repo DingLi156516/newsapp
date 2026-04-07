@@ -50,6 +50,13 @@ export interface DbSource {
   total_articles_ingested: number
   created_at: string
   updated_at: string
+  bias_mbfc: BiasCategory | null
+  bias_allsides: BiasCategory | null
+  bias_adfm: BiasCategory | null
+  factuality_mbfc: FactualityLevel | null
+  factuality_allsides: FactualityLevel | null
+  bias_override: boolean
+  bias_sources_synced_at: string | null
 }
 
 export interface DbSourceInsert {
@@ -62,6 +69,13 @@ export interface DbSourceInsert {
   rss_url?: string | null
   region?: Region
   is_active?: boolean
+  bias_mbfc?: BiasCategory | null
+  bias_allsides?: BiasCategory | null
+  bias_adfm?: BiasCategory | null
+  factuality_mbfc?: FactualityLevel | null
+  factuality_allsides?: FactualityLevel | null
+  bias_override?: boolean
+  bias_sources_synced_at?: string | null
 }
 
 // ---------------------------------------------------------------------------

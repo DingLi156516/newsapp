@@ -7,7 +7,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { Save, X, ExternalLink, Rss } from 'lucide-react'
+import { Save, X, ExternalLink, Rss, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useUpdateSource } from '@/lib/hooks/use-admin-sources'
 import { BIAS_LABELS, FACTUALITY_LABELS, OWNERSHIP_LABELS, REGION_LABELS } from '@/lib/types'
 import type { BiasCategory, FactualityLevel, OwnershipType, Region } from '@/lib/types'
@@ -33,6 +33,7 @@ interface FormState {
   ownership: OwnershipType
   region: Region
   is_active: boolean
+  bias_override: boolean
 }
 
 function sourceToForm(source: DbSource): FormState {
@@ -46,6 +47,7 @@ function sourceToForm(source: DbSource): FormState {
     ownership: source.ownership,
     region: source.region,
     is_active: source.is_active,
+    bias_override: source.bias_override,
   }
 }
 
@@ -94,6 +96,11 @@ export function AdminSourceDetail({ source, onUpdated }: Props) {
     if (form.ownership !== source.ownership) changes.ownership = form.ownership
     if (form.region !== source.region) changes.region = form.region
     if (form.is_active !== source.is_active) changes.is_active = form.is_active
+    if (form.bias_override !== source.bias_override) changes.bias_override = form.bias_override
+
+    if ((changes.bias !== undefined || changes.factuality !== undefined) && changes.bias_override === undefined) {
+      changes.bias_override = form.bias_override
+    }
 
     if (Object.keys(changes).length === 0) {
       setIsEditing(false)
@@ -199,6 +206,55 @@ export function AdminSourceDetail({ source, onUpdated }: Props) {
             <p className="text-xs text-red-400/80 font-mono">{source.last_fetch_error}</p>
           </div>
         )}
+
+        {/* Provider Bias Ratings */}
+        <div className="bg-white/5 rounded-lg p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-white/60 uppercase tracking-wide">Bias Ratings</h3>
+            {source.bias_sources_synced_at && (
+              <span className="text-[10px] text-white/30 flex items-center gap-1">
+                <RefreshCw size={10} />
+                Synced {new Date(source.bias_sources_synced_at).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <ProviderCell label="MBFC" bias={source.bias_mbfc} factuality={source.factuality_mbfc} />
+            <ProviderCell label="AllSides" bias={source.bias_allsides} factuality={source.factuality_allsides} />
+            <ProviderCell label="Ad Fontes" bias={source.bias_adfm} factuality={null} />
+          </div>
+
+          {!(isEditing ? form?.bias_override : source.bias_override) && source.bias_sources_synced_at !== null
+            && source.bias_mbfc === null && source.bias_allsides === null && source.bias_adfm === null && (
+            <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
+              <AlertTriangle size={14} className="text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-300/90 leading-relaxed">
+                No bias providers currently match this source. Effective ratings may be outdated
+                from a previous sync. Consider verifying or setting a manual override.
+              </p>
+            </div>
+          )}
+
+          {isEditing && (
+            <label className="flex items-center gap-2 cursor-pointer pt-1">
+              <input
+                type="checkbox"
+                checked={form?.bias_override ?? source.bias_override}
+                onChange={(e) => {
+                  setForm((prev) => (prev ? { ...prev, bias_override: e.target.checked } : null))
+                }}
+                className="rounded border-white/20 bg-white/5"
+              />
+              <span className="text-xs text-white/60">
+                Manual override — sync will not update effective bias/factuality
+              </span>
+            </label>
+          )}
+          {!isEditing && source.bias_override && (
+            <p className="text-[10px] text-amber-400/70">Manual override active — sync skips effective ratings</p>
+          )}
+        </div>
 
         {/* Form fields */}
         <div className="space-y-3">
@@ -372,6 +428,32 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
         {label}
       </label>
       {children}
+    </div>
+  )
+}
+
+function ProviderCell({
+  label,
+  bias,
+  factuality,
+}: {
+  label: string
+  bias: BiasCategory | null
+  factuality: FactualityLevel | null
+}) {
+  return (
+    <div className="bg-white/5 rounded-lg p-2 text-center space-y-1">
+      <p className="text-[10px] text-white/40 font-medium">{label}</p>
+      {bias ? (
+        <span className={`spectrum-${bias} glass-pill px-1.5 py-0.5 text-[10px] inline-block`}>
+          {BIAS_LABELS[bias]}
+        </span>
+      ) : (
+        <p className="text-[10px] text-white/20">No data</p>
+      )}
+      {factuality && (
+        <p className="text-[10px] text-white/50">{FACTUALITY_LABELS[factuality]}</p>
+      )}
     </div>
   )
 }

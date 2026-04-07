@@ -160,6 +160,31 @@ export function useImportSources() {
   }
 }
 
+interface SyncRatingsResponse {
+  readonly success: boolean
+  readonly data: {
+    readonly synced: number
+    readonly skipped: number
+    readonly overridden: number
+    readonly unmatched: number
+    readonly errors: readonly { source: string; reason: string }[]
+  }
+  readonly error?: string
+}
+
+export function useSyncRatings() {
+  const { trigger, isMutating, error } = useSWRMutation(
+    '/api/admin/sources/sync-ratings',
+    postFetcher<SyncRatingsResponse>
+  )
+
+  return {
+    syncRatings: trigger,
+    isSyncing: isMutating,
+    error: error instanceof Error ? error.message : null,
+  }
+}
+
 export function useDiscoverRss() {
   const { trigger, isMutating, error } = useSWRMutation(
     '/api/admin/sources/discover-rss',

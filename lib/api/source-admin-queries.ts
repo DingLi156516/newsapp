@@ -24,7 +24,7 @@ export async function queryAdminSources(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query = (client.from('sources') as any)
     .select(
-      'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested, created_at, updated_at',
+      'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested, created_at, updated_at, bias_mbfc, bias_allsides, bias_adfm, factuality_mbfc, factuality_allsides, bias_override, bias_sources_synced_at',
       { count: 'exact' }
     )
 
@@ -110,6 +110,13 @@ export async function updateSource(
   if (input.region !== undefined) updateData.region = input.region
   if (input.is_active !== undefined) updateData.is_active = input.is_active
   if (input.slug !== undefined) updateData.slug = input.slug
+  if (input.bias_override !== undefined) updateData.bias_override = input.bias_override
+
+  // Auto-set bias_override when admin manually changes bias or factuality,
+  // but only if the caller didn't explicitly provide bias_override
+  if ((input.bias !== undefined || input.factuality !== undefined) && input.bias_override === undefined) {
+    updateData.bias_override = true
+  }
 
   if (Object.keys(updateData).length === 0) {
     throw new Error('No fields to update')
