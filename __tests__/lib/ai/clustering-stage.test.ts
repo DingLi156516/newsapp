@@ -13,7 +13,13 @@ import {
 function createMockClient(
   articleRows: Record<string, unknown>[] = [],
   storyRows: Record<string, unknown>[] = [],
-  options: { failSingletonUpdate?: boolean; failInitialClaimIds?: string[]; failStoryFetch?: boolean } = {},
+  options: {
+    failSingletonUpdate?: boolean
+    failInitialClaimIds?: string[]
+    failStoryFetch?: boolean
+    rpcResults?: Record<string, unknown>[] | null
+    rpcError?: { message: string } | null
+  } = {},
 ) {
   const articleUpdateCalls: { payload: Record<string, unknown>; id: string }[] = []
 
@@ -60,6 +66,16 @@ function createMockClient(
     }),
   })
 
+  // RPC mock for match_story_centroid
+  const rpcCalls: { fn: string; params: Record<string, unknown> }[] = []
+  const rpcMock = vi.fn().mockImplementation((fn: string, params: Record<string, unknown>) => {
+    rpcCalls.push({ fn, params })
+    if (options.rpcError) {
+      return Promise.resolve({ data: null, error: options.rpcError })
+    }
+    return Promise.resolve({ data: options.rpcResults ?? [], error: null })
+  })
+
   return {
     from: vi.fn((table: string) => {
       if (table === 'articles') {
@@ -100,10 +116,12 @@ function createMockClient(
         }),
       }
     }),
+    rpc: rpcMock,
     _storyInsert: storyInsert,
     _storyDeleteCalls: storyDeleteCalls,
     _articleUpdateCalls: articleUpdateCalls,
     _storySingle: storySingle,
+    _rpcCalls: rpcCalls,
   }
 }
 
@@ -362,5 +380,57 @@ describe('clusterArticles', () => {
     // The finally block should have fired a release update
     const releaseUpdates = client._articleUpdateCalls.filter(c => c.payload.clustering_claimed_at === null)
     expect(releaseUpdates.length).toBe(articles.length)
+  })
+
+  it('matches articles to existing stories via pgvector RPC', async () => {
+    const article = {
+      id: 'rpc-match-1',
+      title: 'Article for RPC matching',
+      source_id: 's1',
+      embedding: [1, 0],
+      published_at: '2026-03-01T00:00:00Z',
+      created_at: '2026-03-01T00:00:00Z',
+      story_id: null,
+      image_url: null,
+      clustering_claimed_at: null,
+      clustering_attempts: 0,
+    }
+
+    const existingStory = {
+      id: 'existing-story-rpc',
+      cluster_centroid: [0.99, 0.01],
+      last_updated: new Date().toISOString(),
+    }
+
+    const client = createMockClient(
+      [article],
+      [existingStory],
+      {
+        rpcResults: [{ story_id: 'existing-story-rpc', similarity: 0.99 }],
+      },
+    )
+
+    const result = await clusterArticles(client as never)
+
+    expect(result.assignedArticles).toBe(1)
+    expect(result.newStories).toBe(0)
+    // RPC should have been called for match_story_centroid
+    expect(client._rpcCalls.length).toBeGreaterThan(0)
+    expect(client._rpcCalls[0].fn).toBe('match_story_centroid')
+  })
+
+  it('falls back to JS brute-force when RPC fails without errors', async () => {
+    const client = createMockClient(
+      TWO_SIMILAR_ARTICLES,
+      [],
+      { rpcError: { message: 'function match_story_centroid does not exist' } },
+    )
+
+    const result = await clusterArticles(client as never)
+
+    // Should still cluster successfully via JS fallback
+    expect(result.assignedArticles).toBe(2)
+    expect(result.newStories).toBe(1)
+    expect(result.errors.length).toBe(0)
   })
 })

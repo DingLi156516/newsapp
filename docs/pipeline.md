@@ -19,6 +19,7 @@ The pipeline transforms raw RSS articles into published stories through four sta
 |---------|-------|----------|------|
 | Cron ingest | `GET /api/cron/ingest` | Every 15 min | `Bearer CRON_SECRET` |
 | Cron process | `GET /api/cron/process` | Every 15 min (5 min offset) | `Bearer CRON_SECRET` |
+| Cron recluster | `GET /api/cron/recluster` | Hourly | `Bearer CRON_SECRET` |
 | Admin trigger | `POST /api/admin/pipeline/trigger` | Manual | Supabase auth + admin |
 
 The admin trigger accepts a JSON body with `type: 'ingest' | 'process' | 'full'`. There is no distributed lock between triggers -- cron and admin can overlap freely.
@@ -75,17 +76,24 @@ The most complex stage. Groups articles by cosine similarity into story clusters
 | `MAX_CLUSTERING_ATTEMPTS` | 3 | Singletons promoted to stories after this many passes |
 | `CLAIM_SCAN_MULTIPLIER` | 3 | Fetch 3x batch size to find unclaimed rows |
 
-### Algorithm
+### Constants
 
-1. **Fetch candidates:** embedded articles with `story_id IS NULL`, `clustering_status = 'pending'`, created within 7 days. Scan 3x batch, filter to unclaimed, take up to batch size.
+| Name | Value | Env Override | Purpose |
+|------|-------|-------------|---------|
+| `SIMILARITY_THRESHOLD` | 0.72 | `CLUSTERING_SIMILARITY_THRESHOLD` | Minimum cosine similarity to join a cluster |
+| `SPLIT_THRESHOLD` | 0.60 | `CLUSTERING_SPLIT_THRESHOLD` | Minimum similarity for recluster split detection |
+| `PGVECTOR_CANDIDATE_COUNT` | 5 | `CLUSTERING_CANDIDATE_COUNT` | pgvector RPC top-K candidates |
+| `PGVECTOR_BATCH_SIZE` | 10 | — | Articles per RPC batch in Pass 1 |
 
-2. **Claim all** selected articles (`clustering_claimed_at = now`).
+### Algorithm (6 composable stages)
 
-3. **Fetch existing stories** with centroids, updated within the 7-day match window.
+1. **fetchUnassignedArticles:** embedded articles with `story_id IS NULL`, `clustering_status = 'pending'`. Scan 3x batch, filter to unclaimed, take up to batch size.
 
-4. **Pass 1 -- Match against existing stories:** For each article, compute cosine similarity to every story centroid. If best match >= 0.72, assign article to that story.
+2. **claimArticleBatch:** bulk-claim selected articles (`clustering_claimed_at = now`).
 
-5. **Pass 2 -- Form new clusters:** Remaining articles are compared pairwise. Each is either added to an existing new cluster (if centroid similarity >= 0.72) or starts a new cluster.
+3. **matchAgainstExistingStories (Pass 1 — Hybrid pgvector + JS):** For each article, query the `match_story_centroid` RPC for HNSW-accelerated centroid search. Falls back to JS brute-force cosine similarity if RPC is unavailable. If best match >= 0.72, assign article to that story.
+
+4. **clusterUnmatchedArticles (Pass 2 — Union-find):** Remaining articles are compared pairwise. All pairs above threshold are ranked by similarity descending, then merged via union-find with path compression and union-by-rank. Centroid validation ejects outliers connected only via transitive chaining.
 
 6. **Handle new clusters:**
    - **Multi-article clusters (>= 2):** Check if centroid matches an existing story (duplicate detection). If so, merge articles into that story. Otherwise, create a new story.
@@ -110,6 +118,18 @@ Run 3: attempts 2→3, promoted to single-article story
 The process runner's `clusterMadeProgress` function intentionally does **not** count singletons as progress. This prevents the loop from re-running clustering on the same articles within a single invocation, which would burn all 3 attempts immediately.
 
 **Batch size:** 75 articles per pass (env: `PIPELINE_PROCESS_CLUSTER_BATCH_SIZE`)
+
+## Re-clustering Maintenance
+
+**File:** `lib/ai/recluster.ts`  
+**Route:** `app/api/cron/recluster/route.ts` (60s runtime limit)
+
+Runs hourly to correct accumulated clustering drift:
+
+1. **Merge detection:** Finds story pairs with centroid similarity above threshold. Queries article counts for each pair and merges the smaller story into the larger one — recomputes the target's centroid and deletes the source story.
+2. **Split detection:** For each story, checks every article's similarity to its story centroid. Articles below the `SPLIT_THRESHOLD` (0.60) are detached and reset to `clustering_status = 'pending'` for re-clustering.
+
+Both phases respect `assembly_claimed_at` TTLs to avoid interfering with concurrent pipeline processing. Uses `match_story_centroid` RPC for merge candidate discovery with JS fallback.
 
 ## Stage 4: Assemble
 
@@ -318,7 +338,10 @@ The approved plan in `.omx/plans/prd-pipeline-throughput-scale-20260402.md` keep
 | `lib/pipeline/claim-utils.ts` | Claim TTL helpers |
 | `lib/pipeline/logger.ts` | Run logging to `pipeline_runs` table |
 | `lib/pipeline/telemetry-utils.ts` | Shared telemetry helpers (toPerMinute rate calculation) |
+| `lib/ai/recluster.ts` | Re-clustering maintenance: merge + split detection |
 | `app/api/cron/ingest/route.ts` | Ingest cron endpoint |
 | `app/api/cron/process/route.ts` | Process cron endpoint |
+| `app/api/cron/recluster/route.ts` | Recluster cron endpoint (hourly) |
 | `app/api/admin/pipeline/trigger/route.ts` | Admin manual trigger |
 | `scripts/backfill-single-source.ts` | Re-assemble single-source stories (fix headlines + fabricated perspectives) |
+| `supabase/migrations/031_pgvector_story_matching.sql` | HNSW index + `match_story_centroid` RPC for clustering Pass 1 |

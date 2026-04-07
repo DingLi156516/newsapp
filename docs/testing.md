@@ -82,7 +82,7 @@ __tests__/
       parser.test.ts  parser-errors.test.ts  dedup.test.ts  ingest.test.ts  feed-registry.test.ts  normalization.test.ts
     ai/
       gemini-client.test.ts  gemini-client-model-routing.test.ts
-      clustering.test.ts  clustering-stage.test.ts
+      clustering.test.ts  clustering-stage.test.ts  recluster.test.ts
       embeddings.test.ts
       spectrum-calculator.test.ts  story-classifier.test.ts
       summary-generator.test.ts

@@ -249,7 +249,8 @@ lib/source-comparison.ts — Pure source-comparison helpers; computes shared/exc
 lib/ai/          — AI processing (12 files)
   gemini-client.ts      — Thin Gemini REST client (uses GEMINI_API_KEY)
   embeddings.ts         — Generates vector embeddings for articles
-  clustering.ts         — Groups articles into story clusters by embedding similarity; singletons stay unclustered and expire after 7 days
+  clustering.ts         — Groups articles into story clusters by embedding similarity (6 composable stages: fetch, claim, pgvector+JS Pass 1, union-find Pass 2, persist assignments, persist clusters); singletons stay unclustered and expire after 7 days
+  recluster.ts          — Re-clustering maintenance: merges fragmented story pairs, ejects misassigned articles below split threshold
   spectrum-calculator.ts — Computes bias distribution (SpectrumSegment[]) per story cluster
   topic-classifier.ts   — Provides deterministic fallback topic logic
   region-classifier.ts  — Provides deterministic fallback region logic
@@ -328,6 +329,7 @@ lib/hooks/       — SWR data-fetching hooks + auth hooks + utilities (23 files)
 | `GET` | `/api/admin/pipeline/stats` | Pipeline statistics (admin required) |
 | `POST` | `/api/admin/pipeline/trigger` | Trigger pipeline run manually (admin required) |
 | `POST` | `/api/cron/digest` | Weekly blindspot digest email (protected by CRON_SECRET) |
+| `GET` | `/api/cron/recluster` | Hourly re-clustering maintenance — merge fragmented stories, eject misassigned articles (protected by CRON_SECRET) |
 | `GET` | `/api/admin/sources` | List all sources with filters (admin required) |
 | `POST` | `/api/admin/sources` | Create new source (admin required) |
 | `PATCH` | `/api/admin/sources/[id]` | Update source (admin required) |
@@ -376,7 +378,7 @@ The **stories** table includes both legacy editorial status and explicit pipelin
 
 The **articles** table also stores ingest/pipeline helpers including `canonical_url`, `title_fingerprint`, `embedding_claimed_at`, and `clustering_claimed_at`.
 
-**pgvector** extension enables storing and searching 768-dimensional embedding vectors with a fast HNSW index.
+**pgvector** extension enables storing and searching 768-dimensional embedding vectors with a fast HNSW index. The `match_story_centroid` RPC function performs HNSW-accelerated centroid similarity search for clustering Pass 1 (migration 031).
 
 **Row Level Security** ensures the browser can only read data — writes are restricted to the service role used by the cron jobs.
 

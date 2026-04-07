@@ -20,6 +20,9 @@ npm run test:coverage # Coverage report (target ≥80%)
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-side service client (bypasses RLS) |
 | `GEMINI_API_KEY` | Yes | Gemini REST client (`lib/ai/gemini-client.ts`) |
 | `CRON_SECRET` | Yes | Auth header for cron endpoints |
+| `CLUSTERING_SIMILARITY_THRESHOLD` | No | Cosine similarity threshold for clustering (default 0.72) |
+| `CLUSTERING_SPLIT_THRESHOLD` | No | Minimum similarity for recluster split detection (default 0.60) |
+| `CLUSTERING_CANDIDATE_COUNT` | No | pgvector RPC candidate count (default 5) |
 | `RESEND_API_KEY` | For digest | Resend email API key (`lib/email/resend-client.ts`) |
 | `RESEND_FROM_EMAIL` | No | Sender address for digest emails (defaults to `onboarding@resend.dev`) |
 | `NEXT_PUBLIC_APP_URL` | No | App base URL for email links (defaults to `http://localhost:3000`) |
@@ -245,7 +248,26 @@ Expected response:
 }
 ```
 
-### 6. Trigger blindspot digest email
+### 6. Trigger re-clustering maintenance
+
+```bash
+curl -s http://localhost:3000/api/cron/recluster \
+  -H "Authorization: Bearer $CRON_SECRET" | jq .
+```
+
+Expected response:
+```json
+{
+  "success": true,
+  "data": {
+    "mergedPairs": 1,
+    "splitArticles": 2,
+    "errors": []
+  }
+}
+```
+
+### 7. Trigger blindspot digest email
 
 ```bash
 curl -s -X POST http://localhost:3000/api/cron/digest \
@@ -359,6 +381,7 @@ curl -s "http://localhost:3000/api/sources/compare?left=reuters&right=fox-news" 
 |--------|------|------|-------------|
 | GET | `/api/cron/ingest` | `Bearer CRON_SECRET` | Trigger RSS ingestion |
 | GET | `/api/cron/process` | `Bearer CRON_SECRET` | Trigger AI processing |
+| GET | `/api/cron/recluster` | `Bearer CRON_SECRET` | Hourly re-clustering maintenance (merge + split) |
 | POST | `/api/cron/digest` | `Bearer CRON_SECRET` | Send weekly blindspot digest email |
 
 ### Protected Endpoints (User — Supabase Auth required)
