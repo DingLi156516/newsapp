@@ -79,7 +79,8 @@ export function categorizeFeedError(err: unknown): { type: FeedErrorType; messag
     message.includes('ETIMEDOUT') ||
     message.includes('ESOCKETTIMEDOUT') ||
     message.includes('AbortError') ||
-    message.includes('timeout')
+    message.includes('timeout') ||
+    message.includes('timed out')
   ) {
     return { type: 'timeout', message }
   }
@@ -99,7 +100,11 @@ export function categorizeFeedError(err: unknown): { type: FeedErrorType; messag
     message.includes('Non-whitespace before first tag') ||
     message.includes('Unexpected close tag') ||
     message.includes('Invalid XML') ||
-    message.includes('not well-formed')
+    message.includes('not well-formed') ||
+    message.includes('Unable to parse XML') ||
+    message.includes('Attribute without value') ||
+    message.includes('Unquoted attribute value') ||
+    message.includes('not recognized as RSS')
   ) {
     return { type: 'parse_error', message }
   }

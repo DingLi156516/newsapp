@@ -65,7 +65,7 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'mixed',
     ownership: 'corporate',
     url: 'msnbc.com',
-    rss_url: 'https://www.msnbc.com/feeds/latest',
+    rss_url: 'https://feeds.nbcnews.com/nbcnews/public/news',
     region: 'us',
   },
   {
@@ -75,7 +75,8 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'mixed',
     ownership: 'corporate',
     url: 'cnn.com',
-    rss_url: 'http://rss.cnn.com/rss/cnn_topstories.rss',
+    rss_url: null,
+    is_active: false,
     region: 'us',
   },
   {
@@ -85,7 +86,7 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'mixed',
     ownership: 'corporate',
     url: 'thedailybeast.com',
-    rss_url: 'https://feeds.thedailybeast.com/rss/articles',
+    rss_url: 'https://www.thedailybeast.com/arc/outboundfeeds/rss/articles/',
     region: 'us',
   },
   {
@@ -223,7 +224,8 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'very-high',
     ownership: 'corporate',
     url: 'reuters.com',
-    rss_url: 'https://www.reutersagency.com/feed/',
+    rss_url: null,
+    is_active: false,
     region: 'international',
   },
   {
@@ -233,7 +235,8 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'very-high',
     ownership: 'non-profit',
     url: 'apnews.com',
-    rss_url: 'https://rsshub.app/apnews/topics/apf-topnews',
+    rss_url: null,
+    is_active: false,
     region: 'us',
   },
   {
@@ -253,7 +256,8 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'high',
     ownership: 'corporate',
     url: 'usatoday.com',
-    rss_url: 'http://rssfeeds.usatoday.com/usatoday-NewsTopStories',
+    rss_url: null,
+    is_active: false,
     region: 'us',
   },
   {
@@ -283,7 +287,7 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'high',
     ownership: 'corporate',
     url: 'bloomberg.com',
-    rss_url: 'https://www.bloomberg.com/feed/podcast/bloomberg-surveillance.xml',
+    rss_url: 'https://feeds.bloomberg.com/politics/news.rss',
     region: 'us',
   },
   {
@@ -337,7 +341,7 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'very-high',
     ownership: 'corporate',
     url: 'economist.com',
-    rss_url: 'https://www.economist.com/rss',
+    rss_url: 'https://www.economist.com/international/rss.xml',
     region: 'uk',
   },
   {
@@ -347,7 +351,7 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'high',
     ownership: 'corporate',
     url: 'forbes.com',
-    rss_url: 'https://www.forbes.com/real-time/feed2/',
+    rss_url: 'https://www.forbes.com/news/feed2/',
     region: 'us',
   },
   {
@@ -491,7 +495,8 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'mixed',
     ownership: 'corporate',
     url: 'skynews.com.au',
-    rss_url: 'https://www.skynews.com.au/rss',
+    rss_url: null,
+    is_active: false,
     region: 'international',
   },
 
@@ -525,7 +530,7 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'mixed',
     ownership: 'independent',
     url: 'theepochtimes.com',
-    rss_url: 'https://www.theepochtimes.com/c-us/feed',
+    rss_url: 'https://feed.theepochtimes.com/us/feed',
     region: 'us',
   },
   {
@@ -545,7 +550,8 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'low',
     ownership: 'corporate',
     url: 'newsmax.com',
-    rss_url: 'https://www.newsmax.com/rss/Newsfront/1/',
+    rss_url: null,
+    is_active: false,
     region: 'us',
   },
 
@@ -559,7 +565,7 @@ export const seedSources: DbSourceInsert[] = [
     factuality: 'high',
     ownership: 'state-funded',
     url: 'cbc.ca',
-    rss_url: 'https://www.cbc.ca/webfeed/rss/rss-topstories',
+    rss_url: 'https://rss.cbc.ca/lineup/topstories.xml',
     region: 'canada',
   },
   {

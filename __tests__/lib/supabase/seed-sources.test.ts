@@ -67,12 +67,22 @@ describe('seedSources', () => {
     })
   })
 
-  it('every source has an RSS URL', () => {
-    seedSources.forEach((source) => {
-      expect(source.rss_url).toBeDefined()
-      expect(typeof source.rss_url).toBe('string')
-      expect(source.rss_url!.length).toBeGreaterThan(0)
-    })
+  it('every active source has an RSS URL', () => {
+    seedSources
+      .filter((source) => source.is_active !== false)
+      .forEach((source) => {
+        expect(source.rss_url).toBeDefined()
+        expect(typeof source.rss_url).toBe('string')
+        expect(source.rss_url!.length).toBeGreaterThan(0)
+      })
+  })
+
+  it('deactivated sources have null RSS URLs', () => {
+    seedSources
+      .filter((source) => source.is_active === false)
+      .forEach((source) => {
+        expect(source.rss_url).toBeNull()
+      })
   })
 
   it('has sources across all 7 bias categories', () => {

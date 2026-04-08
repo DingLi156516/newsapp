@@ -17,6 +17,12 @@ describe('categorizeFeedError', () => {
       const result = categorizeFeedError(new Error('AbortError: The operation was aborted'))
       expect(result.type).toBe('timeout')
     })
+
+    it('categorizes "timed out" as timeout', () => {
+      const result = categorizeFeedError(new Error('Request timed out after 10000ms'))
+      expect(result.type).toBe('timeout')
+      expect(result.message).toContain('timed out')
+    })
   })
 
   describe('DNS errors', () => {
@@ -61,6 +67,10 @@ describe('categorizeFeedError', () => {
         'Unexpected close tag',
         'Invalid XML',
         'not well-formed',
+        'Unable to parse XML',
+        'Attribute without value',
+        'Unquoted attribute value',
+        'not recognized as RSS',
       ]
 
       for (const msg of cases) {
