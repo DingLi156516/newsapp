@@ -20,9 +20,11 @@ npm run test:coverage # Coverage report (target ≥80%)
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Server-side service client (bypasses RLS) |
 | `GEMINI_API_KEY` | Yes | Gemini REST client (`lib/ai/gemini-client.ts`) |
 | `CRON_SECRET` | Yes | Auth header for cron endpoints |
-| `CLUSTERING_SIMILARITY_THRESHOLD` | No | Cosine similarity threshold for clustering (default 0.72) |
+| `CLUSTERING_SIMILARITY_THRESHOLD` | No | Cosine similarity threshold for clustering (default 0.70) |
 | `CLUSTERING_SPLIT_THRESHOLD` | No | Minimum similarity for recluster split detection (default 0.60) |
-| `CLUSTERING_CANDIDATE_COUNT` | No | pgvector RPC candidate count (default 5) |
+| `CLUSTERING_CANDIDATE_COUNT` | No | pgvector RPC candidate count (default 15) |
+| `PIPELINE_INGEST_MAX_PER_SOURCE` | No | Max articles per source per ingest run (default 30) |
+| `PIPELINE_ASSEMBLY_CONCURRENCY` | No | Assembly concurrency limit (default 12) |
 | `RESEND_API_KEY` | For digest | Resend email API key (`lib/email/resend-client.ts`) |
 | `RESEND_FROM_EMAIL` | No | Sender address for digest emails (defaults to `onboarding@resend.dev`) |
 | `NEXT_PUBLIC_APP_URL` | No | App base URL for email links (defaults to `http://localhost:3000`) |
@@ -64,7 +66,7 @@ The process runner is backlog-aware, multi-pass, and freshness-first:
 - embed target per invocation defaults to `1500` articles
 - cluster target per invocation defaults to `1500` articles
 - assemble target per invocation defaults to `100` stories
-- default batch sizes: embed `50`, cluster `75`, assemble `25`
+- default batch sizes: embed `50`, cluster `75`, assemble `50`
 - each invocation works in rounds, refreshing backlog between rounds so newly embedded articles can be clustered before more work starts
 - embed reserves time budget for downstream cluster/assembly stages so they are not starved
 - assembly is deferred when a freshness backlog exists **and** the remaining time budget is too small to run both freshness stages and assembly; with `Infinity` budget (admin trigger / local), assembly always runs alongside freshness stages
@@ -107,7 +109,7 @@ For existing published stories that predate entity extraction, run the backfill 
 # Dry run — preview what would be tagged
 npx tsx scripts/backfill-tags.ts --dry-run
 
-# Run for real (default batch size 25, 500ms delay between batches)
+# Run for real (default batch size 50, 500ms delay between batches)
 npx tsx scripts/backfill-tags.ts
 
 # Custom batch size

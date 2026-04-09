@@ -244,6 +244,70 @@ describe('ingestFeeds', () => {
     )
   })
 
+  it('caps articles per source to prevent dominance', async () => {
+    const { getActiveFeeds } = await import('@/lib/rss/feed-registry')
+    vi.mocked(getActiveFeeds).mockResolvedValue([
+      { sourceId: 's1', slug: 'daily-mail', name: 'Daily Mail', rssUrl: 'https://dailymail.co.uk/feed' },
+      { sourceId: 's2', slug: 'guardian', name: 'The Guardian', rssUrl: 'https://guardian.com/feed' },
+    ])
+
+    // Daily Mail returns 50 articles, Guardian returns 5
+    const dailyMailItems = Array.from({ length: 50 }, (_, i) => ({
+      title: `DM Article ${i}`,
+      url: `https://dailymail.co.uk/article-${i}`,
+      description: null,
+      content: null,
+      imageUrl: null,
+      publishedAt: new Date(2026, 2, 1, 12, 0, 0 - i).toISOString(),
+    }))
+    const guardianItems = Array.from({ length: 5 }, (_, i) => ({
+      title: `Guardian Article ${i}`,
+      url: `https://guardian.com/article-${i}`,
+      description: null,
+      content: null,
+      imageUrl: null,
+      publishedAt: new Date(2026, 2, 1, 12, 0, 0 - i).toISOString(),
+    }))
+
+    const { parseFeed } = await import('@/lib/rss/parser')
+    vi.mocked(parseFeed)
+      .mockResolvedValueOnce(dailyMailItems)
+      .mockResolvedValueOnce(guardianItems)
+
+    const allItems = [...dailyMailItems, ...guardianItems]
+    const { filterNewArticles } = await import('@/lib/rss/dedup')
+    vi.mocked(filterNewArticles).mockResolvedValue(allItems)
+
+    const clientWithInsert = createMockClient()
+    const result = await ingestFeeds(clientWithInsert)
+
+    // Daily Mail should be capped at 30, Guardian keeps all 5 → 35 total
+    expect(result.newArticles).toBe(35)
+
+    const upsertCalls = clientWithInsert._articleUpsert.mock.calls
+    const allUpsertedRows = upsertCalls.flatMap(
+      (call: unknown[]) => call[0] as { source_id: string; url: string }[]
+    )
+
+    const dmRows = allUpsertedRows.filter(
+      (row: { source_id: string }) => row.source_id === 's1'
+    )
+    const guardianRows = allUpsertedRows.filter(
+      (row: { source_id: string }) => row.source_id === 's2'
+    )
+    expect(dmRows).toHaveLength(30)
+    expect(guardianRows).toHaveLength(5)
+
+    // Newest 30 DM articles (indexes 0-29) retained, oldest 20 dropped
+    const dmUrls = dmRows.map((row: { url: string }) => row.url)
+    for (let i = 0; i < 30; i++) {
+      expect(dmUrls).toContain(`https://dailymail.co.uk/article-${i}`)
+    }
+    for (let i = 30; i < 50; i++) {
+      expect(dmUrls).not.toContain(`https://dailymail.co.uk/article-${i}`)
+    }
+  })
+
   it('collapses batch duplicates that normalize to the same canonical url', async () => {
     const { getActiveFeeds } = await import('@/lib/rss/feed-registry')
     vi.mocked(getActiveFeeds).mockResolvedValue([

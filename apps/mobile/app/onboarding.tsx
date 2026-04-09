@@ -28,8 +28,8 @@ const PAGES: readonly OnboardingPage[] = [
   },
   {
     id: 'sources',
-    title: '55 Sources, One Story',
-    body: 'We cluster articles from 55 news outlets into unified stories. See how many sources cover each event and compare their framing side by side.',
+    title: '60 Sources, One Story',
+    body: 'We cluster articles from 60 news outlets into unified stories. See how many sources cover each event and compare their framing side by side.',
     accentColor: '#9ca3af',
   },
   {

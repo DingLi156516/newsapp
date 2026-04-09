@@ -31,6 +31,9 @@ export interface FeedError {
 
 const INSERT_BATCH_SIZE = 50
 const FETCH_CONCURRENCY = 5
+const INGEST_MAX_ARTICLES_PER_SOURCE = Number(
+  process.env.PIPELINE_INGEST_MAX_PER_SOURCE ?? 30
+)
 
 function getCanonicalIdentity(url: string): string {
   return normalizeArticleUrl(url)
@@ -151,7 +154,7 @@ export async function ingestFeeds(
   const newCanonicalSet = new Set(newItems.map((item) => getCanonicalIdentity(item.url)))
 
   const seenCanonical = new Set<string>()
-  const inserts = allItems
+  const dedupedItems = allItems
     .filter((entry) => newCanonicalSet.has(getCanonicalIdentity(entry.item.url)))
     .filter((entry) => {
       const canonicalIdentity = getCanonicalIdentity(entry.item.url)
@@ -159,7 +162,25 @@ export async function ingestFeeds(
       seenCanonical.add(canonicalIdentity)
       return true
     })
-    .map((entry) => toArticleInsert(entry.item, entry.sourceId))
+
+  // Per-source cap: keep only the newest N articles per source
+  const bySource = new Map<string, typeof dedupedItems>()
+  for (const entry of dedupedItems) {
+    const existing = bySource.get(entry.sourceId) ?? []
+    bySource.set(entry.sourceId, [...existing, entry])
+  }
+
+  const cappedItems: typeof dedupedItems = []
+  for (const entries of bySource.values()) {
+    const sorted = [...entries].sort((a, b) => {
+      const aDate = a.item.publishedAt ?? ''
+      const bDate = b.item.publishedAt ?? ''
+      return bDate.localeCompare(aDate)
+    })
+    cappedItems.push(...sorted.slice(0, INGEST_MAX_ARTICLES_PER_SOURCE))
+  }
+
+  const inserts = cappedItems.map((entry) => toArticleInsert(entry.item, entry.sourceId))
 
   let insertedCount = 0
 

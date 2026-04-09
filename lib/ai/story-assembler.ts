@@ -94,7 +94,7 @@ interface StoryAssemblyBatchResult {
 const CLAIM_SCAN_MULTIPLIER = 3
 const DEFAULT_STORY_ASSEMBLY_CONCURRENCY = Math.max(
   1,
-  Number(process.env.PIPELINE_ASSEMBLY_CONCURRENCY ?? 6)
+  Number(process.env.PIPELINE_ASSEMBLY_CONCURRENCY ?? 12)
 )
 
 function dominantValue<T extends string>(values: readonly T[], fallback: T): T {

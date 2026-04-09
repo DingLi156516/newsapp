@@ -1,4 +1,4 @@
-import { cosineSimilarity, computeCentroid, clusterUnmatchedArticles } from '@/lib/ai/clustering'
+import { cosineSimilarity, computeCentroid, clusterUnmatchedArticles, interleaveBySource, matchArticleViaJs, parseVector, recomputeStoryCentroid, SIMILARITY_THRESHOLD, SPLIT_THRESHOLD } from '@/lib/ai/clustering'
 import type { ClusterableArticle } from '@/lib/ai/clustering'
 
 describe('cosineSimilarity', () => {
@@ -157,5 +157,441 @@ describe('clusterUnmatchedArticles', () => {
 
   it('returns empty array for empty input', () => {
     expect(clusterUnmatchedArticles([], 0.72)).toEqual([])
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/*  interleaveBySource — round-robin source diversity                  */
+/* ------------------------------------------------------------------ */
+
+function makeInterleavedArticle(id: string, sourceId: string) {
+  return {
+    id,
+    title: id,
+    source_id: sourceId,
+    embedding: [1, 0],
+    published_at: '2026-04-07T00:00:00Z',
+    created_at: '2026-04-07T00:00:00Z',
+    story_id: null,
+    image_url: null,
+    clustering_claimed_at: null,
+    clustering_attempts: 0,
+  }
+}
+
+describe('interleaveBySource', () => {
+  it('round-robins articles from different sources', () => {
+    const articles = [
+      makeInterleavedArticle('a1', 'src-a'),
+      makeInterleavedArticle('a2', 'src-a'),
+      makeInterleavedArticle('a3', 'src-a'),
+      makeInterleavedArticle('b1', 'src-b'),
+      makeInterleavedArticle('c1', 'src-c'),
+    ]
+
+    const result = interleaveBySource(articles)
+    const ids = result.map((a) => a.id)
+
+    // First round: one from each source
+    expect(ids[0]).toBe('a1')
+    expect(ids[1]).toBe('b1')
+    expect(ids[2]).toBe('c1')
+    // Second round: only src-a has remaining
+    expect(ids[3]).toBe('a2')
+    // Third round
+    expect(ids[4]).toBe('a3')
+  })
+
+  it('returns empty array for empty input', () => {
+    expect(interleaveBySource([])).toEqual([])
+  })
+
+  it('returns same array for single-source input', () => {
+    const articles = [
+      makeInterleavedArticle('a1', 'src-a'),
+      makeInterleavedArticle('a2', 'src-a'),
+    ]
+
+    const result = interleaveBySource(articles)
+
+    expect(result.map((a) => a.id)).toEqual(['a1', 'a2'])
+  })
+
+  it('preserves all articles without duplication', () => {
+    const articles = [
+      makeInterleavedArticle('a1', 'src-a'),
+      makeInterleavedArticle('a2', 'src-a'),
+      makeInterleavedArticle('b1', 'src-b'),
+      makeInterleavedArticle('b2', 'src-b'),
+      makeInterleavedArticle('c1', 'src-c'),
+    ]
+
+    const result = interleaveBySource(articles)
+
+    expect(result).toHaveLength(5)
+    const ids = new Set(result.map((a) => a.id))
+    expect(ids.size).toBe(5)
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/*  parseVector                                                        */
+/* ------------------------------------------------------------------ */
+
+describe('parseVector', () => {
+  it('returns array input unchanged', () => {
+    const v = [1, 2, 3]
+    expect(parseVector(v)).toBe(v)
+  })
+
+  it('parses JSON string to number array', () => {
+    expect(parseVector('[1,2,3]')).toEqual([1, 2, 3])
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/*  Constants — env-configurable defaults                              */
+/* ------------------------------------------------------------------ */
+
+describe('clustering constants', () => {
+  it('exports SIMILARITY_THRESHOLD with expected default', () => {
+    // Default was lowered from 0.72 to 0.70 for better cross-source matching
+    expect(SIMILARITY_THRESHOLD).toBe(0.70)
+  })
+
+  it('exports SPLIT_THRESHOLD with expected default', () => {
+    expect(SPLIT_THRESHOLD).toBe(0.60)
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/*  Centroid recomputation after Pass 1 — behavioral validation        */
+/* ------------------------------------------------------------------ */
+
+describe('centroid recomputation (behavioral)', () => {
+  it('computeCentroid correctly updates when new articles are added to a story', () => {
+    // Simulates the centroid recomputation that happens in persistPass1Assignments.
+    // Initial story centroid: single article embedding
+    const initialEmbedding = [1.0, 0.0, 0.0]
+    const initialCentroid = computeCentroid([initialEmbedding])
+    expect(initialCentroid).toEqual([1.0, 0.0, 0.0])
+
+    // After Pass 1 assigns a new article, we recompute from all embeddings
+    const newArticleEmbedding = [0.8, 0.6, 0.0]
+    const recomputedCentroid = computeCentroid([initialEmbedding, newArticleEmbedding])
+
+    // The centroid should shift to incorporate the new article
+    expect(recomputedCentroid[0]).toBeCloseTo(0.9)
+    expect(recomputedCentroid[1]).toBeCloseTo(0.3)
+    expect(recomputedCentroid[2]).toBeCloseTo(0.0)
+
+    // The recomputed centroid should be more similar to the new article
+    // than the original singleton centroid was
+    const simWithOldCentroid = cosineSimilarity(newArticleEmbedding, initialCentroid)
+    const simWithNewCentroid = cosineSimilarity(newArticleEmbedding, recomputedCentroid)
+    expect(simWithNewCentroid).toBeGreaterThan(simWithOldCentroid)
+  })
+
+  it('centroid drift worsens matching when not recomputed (baseline)', () => {
+    // Story starts as singleton: embedding pointing strongly in x
+    const article1 = [1.0, 0.0]
+    // Second article joins via Pass 1: slightly different angle
+    const article2 = [0.9, 0.44]
+
+    const stalecentroid = computeCentroid([article1])
+    const freshCentroid = computeCentroid([article1, article2])
+
+    // Third article should match this story: similar direction to article2
+    const article3 = [0.85, 0.53]
+
+    const staleMatch = cosineSimilarity(article3, stalecentroid)
+    const freshMatch = cosineSimilarity(article3, freshCentroid)
+
+    // Fresh centroid gives a higher similarity for the related article
+    expect(freshMatch).toBeGreaterThan(staleMatch)
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/*  recomputeStoryCentroid — error path coverage                       */
+/* ------------------------------------------------------------------ */
+
+describe('recomputeStoryCentroid', () => {
+  it('pushes to errors when select fails', async () => {
+    const errors: string[] = []
+    const storyMap = new Map()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = {
+      from: vi.fn(() => ({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            not: vi.fn().mockReturnValue({
+              returns: vi.fn().mockResolvedValue({
+                data: null,
+                error: { message: 'connection timeout' },
+              }),
+            }),
+          }),
+        }),
+      })),
+    } as any
+
+    await recomputeStoryCentroid(client, 'story-1', storyMap, errors)
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('connection timeout')
+    expect(errors[0]).toContain('story-1')
+  })
+
+  it('pushes to errors when update fails', async () => {
+    const errors: string[] = []
+    const storyMap = new Map()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === 'articles') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                not: vi.fn().mockReturnValue({
+                  returns: vi.fn().mockResolvedValue({
+                    data: [{ embedding: [1, 0] }, { embedding: [0, 1] }],
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          }
+        }
+        return {
+          update: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({
+              error: { message: 'permission denied' },
+            }),
+          }),
+        }
+      }),
+    } as any
+
+    await recomputeStoryCentroid(client, 'story-1', storyMap, errors)
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('permission denied')
+  })
+
+  it('does not update storyMap when DB update fails', async () => {
+    const errors: string[] = []
+    const storyMap = new Map([
+      ['story-1', { centroid: [1, 0], articleIds: ['a1'] }],
+    ])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === 'articles') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                not: vi.fn().mockReturnValue({
+                  returns: vi.fn().mockResolvedValue({
+                    data: [{ embedding: [1, 0] }, { embedding: [0, 1] }],
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          }
+        }
+        return {
+          update: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({
+              error: { message: 'write failed' },
+            }),
+          }),
+        }
+      }),
+    } as any
+
+    await recomputeStoryCentroid(client, 'story-1', storyMap, errors)
+
+    expect(storyMap.get('story-1')!.centroid).toEqual([1, 0])
+  })
+
+  it('pushes to errors when update matches zero rows (story deleted)', async () => {
+    const errors: string[] = []
+    const storyMap = new Map([
+      ['story-1', { centroid: [1, 0], articleIds: ['a1'] }],
+    ])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === 'articles') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                not: vi.fn().mockReturnValue({
+                  returns: vi.fn().mockResolvedValue({
+                    data: [{ embedding: [1, 0] }, { embedding: [0, 1] }],
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          }
+        }
+        return {
+          update: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({
+              error: null,
+              count: 0,
+            }),
+          }),
+        }
+      }),
+    } as any
+
+    await recomputeStoryCentroid(client, 'story-1', storyMap, errors)
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('zero rows')
+    expect(errors[0]).toContain('story-1')
+    // storyMap should not be updated
+    expect(storyMap.get('story-1')!.centroid).toEqual([1, 0])
+  })
+
+  it('catches thrown exceptions from parseVector and pushes to errors', async () => {
+    const errors: string[] = []
+    const storyMap = new Map()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = {
+      from: vi.fn(() => ({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            not: vi.fn().mockReturnValue({
+              returns: vi.fn().mockResolvedValue({
+                data: [{ embedding: 'not-valid-json' }, { embedding: [0, 1] }],
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      })),
+    } as any
+
+    await recomputeStoryCentroid(client, 'story-1', storyMap, errors)
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('story-1')
+  })
+
+  it('catches rejected Supabase calls and pushes to errors', async () => {
+    const errors: string[] = []
+    const storyMap = new Map()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = {
+      from: vi.fn(() => ({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            not: vi.fn().mockReturnValue({
+              returns: vi.fn().mockRejectedValue(new Error('network failure')),
+            }),
+          }),
+        }),
+      })),
+    } as any
+
+    await recomputeStoryCentroid(client, 'story-1', storyMap, errors)
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('network failure')
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/*  Threshold boundary behavior at 0.70                                */
+/* ------------------------------------------------------------------ */
+
+describe('threshold boundary behavior at 0.70', () => {
+  function vectorWithSimilarity(sim: number): number[] {
+    const theta = Math.acos(sim)
+    return [Math.cos(theta), Math.sin(theta)]
+  }
+
+  it('rejects a pair below threshold (0.69)', () => {
+    const clusters = normalizeClusters(
+      clusterUnmatchedArticles(
+        [makeArticle('a', [1, 0]), makeArticle('b', vectorWithSimilarity(0.69))],
+        0.70
+      )
+    )
+    expect(clusters).toEqual([['a'], ['b']])
+  })
+
+  it('joins a pair at threshold (0.70)', () => {
+    const clusters = normalizeClusters(
+      clusterUnmatchedArticles(
+        [makeArticle('a', [1, 0]), makeArticle('b', vectorWithSimilarity(0.70))],
+        0.70
+      )
+    )
+    expect(clusters).toEqual([['a', 'b']])
+  })
+
+  it('joins a pair above threshold (0.705)', () => {
+    const clusters = normalizeClusters(
+      clusterUnmatchedArticles(
+        [makeArticle('a', [1, 0]), makeArticle('b', vectorWithSimilarity(0.705))],
+        0.70
+      )
+    )
+    expect(clusters).toEqual([['a', 'b']])
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/*  Pass 1 threshold boundary — matchArticleViaJs                      */
+/* ------------------------------------------------------------------ */
+
+describe('matchArticleViaJs threshold boundary at 0.70', () => {
+  function vectorWithSimilarity(sim: number): number[] {
+    const theta = Math.acos(sim)
+    return [Math.cos(theta), Math.sin(theta)]
+  }
+
+  it('rejects match below threshold (0.69)', () => {
+    const storyMap = new Map([
+      ['story-1', { centroid: vectorWithSimilarity(0.69), articleIds: [] }],
+    ])
+    // Query embedding is [1, 0]; story centroid has cosine sim 0.69 to it
+    const result = matchArticleViaJs([1, 0], storyMap, 0.70)
+    expect(result).toBeNull()
+  })
+
+  it('accepts match at threshold (0.70)', () => {
+    const storyMap = new Map([
+      ['story-1', { centroid: vectorWithSimilarity(0.70), articleIds: [] }],
+    ])
+    const result = matchArticleViaJs([1, 0], storyMap, 0.70)
+    expect(result).not.toBeNull()
+    expect(result!.storyId).toBe('story-1')
+    expect(result!.similarity).toBeCloseTo(0.70, 2)
+  })
+
+  it('accepts match above threshold (0.705)', () => {
+    const storyMap = new Map([
+      ['story-1', { centroid: vectorWithSimilarity(0.705), articleIds: [] }],
+    ])
+    const result = matchArticleViaJs([1, 0], storyMap, 0.70)
+    expect(result).not.toBeNull()
+    expect(result!.storyId).toBe('story-1')
+  })
+
+  it('picks the best match among multiple stories', () => {
+    const storyMap = new Map([
+      ['story-low', { centroid: vectorWithSimilarity(0.71), articleIds: [] }],
+      ['story-high', { centroid: vectorWithSimilarity(0.90), articleIds: [] }],
+    ])
+    const result = matchArticleViaJs([1, 0], storyMap, 0.70)
+    expect(result).not.toBeNull()
+    expect(result!.storyId).toBe('story-high')
   })
 })

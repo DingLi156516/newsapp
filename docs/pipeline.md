@@ -70,7 +70,7 @@ The most complex stage. Groups articles by cosine similarity into story clusters
 
 | Name | Value | Purpose |
 |------|-------|---------|
-| `SIMILARITY_THRESHOLD` | 0.72 | Minimum cosine similarity to join a cluster |
+| `SIMILARITY_THRESHOLD` | 0.70 | Minimum cosine similarity to join a cluster |
 | `STANDARD_MATCH_WINDOW_HOURS` | 168 (7 days) | Only match against stories updated within this window |
 | `ARTICLE_EXPIRY_DAYS` | 7 | Articles older than this are swept to `expired` |
 | `MAX_CLUSTERING_ATTEMPTS` | 3 | Singletons promoted to stories after this many passes |
@@ -80,9 +80,9 @@ The most complex stage. Groups articles by cosine similarity into story clusters
 
 | Name | Value | Env Override | Purpose |
 |------|-------|-------------|---------|
-| `SIMILARITY_THRESHOLD` | 0.72 | `CLUSTERING_SIMILARITY_THRESHOLD` | Minimum cosine similarity to join a cluster |
+| `SIMILARITY_THRESHOLD` | 0.70 | `CLUSTERING_SIMILARITY_THRESHOLD` | Minimum cosine similarity to join a cluster |
 | `SPLIT_THRESHOLD` | 0.60 | `CLUSTERING_SPLIT_THRESHOLD` | Minimum similarity for recluster split detection |
-| `PGVECTOR_CANDIDATE_COUNT` | 5 | `CLUSTERING_CANDIDATE_COUNT` | pgvector RPC top-K candidates |
+| `PGVECTOR_CANDIDATE_COUNT` | 15 | `CLUSTERING_CANDIDATE_COUNT` | pgvector RPC top-K candidates |
 | `PGVECTOR_BATCH_SIZE` | 10 | — | Articles per RPC batch in Pass 1 |
 
 ### Algorithm (6 composable stages)
@@ -91,7 +91,7 @@ The most complex stage. Groups articles by cosine similarity into story clusters
 
 2. **claimArticleBatch:** bulk-claim selected articles (`clustering_claimed_at = now`).
 
-3. **matchAgainstExistingStories (Pass 1 — Hybrid pgvector + JS):** For each article, query the `match_story_centroid` RPC for HNSW-accelerated centroid search. Falls back to JS brute-force cosine similarity if RPC is unavailable. If best match >= 0.72, assign article to that story.
+3. **matchAgainstExistingStories (Pass 1 — Hybrid pgvector + JS):** For each article, query the `match_story_centroid` RPC for HNSW-accelerated centroid search. Falls back to JS brute-force cosine similarity if RPC is unavailable. If best match >= 0.70, assign article to that story. After assigning articles, the story's centroid is recomputed from all its article embeddings to prevent centroid drift.
 
 4. **clusterUnmatchedArticles (Pass 2 — Union-find):** Remaining articles are compared pairwise. All pairs above threshold are ranked by similarity descending, then merged via union-find with path compression and union-by-rank. Centroid validation ejects outliers connected only via transitive chaining.
 
@@ -152,9 +152,9 @@ Both phases respect `assembly_claimed_at` TTLs to avoid interfering with concurr
 8. Update story with all generated fields, set final `publication_status`
 9. On error: set `assembly_status = 'failed'`, `publication_status = 'needs_review'`
 
-Claiming is batched. Story assembly runs with bounded concurrency (default 6, env: PIPELINE_ASSEMBLY_CONCURRENCY).
+Claiming is batched. Story assembly runs with bounded concurrency (default 12, env: PIPELINE_ASSEMBLY_CONCURRENCY).
 
-**Batch size:** 25 stories per pass (env: `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`)
+**Batch size:** 50 stories per pass (env: `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`)
 
 ## Process Runner
 

@@ -102,7 +102,7 @@ const DEFAULT_OPTIONS: Required<ProcessPipelineOptions> = {
   assembleTarget: Number(process.env.PIPELINE_PROCESS_ASSEMBLE_TARGET ?? 100),
   embedBatchSize: Number(process.env.PIPELINE_PROCESS_EMBED_BATCH_SIZE ?? 50),
   clusterBatchSize: Number(process.env.PIPELINE_PROCESS_CLUSTER_BATCH_SIZE ?? 75),
-  assembleBatchSize: Number(process.env.PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE ?? 25),
+  assembleBatchSize: Number(process.env.PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE ?? 50),
   timeBudgetMs: process.env.PIPELINE_PROCESS_TIME_BUDGET_MS
     ? Number(process.env.PIPELINE_PROCESS_TIME_BUDGET_MS)
     : 280_000,

@@ -20,9 +20,9 @@ import { ARTICLE_STAGE_CLAIM_TTL_MS, isClaimAvailable } from '@/lib/pipeline/cla
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const SIMILARITY_THRESHOLD = Number(process.env.CLUSTERING_SIMILARITY_THRESHOLD ?? 0.72)
+const SIMILARITY_THRESHOLD = Number(process.env.CLUSTERING_SIMILARITY_THRESHOLD ?? 0.70)
 const SPLIT_THRESHOLD = Number(process.env.CLUSTERING_SPLIT_THRESHOLD ?? 0.60)
-const PGVECTOR_CANDIDATE_COUNT = Number(process.env.CLUSTERING_CANDIDATE_COUNT ?? 5)
+const PGVECTOR_CANDIDATE_COUNT = Number(process.env.CLUSTERING_CANDIDATE_COUNT ?? 15)
 const STANDARD_MATCH_WINDOW_HOURS = 168
 const CLAIM_SCAN_MULTIPLIER = 3
 const MAX_CLUSTERING_ATTEMPTS = 3
@@ -151,6 +151,30 @@ export function shouldStoryBeMatchable(
   return ageMs <= windowMs
 }
 
+function interleaveBySource(articles: EmbeddedArticle[]): EmbeddedArticle[] {
+  const bySource = new Map<string, EmbeddedArticle[]>()
+  for (const article of articles) {
+    const existing = bySource.get(article.source_id) ?? []
+    bySource.set(article.source_id, [...existing, article])
+  }
+
+  const queues = [...bySource.values()]
+  const result: EmbeddedArticle[] = []
+  let remaining = true
+
+  while (remaining) {
+    remaining = false
+    for (const queue of queues) {
+      if (queue.length > 0) {
+        result.push(queue.shift()!)
+        remaining = remaining || queue.length > 0
+      }
+    }
+  }
+
+  return result
+}
+
 /* ------------------------------------------------------------------ */
 /*  DB helpers                                                         */
 /* ------------------------------------------------------------------ */
@@ -249,14 +273,16 @@ async function fetchUnassignedArticles(
     return []
   }
 
-  return fetchedRows
+  const claimable = fetchedRows
     .filter((row) => isClaimAvailable(row.clustering_claimed_at, ARTICLE_STAGE_CLAIM_TTL_MS))
     .filter((row) => row.embedding !== null)
     .map((row) => ({
       ...row,
       embedding: parseVector(row.embedding),
     }))
-    .slice(0, maxArticles)
+
+  // Round-robin interleave by source_id for diversity
+  return interleaveBySource(claimable).slice(0, maxArticles)
 }
 
 /* ------------------------------------------------------------------ */
@@ -533,12 +559,78 @@ function clusterUnmatchedArticles(
 }
 
 /* ------------------------------------------------------------------ */
+/*  Centroid recomputation helper                                      */
+/* ------------------------------------------------------------------ */
+
+export async function recomputeStoryCentroid(
+  client: SupabaseClient<Database>,
+  storyId: string,
+  storyMap: Map<string, StoryTracker>,
+  errors: string[]
+): Promise<number> {
+  const startedAt = Date.now()
+
+  try {
+    const { data: allArticles, error: selectError } = await client
+      .from('articles')
+      .select('embedding')
+      .eq('story_id', storyId)
+      .not('embedding', 'is', null)
+      .returns<{ embedding: string | number[] }[]>()
+
+    if (selectError) {
+      errors.push(
+        `Failed to fetch embeddings for centroid recomputation of story ${storyId}: ${selectError.message}`
+      )
+      return Date.now() - startedAt
+    }
+
+    if (!allArticles || allArticles.length <= 1) {
+      return Date.now() - startedAt
+    }
+
+    const embeddings = allArticles.map((a) => parseVector(a.embedding))
+    const newCentroid = computeCentroid(embeddings)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: updateError, count } = await (client.from('stories') as any)
+      .update({ cluster_centroid: newCentroid }, { count: 'exact' })
+      .eq('id', storyId)
+
+    if (updateError) {
+      errors.push(
+        `Failed to update centroid for story ${storyId}: ${updateError.message}`
+      )
+      return Date.now() - startedAt
+    }
+
+    if (count === 0) {
+      errors.push(
+        `Centroid update for story ${storyId} matched zero rows — story may have been deleted`
+      )
+      return Date.now() - startedAt
+    }
+
+    const story = storyMap.get(storyId)
+    if (story) {
+      storyMap.set(storyId, { ...story, centroid: newCentroid })
+    }
+  } catch (err) {
+    errors.push(
+      `Centroid recomputation failed for story ${storyId}: ${err instanceof Error ? err.message : String(err)}`
+    )
+  }
+
+  return Date.now() - startedAt
+}
+
+/* ------------------------------------------------------------------ */
 /*  Stage 5: Persist Pass 1 assignments                                */
 /* ------------------------------------------------------------------ */
 
 async function persistPass1Assignments(
   client: SupabaseClient<Database>,
   pass1Assignments: Map<string, string[]>,
+  storyMap: Map<string, StoryTracker>,
   unhandledArticleIds: Set<string>,
   storiesNeedingReassembly: Set<string>,
   errors: string[]
@@ -574,6 +666,7 @@ async function persistPass1Assignments(
 
     if (articleIds.length > failedIds.length) {
       storiesNeedingReassembly.add(storyId)
+      dbTimeMs += await recomputeStoryCentroid(client, storyId, storyMap, errors)
     }
   }
 
@@ -876,6 +969,7 @@ export async function clusterArticles(
     const pass1Result = await persistPass1Assignments(
       client,
       pass1Assignments,
+      storyMap,
       unhandledArticleIds,
       storiesNeedingReassembly,
       errors
@@ -929,4 +1023,4 @@ export async function clusterArticles(
 /*  Exports                                                            */
 /* ------------------------------------------------------------------ */
 
-export { cosineSimilarity, computeCentroid, clusterUnmatchedArticles, parseVector, SIMILARITY_THRESHOLD, SPLIT_THRESHOLD }
+export { cosineSimilarity, computeCentroid, clusterUnmatchedArticles, interleaveBySource, matchArticleViaJs, parseVector, SIMILARITY_THRESHOLD, SPLIT_THRESHOLD }

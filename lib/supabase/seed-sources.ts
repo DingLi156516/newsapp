@@ -1,7 +1,7 @@
 /**
  * lib/supabase/seed-sources.ts — Seed data for the sources table.
  *
- * 55 news outlets with bias, factuality, ownership, and RSS feed URLs.
+ * 60 news outlets with bias, factuality, ownership, and RSS feed URLs.
  * Bias/factuality ratings sourced from AllSides and Media Bias/Fact Check.
  *
  * This module is used both to generate the SQL seed migration and as a
@@ -97,6 +97,36 @@ export const seedSources: DbSourceInsert[] = [
     ownership: 'corporate',
     url: 'huffpost.com',
     rss_url: 'https://www.huffpost.com/section/front-page/feed',
+    region: 'us',
+  },
+  {
+    slug: 'slate',
+    name: 'Slate',
+    bias: 'left',
+    factuality: 'high',
+    ownership: 'corporate',
+    url: 'slate.com',
+    rss_url: 'https://slate.com/feeds/all.rss',
+    region: 'us',
+  },
+  {
+    slug: 'mother-jones',
+    name: 'Mother Jones',
+    bias: 'left',
+    factuality: 'high',
+    ownership: 'non-profit',
+    url: 'motherjones.com',
+    rss_url: 'https://www.motherjones.com/feed/',
+    region: 'us',
+  },
+  {
+    slug: 'salon',
+    name: 'Salon',
+    bias: 'left',
+    factuality: 'mixed',
+    ownership: 'corporate',
+    url: 'salon.com',
+    rss_url: 'https://www.salon.com/feed/',
     region: 'us',
   },
 
@@ -211,6 +241,26 @@ export const seedSources: DbSourceInsert[] = [
     ownership: 'corporate',
     url: 'vox.com',
     rss_url: 'https://www.vox.com/rss/index.xml',
+    region: 'us',
+  },
+  {
+    slug: 'propublica',
+    name: 'ProPublica',
+    bias: 'lean-left',
+    factuality: 'very-high',
+    ownership: 'non-profit',
+    url: 'propublica.org',
+    rss_url: 'https://feeds.propublica.org/propublica/main',
+    region: 'us',
+  },
+  {
+    slug: 'the-american-prospect',
+    name: 'The American Prospect',
+    bias: 'lean-left',
+    factuality: 'high',
+    ownership: 'non-profit',
+    url: 'prospect.org',
+    rss_url: 'https://prospect.org/api/rss/content.rss',
     region: 'us',
   },
 
