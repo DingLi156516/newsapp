@@ -64,8 +64,8 @@ describe('POST /api/admin/pipeline/trigger', () => {
     const { embedUnembeddedArticles } = await import('@/lib/ai/embeddings')
     vi.mocked(embedUnembeddedArticles).mockReset()
     vi.mocked(embedUnembeddedArticles)
-      .mockResolvedValueOnce({ totalProcessed: 5, claimedArticles: 5, errors: [] })
-      .mockResolvedValue({ totalProcessed: 0, claimedArticles: 0, errors: [] })
+      .mockResolvedValueOnce({ totalProcessed: 5, claimedArticles: 5, cacheHits: 0, errors: [] })
+      .mockResolvedValue({ totalProcessed: 0, claimedArticles: 0, cacheHits: 0, errors: [] })
 
     const { clusterArticles } = await import('@/lib/ai/clustering')
     vi.mocked(clusterArticles).mockReset()

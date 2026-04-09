@@ -26,7 +26,7 @@ const PGVECTOR_CANDIDATE_COUNT = Number(process.env.CLUSTERING_CANDIDATE_COUNT ?
 const STANDARD_MATCH_WINDOW_HOURS = 168
 const CLAIM_SCAN_MULTIPLIER = 3
 const MAX_CLUSTERING_ATTEMPTS = 3
-const PGVECTOR_BATCH_SIZE = 10
+const PGVECTOR_BATCH_SIZE = Number(process.env.CLUSTERING_PGVECTOR_BATCH_SIZE ?? 25)
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

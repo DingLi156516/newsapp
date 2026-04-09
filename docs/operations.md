@@ -23,6 +23,9 @@ npm run test:coverage # Coverage report (target ≥80%)
 | `CLUSTERING_SIMILARITY_THRESHOLD` | No | Cosine similarity threshold for clustering (default 0.70) |
 | `CLUSTERING_SPLIT_THRESHOLD` | No | Minimum similarity for recluster split detection (default 0.60) |
 | `CLUSTERING_CANDIDATE_COUNT` | No | pgvector RPC candidate count (default 15) |
+| `CLUSTERING_PGVECTOR_BATCH_SIZE` | No | Articles per RPC batch in clustering Pass 1 (default 25) |
+| `EMBED_BATCH_SIZE` | No | Gemini embedding texts per API call (default 100) |
+| `PIPELINE_CONCURRENT_STAGES` | No | Run embed+cluster in parallel when `true` (default `false`) |
 | `PIPELINE_INGEST_MAX_PER_SOURCE` | No | Max articles per source per ingest run (default 30) |
 | `PIPELINE_ASSEMBLY_CONCURRENCY` | No | Assembly concurrency limit (default 12) |
 | `RESEND_API_KEY` | For digest | Resend email API key (`lib/email/resend-client.ts`) |
@@ -66,12 +69,13 @@ The process runner is backlog-aware, multi-pass, and freshness-first:
 - embed target per invocation defaults to `1500` articles
 - cluster target per invocation defaults to `1500` articles
 - assemble target per invocation defaults to `100` stories
-- default batch sizes: embed `50`, cluster `75`, assemble `50`
+- default batch sizes: embed `200`, cluster `300`, assemble `50`
 - each invocation works in rounds, refreshing backlog between rounds so newly embedded articles can be clustered before more work starts
 - embed reserves time budget for downstream cluster/assembly stages so they are not starved
 - assembly is deferred when a freshness backlog exists **and** the remaining time budget is too small to run both freshness stages and assembly; with `Infinity` budget (admin trigger / local), assembly always runs alongside freshness stages
 - stage summaries include `passes`, `skipped`, and `skipReason` so operators can tell whether a stage had no backlog, no progress, or was held back to protect freshness work
-- env overrides: `PIPELINE_PROCESS_EMBED_TARGET`, `PIPELINE_PROCESS_CLUSTER_TARGET`, `PIPELINE_PROCESS_ASSEMBLE_TARGET`, `PIPELINE_PROCESS_EMBED_BATCH_SIZE`, `PIPELINE_PROCESS_CLUSTER_BATCH_SIZE`, `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`, `PIPELINE_PROCESS_TIME_BUDGET_MS`, `PIPELINE_PROCESS_CLUSTER_RESERVE_MS`, `PIPELINE_PROCESS_ASSEMBLE_RESERVE_MS`
+- concurrent mode: `PIPELINE_CONCURRENT_STAGES=true` runs embed and cluster in `Promise.all` (default: `false`, opt-in)
+- env overrides: `PIPELINE_PROCESS_EMBED_TARGET`, `PIPELINE_PROCESS_CLUSTER_TARGET`, `PIPELINE_PROCESS_ASSEMBLE_TARGET`, `PIPELINE_PROCESS_EMBED_BATCH_SIZE`, `PIPELINE_PROCESS_CLUSTER_BATCH_SIZE`, `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`, `PIPELINE_PROCESS_TIME_BUDGET_MS`, `PIPELINE_PROCESS_CLUSTER_RESERVE_MS`, `PIPELINE_PROCESS_ASSEMBLE_RESERVE_MS`, `PIPELINE_CONCURRENT_STAGES`
 
 Current observability is split across two surfaces:
 - `/api/admin/pipeline` exposes run history with step timings and stage summaries

@@ -540,4 +540,272 @@ describe('runProcessPipeline', () => {
     expect(summary.assembly.skipped).toBe(true)
     expect(summary.assembly.skipReason).toBe('budget_reserved_for_freshness')
   })
+
+  it('reports concurrentMode: false in telemetry by default', async () => {
+    const countBacklog = vi.fn().mockResolvedValue({
+      unembeddedArticles: 0,
+      unclusteredArticles: 0,
+      pendingAssemblyStories: 0,
+      reviewQueueStories: 0,
+      expiredArticles: 0,
+    })
+    const embed = vi.fn()
+    const cluster = vi.fn()
+    const assemble = vi.fn()
+
+    const summary = await runProcessPipeline({
+      countBacklog,
+      embed,
+      cluster,
+      assemble,
+    })
+
+    expect(summary.telemetry.concurrentMode).toBe(false)
+  })
+
+  it('runs embed and cluster concurrently when concurrentStages is true', async () => {
+    let nowMs = 0
+    const callOrder: string[] = []
+    const countBacklog = vi
+      .fn()
+      .mockResolvedValueOnce({
+        unembeddedArticles: 100,
+        unclusteredArticles: 50,
+        pendingAssemblyStories: 5,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+      .mockResolvedValueOnce({
+        unembeddedArticles: 0,
+        unclusteredArticles: 0,
+        pendingAssemblyStories: 5,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+      .mockResolvedValueOnce({
+        unembeddedArticles: 0,
+        unclusteredArticles: 0,
+        pendingAssemblyStories: 0,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+
+    const embed = vi.fn().mockImplementation(async () => {
+      callOrder.push('embed')
+      nowMs += 30_000
+      return { totalProcessed: 100, claimedArticles: 100, cacheHits: 0, errors: [] }
+    })
+    const cluster = vi.fn().mockImplementation(async () => {
+      callOrder.push('cluster')
+      nowMs += 10_000
+      return {
+        newStories: 2,
+        updatedStories: 0,
+        assignedArticles: 50,
+        expiredArticles: 0,
+        promotedSingletons: 0,
+        unmatchedSingletons: 0,
+        errors: [],
+      }
+    })
+    const assemble = vi.fn().mockImplementation(async () => {
+      callOrder.push('assemble')
+      nowMs += 5_000
+      return {
+        storiesProcessed: 5,
+        claimedStories: 5,
+        autoPublished: 3,
+        sentToReview: 2,
+        errors: [],
+      }
+    })
+
+    const summary = await runProcessPipeline(
+      {
+        countBacklog,
+        embed,
+        cluster,
+        assemble,
+        now: () => nowMs,
+      },
+      {
+        embedTarget: 100,
+        clusterTarget: 50,
+        assembleTarget: 5,
+        embedBatchSize: 100,
+        clusterBatchSize: 50,
+        assembleBatchSize: 5,
+        timeBudgetMs: 200_000,
+        concurrentStages: true,
+      }
+    )
+
+    expect(embed).toHaveBeenCalledTimes(1)
+    expect(cluster).toHaveBeenCalledTimes(1)
+    expect(assemble).toHaveBeenCalledTimes(1)
+    expect(summary.telemetry.concurrentMode).toBe(true)
+    expect(summary.embeddings.skipped).toBe(false)
+    expect(summary.clustering.skipped).toBe(false)
+    expect(summary.assembly.skipped).toBe(false)
+
+    // Assembly runs after both embed and cluster
+    const assembleIdx = callOrder.indexOf('assemble')
+    expect(assembleIdx).toBe(2)
+  })
+
+  it('sequential mode unchanged when concurrentStages is false', async () => {
+    let nowMs = 0
+    const callOrder: string[] = []
+    const countBacklog = vi
+      .fn()
+      .mockResolvedValueOnce({
+        unembeddedArticles: 100,
+        unclusteredArticles: 50,
+        pendingAssemblyStories: 0,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+      .mockResolvedValueOnce({
+        unembeddedArticles: 0,
+        unclusteredArticles: 50,
+        pendingAssemblyStories: 0,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+      .mockResolvedValueOnce({
+        unembeddedArticles: 0,
+        unclusteredArticles: 0,
+        pendingAssemblyStories: 0,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+
+    const embed = vi.fn().mockImplementation(async () => {
+      callOrder.push('embed')
+      nowMs += 10_000
+      return { totalProcessed: 100, claimedArticles: 100, cacheHits: 0, errors: [] }
+    })
+    const cluster = vi.fn().mockImplementation(async () => {
+      callOrder.push('cluster')
+      nowMs += 10_000
+      return {
+        newStories: 1,
+        updatedStories: 0,
+        assignedArticles: 50,
+        expiredArticles: 0,
+        promotedSingletons: 0,
+        unmatchedSingletons: 0,
+        errors: [],
+      }
+    })
+    const assemble = vi.fn()
+
+    const summary = await runProcessPipeline(
+      {
+        countBacklog,
+        embed,
+        cluster,
+        assemble,
+        now: () => nowMs,
+      },
+      {
+        embedTarget: 100,
+        clusterTarget: 50,
+        assembleTarget: 0,
+        embedBatchSize: 100,
+        clusterBatchSize: 50,
+        assembleBatchSize: 0,
+        timeBudgetMs: 100_000,
+        concurrentStages: false,
+      }
+    )
+
+    expect(callOrder).toEqual(['embed', 'cluster'])
+    expect(callOrder.indexOf('embed')).toBeLessThan(callOrder.indexOf('cluster'))
+    expect(summary.telemetry.concurrentMode).toBe(false)
+  })
+
+  it('assembly waits for parallel embed+cluster phase to complete', async () => {
+    let nowMs = 0
+    const callOrder: string[] = []
+    const countBacklog = vi
+      .fn()
+      .mockResolvedValueOnce({
+        unembeddedArticles: 50,
+        unclusteredArticles: 50,
+        pendingAssemblyStories: 5,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+      .mockResolvedValueOnce({
+        unembeddedArticles: 0,
+        unclusteredArticles: 0,
+        pendingAssemblyStories: 5,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+      .mockResolvedValueOnce({
+        unembeddedArticles: 0,
+        unclusteredArticles: 0,
+        pendingAssemblyStories: 0,
+        reviewQueueStories: 0,
+        expiredArticles: 0,
+      })
+
+    const embed = vi.fn().mockImplementation(async () => {
+      callOrder.push('embed')
+      nowMs += 20_000
+      return { totalProcessed: 50, claimedArticles: 50, cacheHits: 0, errors: [] }
+    })
+    const cluster = vi.fn().mockImplementation(async () => {
+      callOrder.push('cluster')
+      nowMs += 10_000
+      return {
+        newStories: 1,
+        updatedStories: 0,
+        assignedArticles: 50,
+        expiredArticles: 0,
+        promotedSingletons: 0,
+        unmatchedSingletons: 0,
+        errors: [],
+      }
+    })
+    const assemble = vi.fn().mockImplementation(async () => {
+      callOrder.push('assemble')
+      nowMs += 5_000
+      return {
+        storiesProcessed: 5,
+        claimedStories: 5,
+        autoPublished: 3,
+        sentToReview: 2,
+        errors: [],
+      }
+    })
+
+    await runProcessPipeline(
+      {
+        countBacklog,
+        embed,
+        cluster,
+        assemble,
+        now: () => nowMs,
+      },
+      {
+        embedTarget: 50,
+        clusterTarget: 50,
+        assembleTarget: 5,
+        embedBatchSize: 50,
+        clusterBatchSize: 50,
+        assembleBatchSize: 5,
+        timeBudgetMs: 200_000,
+        concurrentStages: true,
+      }
+    )
+
+    const assembleIdx = callOrder.indexOf('assemble')
+    const embedIdx = callOrder.indexOf('embed')
+    const clusterIdx = callOrder.indexOf('cluster')
+    expect(assembleIdx).toBeGreaterThan(embedIdx)
+    expect(assembleIdx).toBeGreaterThan(clusterIdx)
+  })
 })

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/ai/gemini-client', () => ({
   generateEmbeddingBatch: vi.fn(),
@@ -9,14 +9,34 @@ import { generateEmbeddingBatch } from '@/lib/ai/gemini-client'
 
 const mockGenerateEmbeddingBatch = vi.mocked(generateEmbeddingBatch)
 
-function createMockClient(articles: unknown[] | null, fetchError: unknown = null, updateError: unknown = null) {
+function createMockClient(
+  articles: unknown[] | null,
+  fetchError: unknown = null,
+  updateError: unknown = null,
+  cacheRows: unknown[] = [],
+  cacheError: unknown = null
+) {
   const updateEq = vi.fn().mockResolvedValue({ error: updateError })
   const update = vi.fn().mockReturnValue({ eq: updateEq })
+
+  // Main fetch chain: select → eq → order → order → limit → returns
   const returns = vi.fn().mockResolvedValue({ data: articles, error: fetchError })
-  const limit = vi.fn().mockReturnValue({ returns })
-  const order = vi.fn().mockReturnValue({ order: vi.fn().mockReturnValue({ limit }) })
-  const eq = vi.fn().mockReturnValue({ order })
-  const select = vi.fn().mockReturnValue({ eq })
+  const fetchLimit = vi.fn().mockReturnValue({ returns })
+  const order2 = vi.fn().mockReturnValue({ limit: fetchLimit })
+  const order1 = vi.fn().mockReturnValue({ order: order2 })
+  const fetchEq = vi.fn().mockReturnValue({ order: order1 })
+
+  // Cache lookup chain: select → in → eq → not (returns data directly, no limit)
+  const cacheNot = vi.fn().mockResolvedValue({ data: cacheRows, error: cacheError })
+  const cacheEq = vi.fn().mockReturnValue({ not: cacheNot })
+  const cacheIn = vi.fn().mockReturnValue({ eq: cacheEq })
+
+  const select = vi.fn((fields: string) => {
+    if (fields === 'title_fingerprint, title, description, embedding') {
+      return { in: cacheIn }
+    }
+    return { eq: fetchEq }
+  })
 
   return {
     from: vi.fn(() => ({
@@ -24,8 +44,9 @@ function createMockClient(articles: unknown[] | null, fetchError: unknown = null
       update,
     })),
     _update: update,
-    _selectEq: eq,
-    _limit: limit,
+    _selectEq: fetchEq,
+    _limit: fetchLimit,
+    _cacheIn: cacheIn,
   }
 }
 
@@ -47,8 +68,8 @@ describe('embedUnembeddedArticles', () => {
     ] as never)
 
     const client = createMockClient([
-      { id: 'a1', title: 'First', description: 'One' },
-      { id: 'a2', title: 'Second', description: 'Two' },
+      { id: 'a1', title: 'First', description: 'One', title_fingerprint: null },
+      { id: 'a2', title: 'Second', description: 'Two', title_fingerprint: null },
     ])
 
     const result = await embedUnembeddedArticles(client as never, 2)
@@ -57,6 +78,7 @@ describe('embedUnembeddedArticles', () => {
     expect(client._limit).toHaveBeenCalledWith(6)
     expect(result.totalProcessed).toBe(2)
     expect(result.claimedArticles).toBe(2)
+    expect(result.cacheHits).toBe(0)
     expect(result.errors).toEqual([])
     expect(client._update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -80,6 +102,7 @@ describe('embedUnembeddedArticles', () => {
     expect(result).toEqual(expect.objectContaining({
       totalProcessed: 0,
       claimedArticles: 0,
+      cacheHits: 0,
       errors: [],
     }))
   })
@@ -95,18 +118,21 @@ describe('embedUnembeddedArticles', () => {
         id: 'a1',
         title: 'First',
         description: 'One',
+        title_fingerprint: null,
         embedding_claimed_at: null,
       },
       {
         id: 'a2',
         title: 'Second',
         description: 'Two',
+        title_fingerprint: null,
         embedding_claimed_at: '2026-03-22T11:20:00Z',
       },
       {
         id: 'a3',
         title: 'Fresh Claim',
         description: 'Three',
+        title_fingerprint: null,
         embedding_claimed_at: '2026-03-22T11:50:00Z',
       },
     ])
@@ -115,6 +141,7 @@ describe('embedUnembeddedArticles', () => {
 
     expect(result.totalProcessed).toBe(2)
     expect(result.claimedArticles).toBe(2)
+    expect(result.cacheHits).toBe(0)
     expect(mockGenerateEmbeddingBatch).toHaveBeenCalledWith(['First — One', 'Second — Two'])
   })
 
@@ -126,12 +153,14 @@ describe('embedUnembeddedArticles', () => {
         id: 'a1',
         title: 'First',
         description: 'One',
+        title_fingerprint: null,
         embedding_claimed_at: null,
       },
       {
         id: 'a2',
         title: 'Second',
         description: 'Two',
+        title_fingerprint: null,
         embedding_claimed_at: null,
       },
     ])
@@ -141,6 +170,7 @@ describe('embedUnembeddedArticles', () => {
     expect(result).toEqual({
       totalProcessed: 0,
       claimedArticles: 2,
+      cacheHits: 0,
       errors: ['Batch embedding failed: provider unavailable'],
       dbTimeMs: 0,
       modelTimeMs: 0,
@@ -151,5 +181,173 @@ describe('embedUnembeddedArticles', () => {
         [expect.objectContaining({ embedding_claimed_at: null })],
       ])
     )
+  })
+
+  it('uses cached embeddings when fingerprint AND description match', async () => {
+    mockGenerateEmbeddingBatch.mockResolvedValue([
+      { embedding: [0.5, 0.6] },
+    ] as never)
+
+    const cachedEmbedding = [0.1, 0.2, 0.3]
+    const client = createMockClient(
+      [
+        {
+          id: 'a1',
+          title: 'Wire Story',
+          description: 'AP wire',
+          title_fingerprint: 'fp-abc',
+          embedding_claimed_at: null,
+        },
+        {
+          id: 'a2',
+          title: 'Unique Story',
+          description: 'Original',
+          title_fingerprint: 'fp-xyz',
+          embedding_claimed_at: null,
+        },
+      ],
+      null,
+      null,
+      [{ title_fingerprint: 'fp-abc', title: 'Wire Story', description: 'AP wire', embedding: cachedEmbedding }]
+    )
+
+    const result = await embedUnembeddedArticles(client as never, 2)
+
+    expect(result.totalProcessed).toBe(2)
+    expect(result.cacheHits).toBe(1)
+    expect(mockGenerateEmbeddingBatch).toHaveBeenCalledWith(['Unique Story — Original'])
+  })
+
+  it('rejects cache hit when fingerprint matches but description differs', async () => {
+    mockGenerateEmbeddingBatch.mockResolvedValue([
+      { embedding: [0.5, 0.6] },
+    ] as never)
+
+    const client = createMockClient(
+      [
+        {
+          id: 'a1',
+          title: 'Wire Story',
+          description: 'Updated description',
+          title_fingerprint: 'fp-abc',
+          embedding_claimed_at: null,
+        },
+      ],
+      null,
+      null,
+      [{ title_fingerprint: 'fp-abc', title: 'Wire Story', description: 'Original description', embedding: [0.1, 0.2] }]
+    )
+
+    const result = await embedUnembeddedArticles(client as never, 1)
+
+    expect(result.totalProcessed).toBe(1)
+    expect(result.cacheHits).toBe(0)
+    expect(mockGenerateEmbeddingBatch).toHaveBeenCalledWith(['Wire Story — Updated description'])
+  })
+
+  it('skips Gemini entirely when all articles have exact cache matches', async () => {
+    const cachedEmbedding = [0.1, 0.2, 0.3]
+    const client = createMockClient(
+      [
+        {
+          id: 'a1',
+          title: 'Wire Story',
+          description: 'AP',
+          title_fingerprint: 'fp-abc',
+          embedding_claimed_at: null,
+        },
+        {
+          id: 'a2',
+          title: 'Wire Story',
+          description: 'AP',
+          title_fingerprint: 'fp-abc',
+          embedding_claimed_at: null,
+        },
+      ],
+      null,
+      null,
+      [{ title_fingerprint: 'fp-abc', title: 'Wire Story', description: 'AP', embedding: cachedEmbedding }]
+    )
+
+    const result = await embedUnembeddedArticles(client as never, 2)
+
+    expect(result.totalProcessed).toBe(2)
+    expect(result.cacheHits).toBe(2)
+    expect(mockGenerateEmbeddingBatch).not.toHaveBeenCalled()
+  })
+
+  it('handles mixed batch with some cache hits and some misses', async () => {
+    mockGenerateEmbeddingBatch.mockResolvedValue([
+      { embedding: [0.7, 0.8] },
+      { embedding: [0.9, 1.0] },
+    ] as never)
+
+    const client = createMockClient(
+      [
+        {
+          id: 'a1',
+          title: 'Cached',
+          description: 'Cached desc',
+          title_fingerprint: 'fp-cached',
+          embedding_claimed_at: null,
+        },
+        {
+          id: 'a2',
+          title: 'No fingerprint',
+          description: 'Desc',
+          title_fingerprint: null,
+          embedding_claimed_at: null,
+        },
+        {
+          id: 'a3',
+          title: 'Uncached',
+          description: 'Uncached desc',
+          title_fingerprint: 'fp-miss',
+          embedding_claimed_at: null,
+        },
+      ],
+      null,
+      null,
+      [{ title_fingerprint: 'fp-cached', title: 'Cached', description: 'Cached desc', embedding: [0.1, 0.2] }]
+    )
+
+    const result = await embedUnembeddedArticles(client as never, 3)
+
+    expect(result.cacheHits).toBe(1)
+    expect(result.totalProcessed).toBe(3)
+    expect(mockGenerateEmbeddingBatch).toHaveBeenCalledTimes(1)
+    expect(mockGenerateEmbeddingBatch).toHaveBeenCalledWith([
+      'No fingerprint — Desc',
+      'Uncached — Uncached desc',
+    ])
+  })
+
+  it('surfaces cache lookup errors in the result instead of swallowing them', async () => {
+    mockGenerateEmbeddingBatch.mockResolvedValue([
+      { embedding: [0.1, 0.2] },
+    ] as never)
+
+    const client = createMockClient(
+      [
+        {
+          id: 'a1',
+          title: 'Story',
+          description: 'Desc',
+          title_fingerprint: 'fp-x',
+          embedding_claimed_at: null,
+        },
+      ],
+      null,
+      null,
+      [],
+      { message: 'index missing' }
+    )
+
+    const result = await embedUnembeddedArticles(client as never, 1)
+
+    expect(result.totalProcessed).toBe(1)
+    expect(result.cacheHits).toBe(0)
+    expect(result.errors).toEqual(['Embedding cache lookup failed: index missing'])
+    expect(mockGenerateEmbeddingBatch).toHaveBeenCalledTimes(1)
   })
 })

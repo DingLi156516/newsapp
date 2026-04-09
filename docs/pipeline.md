@@ -52,13 +52,16 @@ story_id = null
 1. Fetch articles where `is_embedded = false`, scanning 3x the batch size
 2. Filter to rows with available claims (claim TTL = 30 min)
 3. Claim selected articles (`embedding_claimed_at = now`)
-4. Generate embeddings via Gemini `gemini-embedding-001` in batches of 20
+4. Look up cached embeddings by `title_fingerprint` — syndicated wire stories (AP/Reuters) that share titles across sources reuse existing embeddings instead of calling Gemini
+5. Generate embeddings via Gemini `gemini-embedding-001` in batches of 100 (env: `EMBED_BATCH_SIZE`) for cache-miss articles only
    - Input: `title + description`
    - Output: 768-dimensional vector
-5. Update each article: store `embedding`, set `is_embedded = true`
-6. Clear claim on success; clear on error for retry
+6. Update each article: store `embedding`, set `is_embedded = true`
+7. Clear claim on success; clear on error for retry
 
-**Batch size:** 50 articles per pass (env: `PIPELINE_PROCESS_EMBED_BATCH_SIZE`)
+Result includes `cacheHits` count for observability.
+
+**Batch size:** 200 articles per pass (env: `PIPELINE_PROCESS_EMBED_BATCH_SIZE`)
 
 ## Stage 3: Cluster
 
@@ -83,7 +86,7 @@ The most complex stage. Groups articles by cosine similarity into story clusters
 | `SIMILARITY_THRESHOLD` | 0.70 | `CLUSTERING_SIMILARITY_THRESHOLD` | Minimum cosine similarity to join a cluster |
 | `SPLIT_THRESHOLD` | 0.60 | `CLUSTERING_SPLIT_THRESHOLD` | Minimum similarity for recluster split detection |
 | `PGVECTOR_CANDIDATE_COUNT` | 15 | `CLUSTERING_CANDIDATE_COUNT` | pgvector RPC top-K candidates |
-| `PGVECTOR_BATCH_SIZE` | 10 | — | Articles per RPC batch in Pass 1 |
+| `PGVECTOR_BATCH_SIZE` | 25 | `CLUSTERING_PGVECTOR_BATCH_SIZE` | Articles per RPC batch in Pass 1 |
 
 ### Algorithm (6 composable stages)
 
@@ -91,7 +94,7 @@ The most complex stage. Groups articles by cosine similarity into story clusters
 
 2. **claimArticleBatch:** bulk-claim selected articles (`clustering_claimed_at = now`).
 
-3. **matchAgainstExistingStories (Pass 1 — Hybrid pgvector + JS):** For each article, query the `match_story_centroid` RPC for HNSW-accelerated centroid search. Falls back to JS brute-force cosine similarity if RPC is unavailable. If best match >= 0.70, assign article to that story. After assigning articles, the story's centroid is recomputed from all its article embeddings to prevent centroid drift.
+3. **matchAgainstExistingStories (Pass 1 — Hybrid pgvector + JS):** For each article, query the `match_story_centroid` RPC for HNSW-accelerated centroid search (`hnsw.ef_search = 80` for improved recall). Falls back to JS brute-force cosine similarity if RPC is unavailable. If best match >= 0.70, assign article to that story. After assigning articles, the story's centroid is recomputed from all its article embeddings to prevent centroid drift.
 
 4. **clusterUnmatchedArticles (Pass 2 — Union-find):** Remaining articles are compared pairwise. All pairs above threshold are ranked by similarity descending, then merged via union-find with path compression and union-by-rank. Centroid validation ejects outliers connected only via transitive chaining.
 
@@ -117,7 +120,7 @@ Run 3: attempts 2→3, promoted to single-article story
 
 The process runner's `clusterMadeProgress` function intentionally does **not** count singletons as progress. This prevents the loop from re-running clustering on the same articles within a single invocation, which would burn all 3 attempts immediately.
 
-**Batch size:** 75 articles per pass (env: `PIPELINE_PROCESS_CLUSTER_BATCH_SIZE`)
+**Batch size:** 300 articles per pass (env: `PIPELINE_PROCESS_CLUSTER_BATCH_SIZE`)
 
 ## Re-clustering Maintenance
 
@@ -179,6 +182,10 @@ while (time budget remaining) {
 ```
 
 Each iteration attempts all three stages in order. The loop continues as long as at least one stage made progress. Stages are skipped when their backlog is empty or time budget is insufficient.
+
+### Concurrent Mode
+
+When `PIPELINE_CONCURRENT_STAGES=true` (default: `false`), embed and cluster run in `Promise.all` within each round, then assembly runs after both complete. This is safe because they operate on disjoint article sets (`is_embedded=false` vs `is_embedded=true AND story_id IS NULL`). Claims provide row-level isolation. In concurrent mode, embed skips the time-budget reserve check since cluster runs in parallel rather than after.
 
 ### Time Budget
 
