@@ -38,6 +38,8 @@ function makeSource(overrides: Partial<DbSource> = {}): DbSource {
     factuality_allsides: null,
     bias_override: false,
     bias_sources_synced_at: '2026-04-01T00:00:00Z',
+    source_type: 'rss',
+    ingestion_config: {},
     ...overrides,
   }
 }

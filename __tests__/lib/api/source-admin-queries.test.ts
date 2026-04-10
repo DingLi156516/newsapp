@@ -56,6 +56,8 @@ const mockSource = {
   factuality_allsides: null,
   bias_override: false,
   bias_sources_synced_at: null,
+  source_type: 'rss',
+  ingestion_config: {},
 }
 
 describe('queryAdminSources', () => {
@@ -72,7 +74,7 @@ describe('queryAdminSources', () => {
   it('queries sources with default parameters', async () => {
     chain.range.mockResolvedValue({ data: [mockSource], count: 1, error: null })
 
-    const result = await queryAdminSources(client, { page: 1, limit: 50, is_active: 'all' })
+    const result = await queryAdminSources(client, { page: 1, limit: 50, is_active: 'all', source_type: 'all' })
 
     expect(client.from).toHaveBeenCalledWith('sources')
     expect(chain.select).toHaveBeenCalled()
@@ -84,7 +86,7 @@ describe('queryAdminSources', () => {
   it('applies search filter', async () => {
     chain.range.mockResolvedValue({ data: [], count: 0, error: null })
 
-    await queryAdminSources(client, { search: 'cnn', page: 1, limit: 50, is_active: 'all' })
+    await queryAdminSources(client, { search: 'cnn', page: 1, limit: 50, is_active: 'all', source_type: 'all' })
 
     expect(chain.or).toHaveBeenCalledWith('name.ilike.%cnn%,slug.ilike.%cnn%')
   })
@@ -92,7 +94,7 @@ describe('queryAdminSources', () => {
   it('escapes special characters in search to prevent PostgREST injection', async () => {
     chain.range.mockResolvedValue({ data: [], count: 0, error: null })
 
-    await queryAdminSources(client, { search: 'a%b,c.d', page: 1, limit: 50, is_active: 'all' })
+    await queryAdminSources(client, { search: 'a%b,c.d', page: 1, limit: 50, is_active: 'all', source_type: 'all' })
 
     expect(chain.or).toHaveBeenCalledWith('name.ilike.%a\\%b\\,c\\.d%,slug.ilike.%a\\%b\\,c\\.d%')
   })
@@ -100,7 +102,7 @@ describe('queryAdminSources', () => {
   it('applies bias filter', async () => {
     chain.range.mockResolvedValue({ data: [], count: 0, error: null })
 
-    await queryAdminSources(client, { bias: 'left', page: 1, limit: 50, is_active: 'all' })
+    await queryAdminSources(client, { bias: 'left', page: 1, limit: 50, is_active: 'all', source_type: 'all' })
 
     expect(chain.eq).toHaveBeenCalledWith('bias', 'left')
   })
@@ -108,7 +110,7 @@ describe('queryAdminSources', () => {
   it('applies region filter', async () => {
     chain.range.mockResolvedValue({ data: [], count: 0, error: null })
 
-    await queryAdminSources(client, { region: 'uk', page: 1, limit: 50, is_active: 'all' })
+    await queryAdminSources(client, { region: 'uk', page: 1, limit: 50, is_active: 'all', source_type: 'all' })
 
     expect(chain.eq).toHaveBeenCalledWith('region', 'uk')
   })
@@ -116,7 +118,7 @@ describe('queryAdminSources', () => {
   it('applies is_active filter for true', async () => {
     chain.range.mockResolvedValue({ data: [], count: 0, error: null })
 
-    await queryAdminSources(client, { is_active: 'true', page: 1, limit: 50 })
+    await queryAdminSources(client, { is_active: 'true', page: 1, limit: 50, source_type: 'all' })
 
     expect(chain.eq).toHaveBeenCalledWith('is_active', true)
   })
@@ -124,7 +126,7 @@ describe('queryAdminSources', () => {
   it('applies is_active filter for false', async () => {
     chain.range.mockResolvedValue({ data: [], count: 0, error: null })
 
-    await queryAdminSources(client, { is_active: 'false', page: 1, limit: 50 })
+    await queryAdminSources(client, { is_active: 'false', page: 1, limit: 50, source_type: 'all' })
 
     expect(chain.eq).toHaveBeenCalledWith('is_active', false)
   })
@@ -132,7 +134,7 @@ describe('queryAdminSources', () => {
   it('calculates correct offset for pagination', async () => {
     chain.range.mockResolvedValue({ data: [], count: 0, error: null })
 
-    await queryAdminSources(client, { page: 3, limit: 20, is_active: 'all' })
+    await queryAdminSources(client, { page: 3, limit: 20, is_active: 'all', source_type: 'all' })
 
     expect(chain.range).toHaveBeenCalledWith(40, 59)
   })
@@ -140,7 +142,7 @@ describe('queryAdminSources', () => {
   it('throws on query error', async () => {
     chain.range.mockResolvedValue({ data: null, count: null, error: { message: 'DB error' } })
 
-    await expect(queryAdminSources(client, { page: 1, limit: 50, is_active: 'all' })).rejects.toThrow(
+    await expect(queryAdminSources(client, { page: 1, limit: 50, is_active: 'all', source_type: 'all' })).rejects.toThrow(
       'Failed to query admin sources: DB error'
     )
   })
@@ -166,6 +168,8 @@ describe('createSource', () => {
       factuality: 'high',
       ownership: 'corporate',
       region: 'us',
+      source_type: 'rss',
+      ingestion_config: {},
     })
 
     expect(chain.insert).toHaveBeenCalledWith(
@@ -194,6 +198,8 @@ describe('createSource', () => {
       factuality: 'high',
       ownership: 'corporate',
       region: 'us',
+      source_type: 'rss',
+      ingestion_config: {},
     })
 
     expect(chain.insert).toHaveBeenCalledWith(
@@ -214,6 +220,8 @@ describe('createSource', () => {
         factuality: 'high',
         ownership: 'corporate',
         region: 'us',
+        source_type: 'rss',
+        ingestion_config: {},
       })
     ).rejects.toThrow('A source with slug "test-source" already exists')
   })
@@ -231,6 +239,8 @@ describe('createSource', () => {
         factuality: 'high',
         ownership: 'corporate',
         region: 'us',
+        source_type: 'rss',
+        ingestion_config: {},
       })
     ).rejects.toThrow('Failed to create source: relation does not exist')
   })

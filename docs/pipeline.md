@@ -5,13 +5,13 @@ Deep-dive into the news processing pipeline internals. For operational commands 
 ## Overview
 
 ```
-RSS Feeds ──► Ingest ──► Embed ──► Cluster ──► Assemble ──► Publish / Review
-                ↑                                              ↑
-           every 15min                                    every 15min
-           (cron)                                         (cron, 5min offset)
+Sources (RSS + Crawlers + APIs) ──► Ingest ──► Embed ──► Cluster ──► Assemble ──► Publish / Review
+                                      ↑                                              ↑
+                                 every 15min                                    every 15min
+                                 (cron)                                         (cron, 5min offset)
 ```
 
-The pipeline transforms raw RSS articles into published stories through four stages. Each stage is idempotent and uses per-row claim locks rather than global mutexes, allowing concurrent runs without data corruption.
+The pipeline transforms raw articles from multiple source types into published stories through four stages. Each stage is idempotent and uses per-row claim locks rather than global mutexes, allowing concurrent runs without data corruption.
 
 ## Entry Points
 
@@ -26,16 +26,26 @@ The admin trigger accepts a JSON body with `type: 'ingest' | 'process' | 'full'`
 
 ## Stage 1: Ingest
 
-**File:** `lib/rss/ingest.ts`  
+**File:** `lib/ingestion/ingest.ts` (unified orchestrator)  
 **Route:** `app/api/cron/ingest/route.ts` (60s runtime limit)
 
-1. Fetch active sources from `sources` table (`lib/rss/feed-registry.ts`)
-2. Fetch RSS feeds concurrently (5 at a time)
-3. Parse each feed into `ParsedFeedItem[]` (`lib/rss/parser.ts`)
+Sources have a `source_type` column: `'rss'`, `'crawler'`, or `'news_api'`. Each type has its own fetcher module:
+
+| Type | Fetcher | Concurrency | Module |
+|------|---------|-------------|--------|
+| RSS | `lib/ingestion/rss-fetcher.ts` → `lib/rss/parser.ts` | 5 | `lib/rss/` |
+| Crawler | `lib/crawler/fetcher.ts` | 2 | `lib/crawler/` |
+| News API | `lib/news-api/fetcher.ts` | 1 | `lib/news-api/` |
+
+All fetchers produce the same `ParsedFeedItem[]` format, so the downstream pipeline is unchanged.
+
+1. Fetch all active sources from `sources` table, grouped by `source_type` (`lib/ingestion/source-registry.ts`)
+2. For each type: fetch concurrently via registered `SourceFetcher` (`lib/ingestion/fetcher-registry.ts`)
+3. RSS: parse feeds via `rss-parser`; Crawler: discover URLs via cheerio + extract via Readability; News API: query provider with rate limiting
 4. Normalize URLs to canonical form (`lib/rss/normalization.ts`)
 5. Deduplicate against DB by canonical URL + title fingerprint (`lib/rss/dedup.ts`)
-6. Upsert articles in batches of 50, conflict key = `canonical_url`
-7. Update source health: `last_fetch_at`, `last_fetch_status`, `consecutive_failures`
+6. Per-source cap, then upsert articles in batches of 50 (`lib/ingestion/pipeline-helpers.ts`)
+7. Update source health per source (`lib/ingestion/pipeline-helpers.ts`)
 
 New articles are created with:
 ```

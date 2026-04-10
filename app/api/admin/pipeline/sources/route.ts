@@ -28,7 +28,7 @@ export async function GET() {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase.from('sources') as any)
-      .select('id, slug, name, bias, region, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested')
+      .select('id, slug, name, bias, region, source_type, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested')
       .order('consecutive_failures', { ascending: false })
 
     if (error) {

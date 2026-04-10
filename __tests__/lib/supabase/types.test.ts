@@ -39,6 +39,8 @@ describe('Database type interfaces', () => {
       factuality_allsides: null,
       bias_override: false,
       bias_sources_synced_at: null,
+      source_type: 'rss',
+      ingestion_config: {},
     }
     expect(source.id).toBe('123')
     expect(source.slug).toBe('test-source')

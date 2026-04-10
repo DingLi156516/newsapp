@@ -31,12 +31,18 @@ npm run test:coverage # Coverage report (target ≥80%)
 | `RESEND_API_KEY` | For digest | Resend email API key (`lib/email/resend-client.ts`) |
 | `RESEND_FROM_EMAIL` | No | Sender address for digest emails (defaults to `onboarding@resend.dev`) |
 | `NEXT_PUBLIC_APP_URL` | No | App base URL for email links (defaults to `http://localhost:3000`) |
+| `PIPELINE_CRAWLER_CONCURRENCY` | No | Concurrent crawler sources per ingest run (default 2) |
+| `PIPELINE_CRAWLER_TIMEOUT_MS` | No | Per-page fetch timeout for crawler (default 15000ms) |
+| `CRAWLER_USER_AGENT` | No | User agent for crawler requests (default `AxiomNews/1.0 (News Crawler)`) |
+| `NEWSAPI_API_KEY` | For APIs | NewsAPI.org API key |
+| `PIPELINE_NEWSAPI_CONCURRENCY` | No | Concurrent news API sources per ingest run (default 1) |
+| `PIPELINE_RSS_CONCURRENCY` | No | Concurrent RSS sources per ingest run (default 5) |
 Copy `.env.example` to `.env.local` and fill in values. Never commit `.env.local`.
 
 ## Data Pipeline Flow
 
 ```
-RSS Feeds
+News Sources (RSS + Crawlers + APIs)
     │
     ▼
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐

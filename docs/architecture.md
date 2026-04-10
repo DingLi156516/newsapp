@@ -20,14 +20,14 @@ Axiom has two halves:
 ### The Big Picture
 
 ```
-55 News Outlets (RSS feeds)
+News Sources (RSS + Crawlers + APIs)
         │
         ▼
 ┌──────────────────┐     ┌──────────────────┐     ┌─────────────┐
 │  INGEST (15 min) │────▶│  PROCESS (15 min)│────▶│  Supabase   │
 │                  │     │                  │     │  Database   │
-│  Fetch RSS feeds │     │  1. Embed (AI)   │     │             │
-│  Remove dupes    │     │  2. Cluster      │     │  sources    │
+│  RSS / Crawl /   │     │  1. Embed (AI)   │     │             │
+│  API → dedup →   │     │  2. Cluster      │     │  sources    │
 │  Save articles   │     │  3. Assemble (AI)│     │  articles   │
 └──────────────────┘     └──────────────────┘     │  stories    │
                                                    └──────┬──────┘
@@ -55,12 +55,29 @@ Axiom has two halves:
 
 **Endpoint:** `GET /api/cron/ingest`
 
-1. **Feed registry** (`lib/rss/feed-registry.ts`) — asks the database "which outlets are active and have RSS URLs?" Returns all 55.
-2. **RSS parser** (`lib/rss/parser.ts`) — fetches each outlet's RSS feed (with a 10-second timeout so a slow site doesn't jam everything) and extracts: title, URL, description, content, image, and publish date.
-3. **Deduplication** (`lib/rss/dedup.ts`) — checks canonical URLs and legacy raw URLs against the database in batches. Already-seen articles are filtered out before insert.
-4. **Ingestion** (`lib/rss/ingest.ts`) — orchestrates all the above. Fetches 5 feeds at a time (not all 55 at once, to avoid overwhelming connections). Saves new articles via upsert. Reports results: "42 feeds succeeded, 13 failed, 655 new articles."
+The ingestion pipeline supports three source types via `lib/ingestion/`:
 
-Individual feed failures are caught and reported — if Fox News is down, NPR still gets ingested.
+| Source Type | Module | Concurrency | How it works |
+|-------------|--------|-------------|-------------|
+| **RSS** | `lib/rss/` | 5 | Fetches RSS/Atom feeds via `rss-parser` |
+| **Crawler** | `lib/crawler/` | 2 | Discovers article URLs via cheerio CSS selectors, extracts content via `@mozilla/readability` + `linkedom`, respects `robots.txt` |
+| **News API** | `lib/news-api/` | 1 | Queries NewsAPI.org and GDELT, with per-provider rate limiting |
+
+All source types produce the same `ParsedFeedItem` format, so the downstream pipeline is unchanged.
+
+**Ingestion flow:**
+
+1. **Source registry** (`lib/ingestion/source-registry.ts`) — queries all active sources, groups by `source_type`
+2. **Fetcher registry** (`lib/ingestion/fetcher-registry.ts`) — strategy pattern routing to type-specific fetchers
+3. **Source fetchers** — each type's fetcher produces `ParsedFeedItem[]`:
+   - RSS: `lib/rss/parser.ts` — 10s timeout, extracts title/URL/description/content/image/date
+   - Crawler: discovers URLs → extracts via Readability → falls back to CSS selectors
+   - News API: routes to NewsAPI.org or GDELT provider with quota tracking
+4. **Deduplication** (`lib/rss/dedup.ts`) — checks canonical/raw URLs against DB in batches
+5. **Pipeline helpers** (`lib/ingestion/pipeline-helpers.ts`) — per-source cap, batch insert, health updates
+6. **Orchestrator** (`lib/ingestion/ingest.ts`) — `ingestAllSources()` fetches per-type concurrently, dedupes, inserts, returns per-type breakdown
+
+Individual source failures are caught and reported — if one source is down, all others still get ingested.
 
 ### Stage 2: AI Processing (every 15 minutes, staggered)
 
@@ -223,13 +240,38 @@ lib/supabase/    — Database layer (4 files)
                       Database (full type map for SupabaseClient<Database>)
   seed-sources.ts   — One-time script to seed sources table
 
-lib/rss/         — Ingestion pipeline (6 files)
-  feed-registry.ts  — Static list of RSS feeds to ingest
-  parser.ts         — Parses RSS feeds into DbArticleInsert records
+lib/ingestion/   — Unified multi-source ingestion (6 files)
+  types.ts          — Shared interfaces: IngestionSource, SourceFetcher, FetchResult
+  source-registry.ts — Queries all active sources, groups by source_type
+  fetcher-registry.ts — Strategy pattern mapping source type → fetcher
+  pipeline-helpers.ts — Shared helpers: article insert, per-source cap, batch upsert, health updates
+  rss-fetcher.ts    — RSS SourceFetcher adapter (wraps lib/rss/parser.ts)
+  ingest.ts         — Unified orchestrator: ingestAllSources() replaces ingestFeeds()
+
+lib/rss/         — RSS feed parsing (6 files)
+  feed-registry.ts  — RSS-only source registry (convenience wrapper)
+  parser.ts         — Parses RSS feeds via rss-parser, produces ParsedFeedItem[]
   normalization.ts  — URL normalization for dedup (canonical URL extraction)
   dedup.ts          — Detects duplicate articles by canonical URL plus legacy raw URL compatibility checks
-  ingest.ts         — Orchestrates fetch → parse → dedup → insert pipeline
+  ingest.ts         — Legacy RSS-only orchestrator (superseded by lib/ingestion/ingest.ts)
   discover.ts       — RSS auto-discovery: parse HTML <link> tags + probe common feed paths
+
+lib/crawler/     — Web crawler module (7 files)
+  types.ts          — CrawlerConfig, ExtractedArticle interfaces
+  robots.ts         — robots.txt compliance (fetch, cache, check per URL)
+  article-discovery.ts — Discovers article URLs via CSS selectors on list pages
+  article-extractor.ts — Content extraction via Readability + cheerio fallback
+  fetcher.ts        — Crawler SourceFetcher implementation
+  validation.ts     — Zod schema for CrawlerConfig
+  js-renderer.ts    — Optional Playwright wrapper for JS-rendered pages
+
+lib/news-api/    — Third-party news API module (5 files + 2 providers)
+  types.ts          — NewsApiConfig, NewsApiProvider types
+  rate-limiter.ts   — Per-provider quota tracking (NewsAPI 100/day, GDELT 1/sec)
+  fetcher.ts        — News API SourceFetcher implementation
+  validation.ts     — Zod schema for NewsApiConfig
+  providers/newsapi.ts — NewsAPI.org client (top-headlines endpoint)
+  providers/gdelt.ts   — GDELT API client (ArtList mode)
 
 lib/utils/       — Client-side utilities
   csv-parser.ts     — CSV parsing for admin source bulk import (no external deps)

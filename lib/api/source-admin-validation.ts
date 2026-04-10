@@ -7,6 +7,8 @@
 
 import { z } from 'zod'
 import { validatePublicUrl } from '@/lib/rss/discover'
+import { crawlerConfigSchema } from '@/lib/crawler/validation'
+import { newsApiConfigSchema } from '@/lib/news-api/validation'
 
 function isPublicUrl(val: string | null | undefined): boolean {
   if (!val) return true
@@ -29,22 +31,61 @@ const OWNERSHIPS = [
 
 const REGIONS = ['us', 'international', 'uk', 'canada', 'europe'] as const
 
+const SOURCE_TYPES = ['rss', 'crawler', 'news_api'] as const
+
 const emptyToUndefined = (v: unknown) => (v === '' ? undefined : v)
 
-export const createSourceSchema = z.object({
+const baseSourceFields = {
   name: z.string().min(1, 'Name is required').max(200),
   url: z.string().url('Invalid URL').max(500).optional().nullable(),
-  rss_url: z.string().url('Invalid RSS URL').max(500).optional().nullable(),
   bias: z.enum(BIASES),
   factuality: z.enum(FACTUALITIES),
   ownership: z.enum(OWNERSHIPS),
   region: z.enum(REGIONS).optional().default('us'),
   slug: z.string().max(200).regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens').optional(),
-}).refine((d) => isPublicUrl(d.url), { ...publicUrlCheck, path: ['url'] })
+}
+
+const rssCreateSchema = z.object({
+  ...baseSourceFields,
+  source_type: z.literal('rss').optional().default('rss'),
+  rss_url: z.string().url('Invalid RSS URL').max(500).optional().nullable(),
+  ingestion_config: z.record(z.string(), z.unknown()).optional().default({}),
+})
+
+const crawlerCreateSchema = z.object({
+  ...baseSourceFields,
+  source_type: z.literal('crawler'),
+  rss_url: z.string().url('Invalid RSS URL').max(500).optional().nullable(),
+  ingestion_config: crawlerConfigSchema,
+})
+
+const newsApiCreateSchema = z.object({
+  ...baseSourceFields,
+  source_type: z.literal('news_api'),
+  rss_url: z.string().url('Invalid RSS URL').max(500).optional().nullable(),
+  ingestion_config: newsApiConfigSchema,
+})
+
+const createSourceUnion = z.discriminatedUnion('source_type', [
+  rssCreateSchema,
+  crawlerCreateSchema,
+  newsApiCreateSchema,
+])
+
+export const createSourceSchema = createSourceUnion
+  .refine((d) => isPublicUrl(d.url), { ...publicUrlCheck, path: ['url'] })
   .refine((d) => isPublicUrl(d.rss_url), { ...publicUrlCheck, path: ['rss_url'] })
 
 export type CreateSourceInput = z.infer<typeof createSourceSchema>
 
+/**
+ * Update schema enforces source_type + ingestion_config consistency:
+ * - Both must be supplied together (never one without the other)
+ * - ingestion_config must match the schema for the given source_type
+ *
+ * This prevents an admin from leaving a source in an invalid state like
+ * source_type='crawler' with ingestion_config={} by only changing source_type.
+ */
 export const updateSourceSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   url: z.string().url('Invalid URL').max(500).optional().nullable(),
@@ -56,8 +97,42 @@ export const updateSourceSchema = z.object({
   is_active: z.boolean().optional(),
   slug: z.string().max(200).regex(/^[a-z0-9-]+$/, 'Slug must be lowercase alphanumeric with hyphens').optional(),
   bias_override: z.boolean().optional(),
+  source_type: z.enum(SOURCE_TYPES).optional(),
+  ingestion_config: z.record(z.string(), z.unknown()).optional(),
 }).refine((d) => isPublicUrl(d.url), { ...publicUrlCheck, path: ['url'] })
   .refine((d) => isPublicUrl(d.rss_url), { ...publicUrlCheck, path: ['rss_url'] })
+  .refine(
+    (d) => {
+      // source_type and ingestion_config must be updated together,
+      // never one without the other — otherwise the pair can drift
+      // into an invalid state.
+      const typeSet = d.source_type !== undefined
+      const configSet = d.ingestion_config !== undefined
+      return typeSet === configSet
+    },
+    {
+      message: 'source_type and ingestion_config must be updated together',
+      path: ['ingestion_config'],
+    }
+  )
+  .refine(
+    (d) => {
+      // Validate ingestion_config against the correct schema for source_type
+      if (d.ingestion_config === undefined || d.source_type === undefined) return true
+      if (d.source_type === 'rss') return true // RSS allows empty config
+      if (d.source_type === 'crawler') {
+        return crawlerConfigSchema.safeParse(d.ingestion_config).success
+      }
+      if (d.source_type === 'news_api') {
+        return newsApiConfigSchema.safeParse(d.ingestion_config).success
+      }
+      return true
+    },
+    {
+      message: 'ingestion_config does not match source_type schema',
+      path: ['ingestion_config'],
+    }
+  )
 
 export type UpdateSourceInput = z.infer<typeof updateSourceSchema>
 
@@ -86,6 +161,7 @@ export const adminSourcesQuerySchema = z.object({
   bias: z.preprocess(emptyToUndefined, z.enum(BIASES).optional()),
   region: z.preprocess(emptyToUndefined, z.enum(REGIONS).optional()),
   is_active: z.preprocess(emptyToUndefined, z.enum(['all', 'true', 'false']).optional().default('all')),
+  source_type: z.preprocess(emptyToUndefined, z.enum([...SOURCE_TYPES, 'all']).optional().default('all')),
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
 })

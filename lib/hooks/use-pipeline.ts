@@ -21,6 +21,7 @@ interface SourceHealthEntry {
   readonly name: string
   readonly bias: string
   readonly region: string
+  readonly source_type: string
   readonly is_active: boolean
   readonly last_fetch_at: string | null
   readonly last_fetch_status: string

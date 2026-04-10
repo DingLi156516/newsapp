@@ -18,6 +18,7 @@ const mockSources: SourceHealthEntry[] = [
     name: 'Reuters',
     bias: 'center',
     region: 'us',
+    source_type: 'rss',
     is_active: true,
     last_fetch_at: new Date(Date.now() - 30 * 60000).toISOString(), // 30 minutes ago
     last_fetch_status: 'success',
@@ -31,6 +32,7 @@ const mockSources: SourceHealthEntry[] = [
     name: 'Fox News',
     bias: 'right',
     region: 'us',
+    source_type: 'rss',
     is_active: true,
     last_fetch_at: new Date(Date.now() - 120 * 60000).toISOString(), // 2 hours ago
     last_fetch_status: 'http_error',
@@ -45,6 +47,7 @@ const mockSources: SourceHealthEntry[] = [
     name: 'BBC News',
     bias: 'lean-left',
     region: 'uk',
+    source_type: 'rss',
     is_active: true,
     last_fetch_at: null,
     last_fetch_status: 'unknown',

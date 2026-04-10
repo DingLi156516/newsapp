@@ -50,12 +50,16 @@ export function AdminSourceListItem({ source, isSelected, onClick }: Props) {
         <span>{source.region.toUpperCase()}</span>
         <span>·</span>
         <span>{source.total_articles_ingested} articles</span>
-        {source.rss_url && (
-          <>
-            <span>·</span>
-            <span className="text-green-400/70">RSS</span>
-          </>
-        )}
+        <span>·</span>
+        <span className={
+          source.source_type === 'crawler' ? 'text-blue-400/70'
+            : source.source_type === 'news_api' ? 'text-purple-400/70'
+              : 'text-green-400/70'
+        }>
+          {source.source_type === 'crawler' ? 'Crawler'
+            : source.source_type === 'news_api' ? 'API'
+              : 'RSS'}
+        </span>
       </div>
     </button>
   )

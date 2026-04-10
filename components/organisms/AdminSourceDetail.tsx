@@ -11,7 +11,7 @@ import { Save, X, ExternalLink, Rss, RefreshCw, AlertTriangle } from 'lucide-rea
 import { useUpdateSource } from '@/lib/hooks/use-admin-sources'
 import { BIAS_LABELS, FACTUALITY_LABELS, OWNERSHIP_LABELS, REGION_LABELS } from '@/lib/types'
 import type { BiasCategory, FactualityLevel, OwnershipType, Region } from '@/lib/types'
-import type { DbSource } from '@/lib/supabase/types'
+import type { DbSource, SourceType } from '@/lib/supabase/types'
 
 interface Props {
   readonly source: DbSource | null
@@ -134,6 +134,11 @@ export function AdminSourceDetail({ source, onUpdated }: Props) {
       <div className="flex items-center justify-between p-4 border-b border-white/10">
         <div className="flex items-center gap-2 min-w-0">
           <h2 className="text-base font-semibold text-white truncate">{source.name}</h2>
+          {source.source_type !== 'rss' && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 shrink-0">
+              {source.source_type === 'crawler' ? 'Crawler' : 'API'}
+            </span>
+          )}
           {!source.is_active && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/40 shrink-0">
               Inactive
@@ -322,6 +327,14 @@ export function AdminSourceDetail({ source, onUpdated }: Props) {
               <p className="text-sm text-white/30">Not set</p>
             )}
           </FormField>
+
+          {source.source_type !== 'rss' && (
+            <FormField label="Ingestion Config">
+              <pre className="text-xs text-white/60 bg-white/5 rounded-lg p-3 overflow-x-auto font-mono">
+                {JSON.stringify(source.ingestion_config, null, 2)}
+              </pre>
+            </FormField>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <FormField label="Bias">

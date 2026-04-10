@@ -26,6 +26,8 @@ const mockSource: DbSource = {
   factuality_allsides: null,
   bias_override: false,
   bias_sources_synced_at: null,
+  source_type: 'rss',
+  ingestion_config: {},
 }
 
 const mockStory = {

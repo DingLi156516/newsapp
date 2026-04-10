@@ -10,7 +10,23 @@ const STATUS_COLORS: Record<string, string> = {
   http_error: 'bg-red-400/20 text-red-400',
   parse_error: 'bg-orange-400/20 text-orange-400',
   dns_error: 'bg-red-400/20 text-red-400',
+  robots_blocked: 'bg-orange-400/20 text-orange-400',
+  extraction_failed: 'bg-red-400/20 text-red-400',
+  rate_limited: 'bg-amber-400/20 text-amber-400',
+  api_auth_error: 'bg-red-400/20 text-red-400',
   unknown: 'bg-white/10 text-white/40',
+}
+
+const SOURCE_TYPE_COLORS: Record<string, string> = {
+  rss: 'text-green-400/70',
+  crawler: 'text-blue-400/70',
+  news_api: 'text-purple-400/70',
+}
+
+const SOURCE_TYPE_SHORT: Record<string, string> = {
+  rss: 'RSS',
+  crawler: 'Crawler',
+  news_api: 'API',
 }
 
 function formatRelativeTime(iso: string | null): string {
@@ -33,7 +49,12 @@ function SourceRow({ source }: { readonly source: SourceHealthEntry }) {
       <div className="flex items-center gap-3 min-w-0">
         <div className="min-w-0">
           <p className="text-sm font-medium text-white truncate">{source.name}</p>
-          <p className="text-xs text-white/40">{source.slug}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs text-white/40">{source.slug}</p>
+            <span className={`text-[10px] ${SOURCE_TYPE_COLORS[source.source_type] ?? 'text-white/40'}`}>
+              {SOURCE_TYPE_SHORT[source.source_type] ?? source.source_type}
+            </span>
+          </div>
         </div>
       </div>
 

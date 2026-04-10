@@ -69,7 +69,16 @@ export async function parseFeed(url: string): Promise<readonly ParsedFeedItem[]>
     }))
 }
 
-export type FeedErrorType = 'timeout' | 'http_error' | 'parse_error' | 'dns_error' | 'unknown'
+export type FeedErrorType =
+  | 'timeout'
+  | 'http_error'
+  | 'parse_error'
+  | 'dns_error'
+  | 'robots_blocked'
+  | 'extraction_failed'
+  | 'rate_limited'
+  | 'api_auth_error'
+  | 'unknown'
 
 export function categorizeFeedError(err: unknown): { type: FeedErrorType; message: string } {
   const message = err instanceof Error ? err.message : String(err)

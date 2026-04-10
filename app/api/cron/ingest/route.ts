@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getSupabaseServiceClient } from '@/lib/supabase/server'
-import { ingestFeeds } from '@/lib/rss/ingest'
+import { ingestAllSources } from '@/lib/ingestion/ingest'
 import { PipelineLogger } from '@/lib/pipeline/logger'
 import { toPerMinute } from '@/lib/pipeline/telemetry-utils'
 
@@ -38,10 +38,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     await logger.startRun('ingest', 'cron')
-    const result = await logger.logStep('ingest_feeds', () =>
-      ingestFeeds(client) as unknown as Promise<Record<string, unknown>>
+    const result = await logger.logStep('ingest_all_sources', () =>
+      ingestAllSources(client) as unknown as Promise<Record<string, unknown>>
     )
-    const durationMs = logger.getSteps().find((step) => step.step === 'ingest_feeds')?.duration_ms ?? 0
+    const durationMs = logger.getSteps().find((step) => step.step === 'ingest_all_sources')?.duration_ms ?? 0
     const summary = {
       ...result,
       ingestedPerMinute: toPerMinute(Number((result as Record<string, unknown>).newArticles ?? 0), durationMs),

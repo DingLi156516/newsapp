@@ -6,6 +6,8 @@
  * 2. Probing common feed paths (/feed, /rss, etc.)
  */
 
+import { lookup } from 'node:dns/promises'
+
 const PRIVATE_IP_RANGES = [
   /^127\./,                    // 127.0.0.0/8
   /^10\./,                     // 10.0.0.0/8
@@ -62,6 +64,67 @@ export function validatePublicUrl(url: string): void {
   const mappedIPv4 = extractMappedIPv4(bare)
   if (mappedIPv4 && PRIVATE_IP_RANGES.some((re) => re.test(mappedIPv4))) {
     throw new Error('URL targets a private or reserved network address')
+  }
+}
+
+/**
+ * Checks if a resolved IP address (v4 or v6) targets a private/reserved range.
+ * Used by validatePublicUrlWithDns after DNS resolution.
+ */
+function isPrivateAddress(address: string): boolean {
+  if (BLOCKED_HOSTNAMES.has(address)) return true
+  if (PRIVATE_IP_RANGES.some((re) => re.test(address))) return true
+  if (BLOCKED_IPV6_PREFIXES.some((re) => re.test(address))) return true
+
+  const mappedIPv4 = extractMappedIPv4(address)
+  if (mappedIPv4 && PRIVATE_IP_RANGES.some((re) => re.test(mappedIPv4))) return true
+
+  return false
+}
+
+/**
+ * Async SSRF guard that resolves the hostname via DNS and rejects ANY URL
+ * whose resolved IP is private/reserved. Use at fetch boundaries to catch
+ * attacker-controlled hostnames like `evil.example.com` → 127.0.0.1.
+ *
+ * Note: this has a known TOCTOU window — between this check and the
+ * subsequent fetch, DNS could theoretically return a different answer.
+ * Fully closing the gap requires a custom undici dispatcher with a
+ * pinned IP, which is out of scope for this check. The sync literal
+ * check + DNS resolution together cover the common attack vectors.
+ */
+export async function validatePublicUrlWithDns(url: string): Promise<void> {
+  // First: sync check catches literal IPs and obvious bad hostnames
+  validatePublicUrl(url)
+
+  const parsed = new URL(url)
+  const hostname = parsed.hostname.startsWith('[')
+    ? parsed.hostname.slice(1, -1)
+    : parsed.hostname
+
+  // Skip DNS resolution for literal IPs (already validated above)
+  if (/^[0-9.]+$/.test(hostname) || hostname.includes(':')) {
+    return
+  }
+
+  let addresses: { address: string; family: number }[]
+  try {
+    addresses = await lookup(hostname, { all: true })
+  } catch {
+    // DNS resolution failure — fail closed
+    throw new Error(`URL DNS resolution failed: ${hostname}`)
+  }
+
+  if (addresses.length === 0) {
+    throw new Error(`URL has no DNS records: ${hostname}`)
+  }
+
+  for (const entry of addresses) {
+    if (isPrivateAddress(entry.address)) {
+      throw new Error(
+        `URL hostname resolves to a private or reserved network address: ${entry.address}`
+      )
+    }
   }
 }
 

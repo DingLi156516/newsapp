@@ -27,7 +27,8 @@ import type {
 // sources table
 // ---------------------------------------------------------------------------
 
-export type FetchStatus = 'success' | 'timeout' | 'http_error' | 'parse_error' | 'dns_error' | 'unknown'
+export type SourceType = 'rss' | 'crawler' | 'news_api'
+export type FetchStatus = 'success' | 'timeout' | 'http_error' | 'parse_error' | 'dns_error' | 'robots_blocked' | 'extraction_failed' | 'rate_limited' | 'api_auth_error' | 'unknown'
 export type DbAssemblyStatus = 'pending' | 'processing' | 'completed' | 'failed'
 export type DbPublicationStatus = 'draft' | 'needs_review' | 'published' | 'rejected'
 export type DbStoryKind = 'standard'
@@ -57,6 +58,8 @@ export interface DbSource {
   factuality_allsides: FactualityLevel | null
   bias_override: boolean
   bias_sources_synced_at: string | null
+  source_type: SourceType
+  ingestion_config: Record<string, unknown>
 }
 
 export interface DbSourceInsert {
@@ -76,6 +79,8 @@ export interface DbSourceInsert {
   factuality_allsides?: FactualityLevel | null
   bias_override?: boolean
   bias_sources_synced_at?: string | null
+  source_type?: SourceType
+  ingestion_config?: Record<string, unknown>
 }
 
 // ---------------------------------------------------------------------------

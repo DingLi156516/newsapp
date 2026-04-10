@@ -102,7 +102,7 @@ describe('GET /api/admin/pipeline/sources', () => {
     ])
     expect(mockSupabase.from).toHaveBeenCalledWith('sources')
     expect(mockSelect).toHaveBeenCalledWith(
-      'id, slug, name, bias, region, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested'
+      'id, slug, name, bias, region, source_type, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested'
     )
     expect(mockOrder).toHaveBeenCalledWith('consecutive_failures', { ascending: false })
   })

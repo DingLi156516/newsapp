@@ -12,7 +12,7 @@ import { useCreateSource, useDiscoverRss } from '@/lib/hooks/use-admin-sources'
 import { normalizeSourceSlug } from '@/lib/source-slugs'
 import { BIAS_LABELS, FACTUALITY_LABELS, OWNERSHIP_LABELS, REGION_LABELS } from '@/lib/types'
 import type { BiasCategory, FactualityLevel, OwnershipType, Region } from '@/lib/types'
-import type { DbSource } from '@/lib/supabase/types'
+import type { DbSource, SourceType } from '@/lib/supabase/types'
 
 interface Props {
   readonly onCreated: (created: DbSource) => void
@@ -23,6 +23,11 @@ const BIASES: BiasCategory[] = ['far-left', 'left', 'lean-left', 'center', 'lean
 const FACTUALITIES: FactualityLevel[] = ['very-high', 'high', 'mixed', 'low', 'very-low']
 const OWNERSHIPS: OwnershipType[] = ['independent', 'corporate', 'private-equity', 'state-funded', 'telecom', 'government', 'non-profit', 'other']
 const REGIONS: Region[] = ['us', 'international', 'uk', 'canada', 'europe']
+const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
+  rss: 'RSS Feed',
+  crawler: 'Web Crawler',
+  news_api: 'News API',
+}
 
 interface FormState {
   name: string
@@ -34,6 +39,8 @@ interface FormState {
   factuality: FactualityLevel
   ownership: OwnershipType
   region: Region
+  source_type: SourceType
+  ingestion_config: string
 }
 
 const INITIAL_FORM: FormState = {
@@ -46,6 +53,8 @@ const INITIAL_FORM: FormState = {
   factuality: 'high',
   ownership: 'corporate',
   region: 'us',
+  source_type: 'rss',
+  ingestion_config: '{}',
 }
 
 export function AdminSourceCreate({ onCreated, onCancel }: Props) {
@@ -97,6 +106,16 @@ export function AdminSourceCreate({ onCreated, onCancel }: Props) {
       return
     }
 
+    let parsedConfig: Record<string, unknown> = {}
+    if (form.source_type !== 'rss' && form.ingestion_config.trim()) {
+      try {
+        parsedConfig = JSON.parse(form.ingestion_config)
+      } catch {
+        setError('Ingestion config must be valid JSON')
+        return
+      }
+    }
+
     try {
       const result = await create({
         name: form.name.trim(),
@@ -107,6 +126,8 @@ export function AdminSourceCreate({ onCreated, onCancel }: Props) {
         factuality: form.factuality,
         ownership: form.ownership,
         region: form.region,
+        source_type: form.source_type,
+        ingestion_config: parsedConfig,
       })
       onCreated(result.data)
     } catch (err) {
@@ -151,6 +172,18 @@ export function AdminSourceCreate({ onCreated, onCancel }: Props) {
             placeholder="auto-generated from name"
             className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder:text-white/30 focus:outline-none focus:border-white/20"
           />
+        </FormField>
+
+        <FormField label="Source Type">
+          <select
+            value={form.source_type}
+            onChange={(e) => updateField('source_type', e.target.value as SourceType)}
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white/20"
+          >
+            {(Object.keys(SOURCE_TYPE_LABELS) as SourceType[]).map((t) => (
+              <option key={t} value={t}>{SOURCE_TYPE_LABELS[t]}</option>
+            ))}
+          </select>
         </FormField>
 
         <FormField label="Website URL">
@@ -203,6 +236,21 @@ export function AdminSourceCreate({ onCreated, onCancel }: Props) {
             className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-white/20"
           />
         </FormField>
+
+        {form.source_type !== 'rss' && (
+          <FormField label="Ingestion Config (JSON)">
+            <textarea
+              value={form.ingestion_config}
+              onChange={(e) => updateField('ingestion_config', e.target.value)}
+              placeholder={form.source_type === 'crawler'
+                ? '{\n  "articleListUrl": "https://...",\n  "articleLinkSelector": "a.article"\n}'
+                : '{\n  "provider": "newsapi",\n  "country": "us"\n}'
+              }
+              rows={5}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder:text-white/30 focus:outline-none focus:border-white/20"
+            />
+          </FormField>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <FormField label="Bias *">

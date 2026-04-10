@@ -18,13 +18,13 @@ export async function queryAdminSources(
   client: SupabaseClient<Database>,
   params: AdminSourcesQuery
 ): Promise<{ data: DbSource[]; count: number }> {
-  const { search, bias, region, is_active, page, limit } = params
+  const { search, bias, region, is_active, source_type, page, limit } = params
   const offset = (page - 1) * limit
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query = (client.from('sources') as any)
     .select(
-      'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested, created_at, updated_at, bias_mbfc, bias_allsides, bias_adfm, factuality_mbfc, factuality_allsides, bias_override, bias_sources_synced_at',
+      'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested, created_at, updated_at, bias_mbfc, bias_allsides, bias_adfm, factuality_mbfc, factuality_allsides, bias_override, bias_sources_synced_at, source_type, ingestion_config',
       { count: 'exact' }
     )
 
@@ -45,6 +45,10 @@ export async function queryAdminSources(
     query = query.eq('is_active', true)
   } else if (is_active === 'false') {
     query = query.eq('is_active', false)
+  }
+
+  if (source_type && source_type !== 'all') {
+    query = query.eq('source_type', source_type)
   }
 
   query = query
@@ -76,6 +80,8 @@ export async function createSource(
     url: input.url ?? null,
     rss_url: input.rss_url ?? null,
     is_active: true,
+    source_type: input.source_type ?? 'rss',
+    ingestion_config: input.ingestion_config ?? {},
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,6 +117,8 @@ export async function updateSource(
   if (input.is_active !== undefined) updateData.is_active = input.is_active
   if (input.slug !== undefined) updateData.slug = input.slug
   if (input.bias_override !== undefined) updateData.bias_override = input.bias_override
+  if (input.source_type !== undefined) updateData.source_type = input.source_type
+  if (input.ingestion_config !== undefined) updateData.ingestion_config = input.ingestion_config
 
   // Auto-set bias_override when admin manually changes bias or factuality,
   // but only if the caller didn't explicitly provide bias_override

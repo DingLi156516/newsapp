@@ -90,6 +90,15 @@ __tests__/
       story-assembler.test.ts  story-assembler-concurrency.test.ts
     email/
       send-digest.test.ts
+    ingestion/
+      source-registry.test.ts  fetcher-registry.test.ts
+      pipeline-helpers.test.ts  ingest.test.ts
+    crawler/
+      robots.test.ts  article-discovery.test.ts
+      article-extractor.test.ts  fetcher.test.ts
+    news-api/
+      rate-limiter.test.ts  fetcher.test.ts
+      providers/newsapi.test.ts  providers/gdelt.test.ts
     offline/
       cache-manager.test.ts
     supabase/
