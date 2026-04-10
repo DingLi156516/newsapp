@@ -29,6 +29,8 @@ import {
   type ClaimOwner,
 } from '@/lib/pipeline/claim-utils'
 import { bumpAssemblyVersion } from '@/lib/pipeline/reassembly'
+import { computeRetryOutcome } from '@/lib/pipeline/retry-policy'
+import { pushToDeadLetter } from '@/lib/pipeline/dead-letter'
 import { decideStoryPublication } from '@/lib/pipeline/story-state'
 
 export function scheduleTagExtraction(
@@ -455,20 +457,53 @@ export async function assembleStories(
         const message = err instanceof Error ? err.message : String(err)
         const formattedMessage = `Story assembly failed for ${story.id}: ${message}`
         const failureStartedAt = Date.now()
+
+        // Read current retry count so we can apply exponential backoff.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: current } = await (client.from('stories') as any)
+          .select('assembly_retry_count')
+          .eq('id', story.id)
+          .single()
+        const previousCount = (current?.assembly_retry_count as number | undefined) ?? 0
+        const outcome = computeRetryOutcome('assemble', previousCount)
+
+        // Transient (budget-remaining) failures stay in 'pending' so the
+        // next pass picks them up after the backoff window — consistent
+        // with embedding and clustering. Terminal (budget-exhausted)
+        // failures go to 'failed' AND the DLQ for operator attention.
+        const FAR_FUTURE = '2099-01-01T00:00:00Z'
+        const nextAssemblyStatus = outcome.exhausted ? 'failed' : 'pending'
+        const nextPublicationStatus = outcome.exhausted ? 'needs_review' : 'draft'
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (client.from('stories') as any)
           .update({
-            assembly_status: 'failed',
-            publication_status: 'needs_review',
+            assembly_status: nextAssemblyStatus,
+            publication_status: nextPublicationStatus,
             review_status: 'pending',
-            review_reasons: ['assembly_failed'],
+            review_reasons: outcome.exhausted ? ['assembly_failed'] : [],
             processing_error: message,
             assembly_claimed_at: null,
             assembly_claim_owner: null,
+            assembly_retry_count: outcome.nextRetryCount,
+            assembly_next_attempt_at: outcome.exhausted
+              ? FAR_FUTURE
+              : outcome.nextAttemptAt.toISOString(),
+            assembly_last_error: message,
             last_updated: new Date().toISOString(),
           })
           .eq('id', story.id)
         await bumpAssemblyVersion(client, story.id)
+
+        if (outcome.exhausted) {
+          await pushToDeadLetter(client, {
+            itemKind: 'story_assemble',
+            itemId: story.id,
+            retryCount: outcome.nextRetryCount,
+            lastError: message,
+          })
+        }
+
         return { storyId: story.id, error: formattedMessage, failureDbTimeMs: Date.now() - failureStartedAt }
       }
     }

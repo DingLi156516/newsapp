@@ -224,14 +224,15 @@ describe('embedUnembeddedArticles', () => {
       errors: ['Batch embedding failed: provider unavailable'],
       modelTimeMs: 0,
     }))
-    // Failure path releases claims via owner-scoped RPC.
-    expect(client._rpc).toHaveBeenCalledWith(
-      'release_embedding_claim',
-      expect.objectContaining({ p_article_id: 'a1' })
-    )
-    expect(client._rpc).toHaveBeenCalledWith(
-      'release_embedding_claim',
-      expect.objectContaining({ p_article_id: 'a2' })
+    // Failure path updates retry metadata (count, next_attempt, last_error)
+    // and clears the claim so the next run can pick it up after backoff.
+    expect(client._update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embedding_retry_count: 1,
+        embedding_last_error: 'provider unavailable',
+        embedding_claimed_at: null,
+        embedding_claim_owner: null,
+      })
     )
   })
 

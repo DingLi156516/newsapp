@@ -111,6 +111,9 @@ export interface DbStory {
   assembly_claimed_at: string | null
   assembly_claim_owner: string | null
   assembly_version: number
+  assembly_retry_count: number
+  assembly_next_attempt_at: string | null
+  assembly_last_error: string | null
   review_status: 'pending' | 'approved' | 'rejected'
   reviewed_by: string | null
   reviewed_at: string | null
@@ -179,8 +182,14 @@ export interface DbArticle {
   is_embedded: boolean
   embedding_claimed_at: string | null
   embedding_claim_owner: string | null
+  embedding_retry_count: number
+  embedding_next_attempt_at: string | null
+  embedding_last_error: string | null
   clustering_claimed_at: string | null
   clustering_claim_owner: string | null
+  clustering_retry_count: number
+  clustering_next_attempt_at: string | null
+  clustering_last_error: string | null
   story_id: string | null
   clustering_attempts: number
   clustering_status: 'pending' | 'clustered' | 'expired'

@@ -18,6 +18,8 @@ import {
   releaseEmbeddingClaims,
   type ClaimOwner,
 } from '@/lib/pipeline/claim-utils'
+import { computeRetryOutcome } from '@/lib/pipeline/retry-policy'
+import { pushToDeadLetter } from '@/lib/pipeline/dead-letter'
 
 const EMBED_BATCH_SIZE = Number(process.env.EMBED_BATCH_SIZE ?? 100)
 
@@ -26,6 +28,7 @@ interface UnembeddedArticle {
   title: string
   description: string | null
   title_fingerprint: string | null
+  embedding_retry_count?: number
 }
 
 export interface EmbeddingResult {
@@ -101,7 +104,7 @@ async function fetchClaimedArticles(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const query = (client.from('articles') as any)
-    .select('id, title, description, title_fingerprint')
+    .select('id, title, description, title_fingerprint, embedding_retry_count')
 
   const withFilter = typeof query.in === 'function'
     ? query.in('id', claimedIds)
@@ -114,6 +117,57 @@ async function fetchClaimedArticles(
   }
 
   return (data as UnembeddedArticle[] | null) ?? []
+}
+
+/**
+ * Handle per-item embedding failure with exponential backoff and DLQ
+ * escalation when the retry budget is exhausted.
+ *
+ * Each article gets:
+ *   - embedding_retry_count += 1
+ *   - embedding_next_attempt_at = now + backoff (shields it from claim RPC)
+ *   - embedding_last_error = the error message
+ *   - claim cleared so another owner can retry after the backoff expires
+ *
+ * On exhaustion we push a DLQ entry AND set next_attempt_at to a far-future
+ * date so the claim RPC permanently excludes the row until an operator
+ * replays the DLQ entry.
+ */
+async function handleEmbeddingFailure(
+  client: SupabaseClient<Database>,
+  failedArticles: readonly UnembeddedArticle[],
+  errorMessage: string
+): Promise<void> {
+  if (failedArticles.length === 0) return
+
+  const FAR_FUTURE = '2099-01-01T00:00:00Z'
+
+  for (const article of failedArticles) {
+    const previous = article.embedding_retry_count ?? 0
+    const outcome = computeRetryOutcome('embed', previous)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (client.from('articles') as any)
+      .update({
+        embedding_retry_count: outcome.nextRetryCount,
+        embedding_next_attempt_at: outcome.exhausted
+          ? FAR_FUTURE
+          : outcome.nextAttemptAt.toISOString(),
+        embedding_last_error: errorMessage,
+        embedding_claimed_at: null,
+        embedding_claim_owner: null,
+      })
+      .eq('id', article.id)
+
+    if (outcome.exhausted) {
+      await pushToDeadLetter(client, {
+        itemKind: 'article_embed',
+        itemId: article.id,
+        retryCount: outcome.nextRetryCount,
+        lastError: errorMessage,
+      })
+    }
+  }
 }
 
 async function bulkWriteEmbeddings(
@@ -256,13 +310,12 @@ export async function embedUnembeddedArticles(
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         errors.push(`Batch embedding failed: ${message}`)
-        const clearStartedAt = Date.now()
-        await releaseEmbeddingClaims(
-          client,
-          uncachedArticles.map((article) => article.id),
-          owner
-        )
-        dbTimeMs += Date.now() - clearStartedAt
+        // Exponential backoff + DLQ escalation per retry budget. The
+        // handler also clears the claim so another owner can retry after
+        // the backoff window expires.
+        const failureStartedAt = Date.now()
+        await handleEmbeddingFailure(client, uncachedArticles, message)
+        dbTimeMs += Date.now() - failureStartedAt
       }
     }
   }
