@@ -11,7 +11,25 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
-import { ASSEMBLY_CLAIM_TTL_MS, isClaimAvailable } from '@/lib/pipeline/claim-utils'
+import { ASSEMBLY_CLAIM_TTL_MS } from '@/lib/pipeline/claim-utils'
+import { fetchAssemblyVersions, requeueStoryForReassembly } from '@/lib/pipeline/reassembly'
+import { mergeStories } from '@/lib/pipeline/cluster-writes'
+
+/**
+ * Returns true if a claim timestamp is absent or older than the TTL.
+ * Used only by the recluster maintenance cron, which does not hold its own
+ * pipeline claim lease; it skips stories an assembler is actively claiming.
+ */
+function isClaimExpired(
+  claimedAt: string | null | undefined,
+  ttlMs: number,
+  nowMs = Date.now()
+): boolean {
+  if (!claimedAt) return true
+  const claimedMs = new Date(claimedAt).getTime()
+  if (Number.isNaN(claimedMs)) return true
+  return nowMs - claimedMs >= ttlMs
+}
 import { cosineSimilarity, computeCentroid, parseVector, SIMILARITY_THRESHOLD, SPLIT_THRESHOLD } from '@/lib/ai/clustering'
 
 const DEFAULT_WINDOW_HOURS = 24
@@ -47,7 +65,6 @@ interface PhaseResult {
 async function detectAndMergeStories(
   client: SupabaseClient<Database>,
   stories: readonly StoryRow[],
-  nowIso: string,
   cutoffIso: string
 ): Promise<PhaseResult> {
   let mergedPairs = 0
@@ -111,93 +128,85 @@ async function detectAndMergeStories(
       const targetId = storyIsLarger ? story.id : candidate.story_id
       const sourceId = storyIsLarger ? candidate.story_id : story.id
 
-      // Capture source article IDs before reassignment for potential rollback
+      // Fetch source articles + their embeddings in ONE query so we can
+      // compute the post-merge centroid without a second round-trip after
+      // reassignment. We then also need the current target embeddings.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: sourceArticleRows } = await (client.from('articles') as any)
-        .select('id')
+      const { data: sourceEmbeddings, error: sourceFetchError } = await (client.from('articles') as any)
+        .select('id, embedding')
         .eq('story_id', sourceId)
+        .not('embedding', 'is', null)
 
-      const sourceArticleIds = (sourceArticleRows ?? []).map((a: { id: string }) => a.id)
-
-      // Reassign articles from source to target
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: reassignError } = await (client.from('articles') as any)
-        .update({ story_id: targetId })
-        .eq('story_id', sourceId)
-
-      if (reassignError) {
-        errors.push(`Failed to reassign articles from story ${sourceId} to ${targetId}: ${reassignError.message}`)
+      if (sourceFetchError) {
+        errors.push(`Failed to fetch source articles for merge of ${sourceId}: ${sourceFetchError.message}`)
         continue
       }
 
-      // Fetch all articles for the merged story to recompute centroid
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: mergedArticles, error: fetchError } = await (client.from('articles') as any)
+      const { data: targetEmbeddings, error: targetFetchError } = await (client.from('articles') as any)
         .select('embedding')
         .eq('story_id', targetId)
         .not('embedding', 'is', null)
 
-      if (fetchError) {
-        errors.push(`Failed to fetch articles for centroid recompute on story ${targetId}: ${fetchError.message}`)
+      if (targetFetchError) {
+        errors.push(`Failed to fetch target articles for merge of ${targetId}: ${targetFetchError.message}`)
       }
 
-      // Fallback: use the surviving (target) story's centroid, not the outer-loop story
-      const targetStory = stories.find(s => s.id === targetId)
+      // Fallback centroid: use the surviving target story's centroid.
+      const targetStory = stories.find((s) => s.id === targetId)
       const fallbackCentroid = targetStory
         ? parseVector(targetStory.cluster_centroid)
         : parseVector(story.cluster_centroid)
 
-      const newCentroid = (!fetchError && mergedArticles && mergedArticles.length > 0)
-        ? computeCentroid((mergedArticles as ArticleRow[]).map((a) => parseVector(a.embedding)))
+      const allEmbeddings = [
+        ...((sourceEmbeddings ?? []) as ArticleRow[]).map((a) => parseVector(a.embedding)),
+        ...((targetEmbeddings ?? []) as ArticleRow[]).map((a) => parseVector(a.embedding)),
+      ]
+
+      const newCentroid = allEmbeddings.length > 0
+        ? computeCentroid(allEmbeddings)
         : fallbackCentroid
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: updateError } = await (client.from('stories') as any)
-        .update({
-          cluster_centroid: newCentroid,
-          assembly_status: 'pending',
-          publication_status: 'draft',
-          review_status: 'pending',
-          review_reasons: [],
-          published_at: null,
-          assembly_claimed_at: null,
-          last_updated: nowIso,
-        })
-        .eq('id', targetId)
+      // Read assembly_version BEFORE the merge so the guarded requeue
+      // can use a consistent version.
+      let expectedVersion: number | undefined
+      try {
+        const versions = await fetchAssemblyVersions(client, [targetId])
+        expectedVersion = versions.get(targetId)
+      } catch (err) {
+        errors.push(`Failed to read assembly_version for story ${targetId}: ${err instanceof Error ? err.message : String(err)}`)
+      }
 
-      if (updateError) {
-        errors.push(`Failed to update centroid for story ${targetId}: ${updateError.message}`)
-
-        // Compensating rollback: move articles back to source so it isn't left empty
-        if (sourceArticleIds.length > 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const { error: rollbackError } = await (client.from('articles') as any)
-            .update({ story_id: sourceId })
-            .in('id', sourceArticleIds)
-
-          if (rollbackError) {
-            errors.push(`Failed to rollback article reassignment to story ${sourceId}: ${rollbackError.message}`)
-          }
-        }
-
+      // Atomic merge: reassign articles, update target centroid, delete
+      // source — all inside a single transaction. If any step fails, the
+      // RPC rolls back the entire merge so no orphan/empty story remains.
+      try {
+        await mergeStories(client, targetId, sourceId, newCentroid)
+      } catch (err) {
+        errors.push(`Failed to merge story ${sourceId} into ${targetId}: ${err instanceof Error ? err.message : String(err)}`)
         continue
       }
 
-      // Delete the source story
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error: deleteError } = await (client.from('stories') as any)
-        .delete()
-        .eq('id', sourceId)
-
-      if (deleteError) {
-        errors.push(`Failed to delete merged story ${sourceId}: ${deleteError.message}`)
-      } else {
-        deletedIds.add(sourceId)
-        mergedPairs++
-
-        // Current story was merged away — stop processing its candidates
-        if (sourceId === story.id) break
+      // Guarded requeue: only reset assembly state if no assembler is
+      // currently processing the target story.
+      if (expectedVersion !== undefined) {
+        try {
+          const requeued = await requeueStoryForReassembly(client, targetId, expectedVersion)
+          if (!requeued) {
+            errors.push(
+              `Merge target ${targetId} requeue guarded: currently processing or version mismatch`
+            )
+          }
+        } catch (err) {
+          errors.push(`Failed to requeue merge target ${targetId}: ${err instanceof Error ? err.message : String(err)}`)
+        }
       }
+
+      deletedIds.add(sourceId)
+      mergedPairs++
+
+      // Current story was merged away — stop processing its candidates
+      if (sourceId === story.id) break
     }
   }
 
@@ -210,8 +219,7 @@ async function detectAndMergeStories(
 
 async function detectAndSplitArticles(
   client: SupabaseClient<Database>,
-  stories: readonly StoryRow[],
-  nowIso: string
+  stories: readonly StoryRow[]
 ): Promise<PhaseResult> {
   let splitArticles = 0
   const errors: string[] = []
@@ -283,23 +291,38 @@ async function detectAndSplitArticles(
       ? computeCentroid(remainingArticles.map((a: ArticleRow) => parseVector(a.embedding)))
       : parseVector(story.cluster_centroid)
 
-    // Queue story for reassembly with updated centroid
+    // Read assembly_version BEFORE mutating so we can guard the reset below.
+    let expectedVersion: number | undefined
+    try {
+      const versions = await fetchAssemblyVersions(client, [story.id])
+      expectedVersion = versions.get(story.id)
+    } catch (err) {
+      errors.push(`Failed to read assembly_version for story ${story.id}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    // Update centroid first (isolated write).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: queueError } = await (client.from('stories') as any)
-      .update({
-        cluster_centroid: newCentroid,
-        assembly_status: 'pending',
-        publication_status: 'draft',
-        review_status: 'pending',
-        review_reasons: [],
-        published_at: null,
-        assembly_claimed_at: null,
-        last_updated: nowIso,
-      })
+      .update({ cluster_centroid: newCentroid })
       .eq('id', story.id)
 
     if (queueError) {
-      errors.push(`Failed to queue reassembly for story ${story.id}: ${queueError.message}`)
+      errors.push(`Failed to update centroid after split for story ${story.id}: ${queueError.message}`)
+      continue
+    }
+
+    // Guarded requeue: skip if assembler is currently processing.
+    if (expectedVersion !== undefined) {
+      try {
+        const requeued = await requeueStoryForReassembly(client, story.id, expectedVersion)
+        if (!requeued) {
+          errors.push(
+            `Split path requeue for story ${story.id} guarded: currently processing or version mismatch`
+          )
+        }
+      } catch (err) {
+        errors.push(`Failed to requeue split story ${story.id}: ${err instanceof Error ? err.message : String(err)}`)
+      }
     }
   }
 
@@ -339,17 +362,15 @@ export async function reclusterRecentStories(
   // check. Accepted risk: row-level locking would be disproportionate for an
   // hourly maintenance cron that already filters by claim TTL.
   const availableStories = storyRows.filter(
-    (s) => isClaimAvailable(s.assembly_claimed_at, ASSEMBLY_CLAIM_TTL_MS)
+    (s) => isClaimExpired(s.assembly_claimed_at, ASSEMBLY_CLAIM_TTL_MS)
   )
 
   if (availableStories.length === 0) {
     return { mergedPairs: 0, splitArticles: 0, errors: [] }
   }
 
-  const nowIso = new Date().toISOString()
-
   // Run merge detection first, then split detection
-  const mergeResult = await detectAndMergeStories(client, availableStories, nowIso, cutoff)
+  const mergeResult = await detectAndMergeStories(client, availableStories, cutoff)
 
   // Re-fetch stories if merges occurred — centroids may have changed
   let storiesForSplit = availableStories
@@ -363,12 +384,12 @@ export async function reclusterRecentStories(
 
     if (!refreshError && refreshedRows) {
       storiesForSplit = refreshedRows.filter(
-        (s) => isClaimAvailable(s.assembly_claimed_at, ASSEMBLY_CLAIM_TTL_MS)
+        (s) => isClaimExpired(s.assembly_claimed_at, ASSEMBLY_CLAIM_TTL_MS)
       )
     }
   }
 
-  const splitResult = await detectAndSplitArticles(client, storiesForSplit, nowIso)
+  const splitResult = await detectAndSplitArticles(client, storiesForSplit)
 
   return {
     mergedPairs: mergeResult.count,

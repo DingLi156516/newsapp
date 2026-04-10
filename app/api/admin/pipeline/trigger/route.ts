@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAdminUser } from '@/lib/api/admin-helpers'
 import { getSupabaseServiceClient } from '@/lib/supabase/server'
 import { PipelineLogger } from '@/lib/pipeline/logger'
-import { ingestFeeds } from '@/lib/rss/ingest'
+import { ingestAllSources } from '@/lib/ingestion/ingest'
 import { embedUnembeddedArticles } from '@/lib/ai/embeddings'
 import { clusterArticles } from '@/lib/ai/clustering'
 import { assembleStories } from '@/lib/ai/story-assembler'
@@ -17,6 +17,7 @@ import { z } from 'zod'
 import { countPipelineBacklog } from '@/lib/pipeline/backlog'
 import { runProcessPipeline } from '@/lib/pipeline/process-runner'
 import { toPerMinute } from '@/lib/pipeline/telemetry-utils'
+import { generateClaimOwner } from '@/lib/pipeline/claim-utils'
 
 const triggerSchema = z.object({
   type: z.enum(['ingest', 'process', 'full']),
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
 
     if (type === 'ingest' || type === 'full') {
       const ingestResult = await logger.logStep('ingest_feeds', () =>
-        ingestFeeds(serviceClient) as unknown as Promise<Record<string, unknown>>
+        ingestAllSources(serviceClient) as unknown as Promise<Record<string, unknown>>
       )
       ingestSummary = {
         ...ingestResult,
@@ -96,11 +97,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === 'process' || type === 'full') {
+      const claimOwner = generateClaimOwner()
       const processSummary = await runProcessPipeline({
         countBacklog: () => countPipelineBacklog(serviceClient),
-        embed: (maxArticles) => embedUnembeddedArticles(serviceClient, maxArticles),
-        cluster: (maxArticles) => clusterArticles(serviceClient, maxArticles),
-        assemble: (maxStories) => assembleStories(serviceClient, maxStories),
+        embed: (maxArticles) => embedUnembeddedArticles(serviceClient, maxArticles, claimOwner),
+        cluster: (maxArticles) => clusterArticles(serviceClient, maxArticles, claimOwner),
+        assemble: (maxStories) => assembleStories(serviceClient, maxStories, undefined, claimOwner),
         logStep: <T,>(step: string, fn: () => Promise<T>) =>
           logger.logStep(step, () => fn() as unknown as Promise<Record<string, unknown>>) as Promise<T>,
       })

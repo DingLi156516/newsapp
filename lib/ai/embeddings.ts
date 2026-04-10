@@ -3,22 +3,29 @@
  *
  * Fetches un-embedded articles from the database, generates embeddings
  * via Gemini, and stores them back. Processes in configurable batch sizes.
+ *
+ * Claiming uses the atomic `claim_articles_for_embedding` RPC (migration 037)
+ * which performs a DB-side compare-and-set with owner token, so overlapping
+ * pipeline runs cannot claim the same rows.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
 import { generateEmbeddingBatch } from '@/lib/ai/gemini-client'
-import { ARTICLE_STAGE_CLAIM_TTL_MS, isClaimAvailable } from '@/lib/pipeline/claim-utils'
+import {
+  claimEmbeddingBatch,
+  generateClaimOwner,
+  releaseEmbeddingClaims,
+  type ClaimOwner,
+} from '@/lib/pipeline/claim-utils'
 
 const EMBED_BATCH_SIZE = Number(process.env.EMBED_BATCH_SIZE ?? 100)
-const CLAIM_SCAN_MULTIPLIER = 3
 
 interface UnembeddedArticle {
   id: string
   title: string
   description: string | null
   title_fingerprint: string | null
-  embedding_claimed_at: string | null
 }
 
 export interface EmbeddingResult {
@@ -86,56 +93,27 @@ function buildEmbeddingText(article: UnembeddedArticle): string {
   return parts.join(' — ')
 }
 
-async function bulkClaimArticles(
+async function fetchClaimedArticles(
   client: SupabaseClient<Database>,
-  articleIds: readonly string[],
-  claimedAt: string
-): Promise<void> {
-  if (articleIds.length === 0) {
-    return
-  }
+  claimedIds: readonly string[]
+): Promise<UnembeddedArticle[]> {
+  if (claimedIds.length === 0) return []
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const query = (client.from('articles') as any).update({ embedding_claimed_at: claimedAt })
-  if (typeof query.in === 'function') {
-    const { error } = await query.in('id', articleIds)
-    if (error) {
-      throw new Error(`Failed to claim embedding batch: ${error.message}`)
-    }
-    return
+  const query = (client.from('articles') as any)
+    .select('id, title, description, title_fingerprint')
+
+  const withFilter = typeof query.in === 'function'
+    ? query.in('id', claimedIds)
+    : query
+
+  const { data, error } = await withFilter
+
+  if (error) {
+    throw new Error(`Failed to fetch claimed articles: ${error.message}`)
   }
 
-  for (const articleId of articleIds) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (client.from('articles') as any)
-      .update({ embedding_claimed_at: claimedAt })
-      .eq('id', articleId)
-
-    if (error) {
-      throw new Error(`Failed to claim article ${articleId}: ${error.message}`)
-    }
-  }
-}
-
-async function clearClaims(
-  client: SupabaseClient<Database>,
-  articleIds: readonly string[]
-): Promise<void> {
-  if (articleIds.length === 0) {
-    return
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const query = (client.from('articles') as any).update({ embedding_claimed_at: null })
-  if (typeof query.in === 'function') {
-    await query.in('id', articleIds)
-    return
-  }
-
-  for (const articleId of articleIds) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (client.from('articles') as any).update({ embedding_claimed_at: null }).eq('id', articleId)
-  }
+  return (data as UnembeddedArticle[] | null) ?? []
 }
 
 async function bulkWriteEmbeddings(
@@ -148,6 +126,7 @@ async function bulkWriteEmbeddings(
     embedding: embeddings[index]?.embedding as number[],
     is_embedded: true,
     embedding_claimed_at: null,
+    embedding_claim_owner: null,
   }))
 
   const errors: string[] = []
@@ -175,13 +154,12 @@ async function bulkWriteEmbeddings(
         embedding: row.embedding,
         is_embedded: row.is_embedded,
         embedding_claimed_at: row.embedding_claimed_at,
+        embedding_claim_owner: row.embedding_claim_owner,
       })
       .eq('id', row.id)
 
     if (error) {
       errors.push(`Update failed for ${row.id}: ${error.message}`)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (client.from('articles') as any).update({ embedding_claimed_at: null }).eq('id', row.id)
     } else {
       processed += 1
     }
@@ -192,44 +170,37 @@ async function bulkWriteEmbeddings(
 
 export async function embedUnembeddedArticles(
   client: SupabaseClient<Database>,
-  maxArticles = 500
+  maxArticles = 500,
+  owner: ClaimOwner = generateClaimOwner()
 ): Promise<EmbeddingResult> {
-  const { data: fetchedArticles, error: fetchError } = await client
-    .from('articles')
-    .select('id, title, description, title_fingerprint, embedding_claimed_at')
-    .eq('is_embedded', false)
-    .order('created_at', { ascending: true })
-    .order('id', { ascending: true })
-    .limit(maxArticles * CLAIM_SCAN_MULTIPLIER)
-    .returns<UnembeddedArticle[]>()
-
-  if (fetchError) {
-    throw new Error(`Failed to fetch un-embedded articles: ${fetchError.message}`)
-  }
-
-  if (!fetchedArticles || fetchedArticles.length === 0) {
-    return { totalProcessed: 0, claimedArticles: 0, cacheHits: 0, errors: [], dbTimeMs: 0, modelTimeMs: 0 }
-  }
-
-  const articles = fetchedArticles
-    .filter((article) => isClaimAvailable(article.embedding_claimed_at, ARTICLE_STAGE_CLAIM_TTL_MS))
-    .slice(0, maxArticles)
-
-  if (articles.length === 0) {
-    return { totalProcessed: 0, claimedArticles: 0, cacheHits: 0, errors: [], dbTimeMs: 0, modelTimeMs: 0 }
-  }
-
+  let dbTimeMs = 0
+  let modelTimeMs = 0
   const errors: string[] = []
   let totalProcessed = 0
   let cacheHits = 0
-  let dbTimeMs = 0
-  let modelTimeMs = 0
-  const claimedAt = new Date().toISOString()
-  const articleIds = articles.map((article) => article.id)
 
   const claimStartedAt = Date.now()
-  await bulkClaimArticles(client, articleIds, claimedAt)
+  const claimedIds = await claimEmbeddingBatch(client, owner, maxArticles)
   dbTimeMs += Date.now() - claimStartedAt
+
+  if (claimedIds.length === 0) {
+    return { totalProcessed: 0, claimedArticles: 0, cacheHits: 0, errors: [], dbTimeMs, modelTimeMs: 0 }
+  }
+
+  let articles: UnembeddedArticle[]
+  const fetchStartedAt = Date.now()
+  try {
+    articles = await fetchClaimedArticles(client, claimedIds)
+  } catch (err) {
+    // Fetch failed — release the claims so another run can retry.
+    await releaseEmbeddingClaims(client, claimedIds, owner)
+    throw err
+  }
+  dbTimeMs += Date.now() - fetchStartedAt
+
+  if (articles.length === 0) {
+    return { totalProcessed: 0, claimedArticles: claimedIds.length, cacheHits: 0, errors, dbTimeMs, modelTimeMs: 0 }
+  }
 
   const cacheFingerprints = articles
     .map((a) => a.title_fingerprint)
@@ -286,11 +257,22 @@ export async function embedUnembeddedArticles(
         const message = err instanceof Error ? err.message : String(err)
         errors.push(`Batch embedding failed: ${message}`)
         const clearStartedAt = Date.now()
-        await clearClaims(client, uncachedArticles.map((article) => article.id))
+        await releaseEmbeddingClaims(
+          client,
+          uncachedArticles.map((article) => article.id),
+          owner
+        )
         dbTimeMs += Date.now() - clearStartedAt
       }
     }
   }
 
-  return { totalProcessed, claimedArticles: articles.length, cacheHits, errors, dbTimeMs, modelTimeMs }
+  return {
+    totalProcessed,
+    claimedArticles: claimedIds.length,
+    cacheHits,
+    errors,
+    dbTimeMs,
+    modelTimeMs,
+  }
 }

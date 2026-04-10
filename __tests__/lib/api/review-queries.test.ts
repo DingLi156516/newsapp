@@ -29,9 +29,57 @@ function createMockQueryBuilder(
   return builder
 }
 
-function createMockClient(queryBuilder: ReturnType<typeof createMockQueryBuilder>) {
+function createMockClient(
+  queryBuilder: ReturnType<typeof createMockQueryBuilder>,
+  rpcOptions: {
+    assemblyVersion?: number
+    assemblyStatus?: string
+    requeueReturn?: boolean
+  } = {}
+) {
+  // The reprocess path reads assembly_version via
+  // `from('stories').select('id, assembly_version, assembly_status').in(...)`.
+  // Return a separate one-shot builder for that column list so we don't
+  // disturb the default chainable queryBuilder used by other tests.
+  const versionsBuilder = {
+    in: vi.fn().mockImplementation((_col: string, ids: string[]) =>
+      Promise.resolve({
+        data: ids.map((id) => ({
+          id,
+          assembly_version: rpcOptions.assemblyVersion ?? 0,
+          assembly_status: rpcOptions.assemblyStatus ?? 'completed',
+        })),
+        error: null,
+      })
+    ),
+  }
+
+  const fromMock = vi.fn().mockImplementation(() => {
+    // Return a proxy queryBuilder whose `select` intercepts the assembly
+    // version column list and otherwise defers to the original builder.
+    const proxy = Object.create(queryBuilder) as typeof queryBuilder
+    proxy.select = vi.fn().mockImplementation((columns?: string) => {
+      if (columns === 'id, assembly_version, assembly_status') {
+        return versionsBuilder
+      }
+      return queryBuilder
+    }) as unknown as typeof queryBuilder.select
+    return proxy
+  })
+
+  const rpc = vi.fn((name: string, _args: unknown) => {
+    if (name === 'requeue_story_for_reassembly') {
+      return Promise.resolve({ data: rpcOptions.requeueReturn ?? true, error: null })
+    }
+    if (name === 'bump_assembly_version') {
+      return Promise.resolve({ data: null, error: null })
+    }
+    return Promise.resolve({ data: null, error: null })
+  })
+
   return {
-    from: vi.fn().mockReturnValue(queryBuilder),
+    from: fromMock,
+    rpc,
   } as unknown as SupabaseClient<Database>
 }
 
@@ -170,7 +218,7 @@ describe('updateReviewStatus', () => {
     )
   })
 
-  it('reprocesses a story by resetting to pending', async () => {
+  it('reprocesses a story by resetting metadata and calling guarded requeue RPC', async () => {
     const builder = createMockQueryBuilder(mockStory)
     const client = createMockClient(builder)
 
@@ -178,14 +226,30 @@ describe('updateReviewStatus', () => {
       action: 'reprocess',
     })
 
+    // Non-status fields are written via the UPDATE path.
     expect(builder.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        review_status: 'pending',
-        publication_status: 'draft',
-        assembly_status: 'pending',
         headline: 'Pending headline generation',
+        processing_error: null,
+        assembled_at: null,
       })
     )
+    // The status reset is delegated to the guarded RPC.
+    expect(client.rpc).toHaveBeenCalledWith(
+      'requeue_story_for_reassembly',
+      expect.objectContaining({
+        p_story_id: 'story-1',
+      })
+    )
+  })
+
+  it('throws when reprocess is guarded because story is currently being assembled', async () => {
+    const builder = createMockQueryBuilder(mockStory)
+    const client = createMockClient(builder, { requeueReturn: false })
+
+    await expect(
+      updateReviewStatus(client, 'story-1', 'admin-user-id', { action: 'reprocess' })
+    ).rejects.toThrow(/currently being assembled/)
   })
 
   it('throws on update error', async () => {

@@ -9,24 +9,66 @@ import { generateEmbeddingBatch } from '@/lib/ai/gemini-client'
 
 const mockGenerateEmbeddingBatch = vi.mocked(generateEmbeddingBatch)
 
+interface MockArticleRow {
+  id: string
+  title: string
+  description: string | null
+  title_fingerprint: string | null
+  // Optional: simulates what the atomic claim RPC's expiry filter would see.
+  embedding_claimed_at?: string | null
+}
+
+const CLAIM_TTL_MS = 30 * 60 * 1000
+
 function createMockClient(
-  articles: unknown[] | null,
+  articles: MockArticleRow[] | null,
   fetchError: unknown = null,
   updateError: unknown = null,
   cacheRows: unknown[] = [],
   cacheError: unknown = null
 ) {
+  // --- update().eq() path (used by bulkWriteEmbeddings non-upsert fallback) ---
   const updateEq = vi.fn().mockResolvedValue({ error: updateError })
   const update = vi.fn().mockReturnValue({ eq: updateEq })
 
-  // Main fetch chain: select → eq → order → order → limit → returns
-  const returns = vi.fn().mockResolvedValue({ data: articles, error: fetchError })
-  const fetchLimit = vi.fn().mockReturnValue({ returns })
-  const order2 = vi.fn().mockReturnValue({ limit: fetchLimit })
-  const order1 = vi.fn().mockReturnValue({ order: order2 })
-  const fetchEq = vi.fn().mockReturnValue({ order: order1 })
+  // --- upsert (preferred write path) ---
+  const upsert = vi.fn().mockResolvedValue({ error: updateError })
 
-  // Cache lookup chain: select → in → eq → not (returns data directly, no limit)
+  // --- client.rpc — handles claim + release RPCs ---
+  const rpc = vi.fn((name: string, args: { p_owner?: string; p_limit?: number }) => {
+    if (name === 'claim_articles_for_embedding') {
+      if (fetchError) return Promise.resolve({ data: null, error: fetchError })
+      const all = (articles ?? []) as MockArticleRow[]
+      const now = Date.now()
+      const claimable = all.filter((a) => {
+        const claimedAt = a.embedding_claimed_at ?? null
+        if (!claimedAt) return true
+        const claimedMs = new Date(claimedAt).getTime()
+        return Number.isNaN(claimedMs) || now - claimedMs >= CLAIM_TTL_MS
+      })
+      const limit = args.p_limit ?? claimable.length
+      return Promise.resolve({ data: claimable.slice(0, limit).map((a) => a.id), error: null })
+    }
+    if (name === 'release_embedding_claim') {
+      return Promise.resolve({ data: true, error: null })
+    }
+    return Promise.resolve({ data: null, error: null })
+  })
+
+  // --- select('id, title, description, title_fingerprint').in('id', ids) path ---
+  const fetchByIdsIn = vi.fn((_col: string, ids: string[]) => {
+    const all = (articles ?? []) as MockArticleRow[]
+    const bySet = new Set(ids)
+    const rows = all.filter((a) => bySet.has(a.id)).map((a) => ({
+      id: a.id,
+      title: a.title,
+      description: a.description,
+      title_fingerprint: a.title_fingerprint,
+    }))
+    return Promise.resolve({ data: rows, error: null })
+  })
+
+  // --- select('title_fingerprint, title, description, embedding').in().eq().not() path ---
   const cacheNot = vi.fn().mockResolvedValue({ data: cacheRows, error: cacheError })
   const cacheEq = vi.fn().mockReturnValue({ not: cacheNot })
   const cacheIn = vi.fn().mockReturnValue({ eq: cacheEq })
@@ -35,18 +77,24 @@ function createMockClient(
     if (fields === 'title_fingerprint, title, description, embedding') {
       return { in: cacheIn }
     }
-    return { eq: fetchEq }
+    if (fields === 'id, title, description, title_fingerprint') {
+      return { in: fetchByIdsIn }
+    }
+    return { in: fetchByIdsIn }
   })
 
   return {
     from: vi.fn(() => ({
       select,
       update,
+      upsert,
     })),
+    rpc,
     _update: update,
-    _selectEq: fetchEq,
-    _limit: fetchLimit,
+    _upsert: upsert,
     _cacheIn: cacheIn,
+    _rpc: rpc,
+    _fetchByIdsIn: fetchByIdsIn,
   }
 }
 
@@ -74,23 +122,25 @@ describe('embedUnembeddedArticles', () => {
 
     const result = await embedUnembeddedArticles(client as never, 2)
 
-    expect(client._selectEq).toHaveBeenCalledWith('is_embedded', false)
-    expect(client._limit).toHaveBeenCalledWith(6)
+    expect(client._rpc).toHaveBeenCalledWith(
+      'claim_articles_for_embedding',
+      expect.objectContaining({ p_limit: 2 })
+    )
     expect(result.totalProcessed).toBe(2)
     expect(result.claimedArticles).toBe(2)
     expect(result.cacheHits).toBe(0)
     expect(result.errors).toEqual([])
-    expect(client._update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        embedding_claimed_at: expect.any(String),
-      })
-    )
-    expect(client._update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        embedding: [0.1, 0.2],
-        is_embedded: true,
-        embedding_claimed_at: null,
-      })
+    // Writes are batched via upsert with the completion payload.
+    expect(client._upsert).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          embedding: [0.1, 0.2],
+          is_embedded: true,
+          embedding_claimed_at: null,
+          embedding_claim_owner: null,
+        }),
+      ]),
+      { onConflict: 'id' }
     )
   })
 
@@ -167,19 +217,21 @@ describe('embedUnembeddedArticles', () => {
 
     const result = await embedUnembeddedArticles(client as never, 2)
 
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       totalProcessed: 0,
       claimedArticles: 2,
       cacheHits: 0,
       errors: ['Batch embedding failed: provider unavailable'],
-      dbTimeMs: 0,
       modelTimeMs: 0,
-    })
-    expect(client._update.mock.calls).toEqual(
-      expect.arrayContaining([
-        [expect.objectContaining({ embedding_claimed_at: expect.any(String) })],
-        [expect.objectContaining({ embedding_claimed_at: null })],
-      ])
+    }))
+    // Failure path releases claims via owner-scoped RPC.
+    expect(client._rpc).toHaveBeenCalledWith(
+      'release_embedding_claim',
+      expect.objectContaining({ p_article_id: 'a1' })
+    )
+    expect(client._rpc).toHaveBeenCalledWith(
+      'release_embedding_claim',
+      expect.objectContaining({ p_article_id: 'a2' })
     )
   })
 

@@ -3,46 +3,46 @@ import {
   clusterArticles,
 } from '@/lib/ai/clustering'
 
+const CLAIM_TTL_MS = 30 * 60 * 1000
+
 /**
- * Build a mock Supabase client that simulates the chained query API.
+ * Build a mock Supabase client that simulates the atomic-claim clustering API.
  *
- * `articleRows` controls what the articles SELECT returns.
+ * `articleRows` controls what the claim RPC + subsequent fetch return.
  * `storyRows` controls what the stories SELECT returns.
- * The mock tracks all update/insert calls for assertions.
+ * The mock tracks update/insert/release calls for assertions.
  */
 function createMockClient(
   articleRows: Record<string, unknown>[] = [],
   storyRows: Record<string, unknown>[] = [],
   options: {
     failSingletonUpdate?: boolean
-    failInitialClaimIds?: string[]
+    skipClaimIds?: string[]
     failStoryFetch?: boolean
     rpcResults?: Record<string, unknown>[] | null
     rpcError?: { message: string } | null
   } = {},
 ) {
   const articleUpdateCalls: { payload: Record<string, unknown>; id: string }[] = []
+  const releasedClaims: string[] = []
 
-  // Article select chain for fetching unassigned articles
-  // Chain: .select().eq('is_embedded').is('story_id').eq('clustering_status').order().order().limit().returns()
-  const articleReturns = vi.fn().mockResolvedValue({
-    data: articleRows,
-    error: null,
+  // --- Article fetch by claimed IDs: select(...).in('id', ids) ---
+  const fetchArticlesByIds = vi.fn((_col: string, ids: string[]) => {
+    const bySet = new Set(ids)
+    const matching = (articleRows as Record<string, unknown>[]).filter(
+      (a) => bySet.has(a.id as string)
+    )
+    return Promise.resolve({ data: matching, error: null })
   })
-  const articleLimit = vi.fn().mockReturnValue({ returns: articleReturns })
-  const articleOrder2 = vi.fn().mockReturnValue({ limit: articleLimit })
-  const articleOrder = vi.fn().mockReturnValue({ order: articleOrder2 })
-  const articleEqClusteringStatus = vi.fn().mockReturnValue({ order: articleOrder })
-  const articleIs = vi.fn().mockReturnValue({ eq: articleEqClusteringStatus })
-  const articleEq = vi.fn().mockReturnValue({ is: articleIs })
-  const articleSelect = vi.fn().mockReturnValue({ eq: articleEq })
+  const articleSelect = vi.fn().mockReturnValue({ in: fetchArticlesByIds })
 
-  // Story insert chain
-  const storySingle = vi.fn().mockResolvedValue({ data: { id: 'story-1' }, error: null })
-  const storySelectAfterInsert = vi.fn().mockReturnValue({ single: storySingle })
-  const storyInsert = vi.fn().mockReturnValue({ select: storySelectAfterInsert })
+  // --- Story insert: the RPC now handles this atomically, so the mock
+  //     simply records the payloads that would have been inserted. We
+  //     expose a spy on the RPC path so existing `_storyInsert` assertions
+  //     still work unchanged.
+  const storyInsert = vi.fn()
 
-  // Story select chain for fetching existing stories
+  // --- Story fetch chain for existing stories used in clustering ---
   const storyReturns = vi.fn().mockResolvedValue(
     options.failStoryFetch
       ? { data: null, error: { message: 'DB error' } }
@@ -57,7 +57,7 @@ function createMockClient(
     return { insert: storyInsert }
   })
 
-  // Track story deletions
+  // --- Story deletions tracker ---
   const storyDeleteCalls: string[] = []
   const storyDelete = vi.fn().mockReturnValue({
     eq: vi.fn().mockImplementation((_col: string, id: string) => {
@@ -66,10 +66,52 @@ function createMockClient(
     }),
   })
 
-  // RPC mock for match_story_centroid
+  // --- RPC mock: claim/release + create_story_with_articles + match_story_centroid ---
   const rpcCalls: { fn: string; params: Record<string, unknown> }[] = []
+  let nextStoryIdCounter = 1
+  const storyCreatePayloads: Array<{ payload: Record<string, unknown>; articleIds: string[] }> = []
   const rpcMock = vi.fn().mockImplementation((fn: string, params: Record<string, unknown>) => {
     rpcCalls.push({ fn, params })
+    if (fn === 'claim_articles_for_clustering') {
+      const now = Date.now()
+      const skipSet = new Set(options.skipClaimIds ?? [])
+      const claimable = articleRows.filter((row) => {
+        if (skipSet.has(row.id as string)) return false
+        const claimedAt = (row.clustering_claimed_at as string | null | undefined) ?? null
+        if (!claimedAt) return true
+        const claimedMs = new Date(claimedAt).getTime()
+        return Number.isNaN(claimedMs) || now - claimedMs >= CLAIM_TTL_MS
+      })
+      const limit = (params.p_limit as number | undefined) ?? claimable.length
+      return Promise.resolve({
+        data: claimable.slice(0, limit).map((a) => a.id as string),
+        error: null,
+      })
+    }
+    if (fn === 'release_clustering_claim') {
+      releasedClaims.push(params.p_article_id as string)
+      return Promise.resolve({ data: true, error: null })
+    }
+    if (fn === 'create_story_with_articles') {
+      const articleIds = params.p_article_ids as string[]
+      // Record for legacy `_storyInsert` assertions.
+      storyInsert(params.p_story)
+      if (options.failSingletonUpdate) {
+        // Simulate an atomic rollback: no story is created and no
+        // articles are touched — the RPC raises and rolls back.
+        return Promise.resolve({
+          data: null,
+          error: { message: 'Simulated transactional failure' },
+        })
+      }
+      const newStoryId = `story-${nextStoryIdCounter}`
+      nextStoryIdCounter += 1
+      storyCreatePayloads.push({
+        payload: params.p_story as Record<string, unknown>,
+        articleIds: [...articleIds],
+      })
+      return Promise.resolve({ data: newStoryId, error: null })
+    }
     if (options.rpcError) {
       return Promise.resolve({ data: null, error: options.rpcError })
     }
@@ -84,12 +126,6 @@ function createMockClient(
           update: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
             return {
               in: vi.fn().mockImplementation((_col: string, ids: string[]) => {
-                if (payload.clustering_claimed_at) {
-                  const shouldFail = ids.some((id) => options.failInitialClaimIds?.includes(id))
-                  if (shouldFail) {
-                    return Promise.resolve({ error: { message: 'Simulated initial claim failure' } })
-                  }
-                }
                 if (options.failSingletonUpdate && payload.clustering_status === 'clustered') {
                   return Promise.resolve({ error: { message: 'Simulated update failure' } })
                 }
@@ -120,7 +156,8 @@ function createMockClient(
     _storyInsert: storyInsert,
     _storyDeleteCalls: storyDeleteCalls,
     _articleUpdateCalls: articleUpdateCalls,
-    _storySingle: storySingle,
+    _releasedClaims: releasedClaims,
+    _storyCreatePayloads: storyCreatePayloads,
     _rpcCalls: rpcCalls,
   }
 }
@@ -251,13 +288,17 @@ describe('clusterArticles', () => {
       })
     )
 
-    // Should have updated the article with clustered status
-    const promotionUpdate = client._articleUpdateCalls.find(
-      c => c.id === 'singleton-1' && c.payload.clustering_status === 'clustered'
+    // The transactional RPC assigned the article to the new story.
+    const creation = client._storyCreatePayloads.find(
+      (c) => c.articleIds.includes('singleton-1')
     )
-    expect(promotionUpdate).toBeDefined()
-    expect(promotionUpdate!.payload.clustering_attempts).toBe(3)
-    expect(promotionUpdate!.payload.story_id).toBe('story-1')
+    expect(creation).toBeDefined()
+
+    // A follow-up UPDATE bumps clustering_attempts to 3 (the retry budget).
+    const attemptsUpdate = client._articleUpdateCalls.find(
+      (c) => c.id === 'singleton-1' && c.payload.clustering_attempts === 3
+    )
+    expect(attemptsUpdate).toBeDefined()
   })
 
   it('increments clustering_attempts and releases singleton with < 3 attempts', async () => {
@@ -290,18 +331,19 @@ describe('clusterArticles', () => {
     expect(incrementUpdate!.payload.clustering_claimed_at).toBeNull()
   })
 
-  it('sets clustering_status to clustered when assigning articles to stories', async () => {
+  it('assigns clustered articles to a new story atomically via the RPC', async () => {
     const client = createMockClient(TWO_SIMILAR_ARTICLES)
 
     const result = await clusterArticles(client as never)
 
     expect(result.assignedArticles).toBe(2)
 
-    // Both assigned articles should have clustering_status: 'clustered'
-    const clusteredUpdates = client._articleUpdateCalls.filter(
-      c => c.payload.clustering_status === 'clustered' && c.payload.story_id != null
+    // Both assigned articles should appear in the atomic create_story_with_articles payload.
+    const creation = client._storyCreatePayloads.find(
+      (c) => c.articleIds.length === 2
     )
-    expect(clusteredUpdates.length).toBe(2)
+    expect(creation).toBeDefined()
+    expect(creation!.articleIds).toEqual(expect.arrayContaining(['a1', 'a2']))
   })
 
   it('runs expiry sweep even when no articles to process', async () => {
@@ -312,7 +354,7 @@ describe('clusterArticles', () => {
     expect(result.expiredArticles).toBe(0)
   })
 
-  it('handles article-update failure after singleton promotion story insert', async () => {
+  it('rolls back atomically when singleton promotion RPC fails', async () => {
     const client = createMockClient(
       [
         {
@@ -338,48 +380,43 @@ describe('clusterArticles', () => {
     expect(result.assignedArticles).toBe(0)
     expect(result.newStories).toBe(0)
     expect(result.errors.length).toBe(1)
-    expect(result.errors[0]).toContain('Failed to assign promoted singleton singleton-fail')
+    expect(result.errors[0]).toContain('Failed to promote singleton singleton-fail')
 
-    // Should have deleted the orphan story
-    expect(client._storyDeleteCalls).toEqual(['story-1'])
+    // The RPC transactional rollback means no story was ever inserted — so
+    // no compensating delete is required. The old "_storyDeleteCalls" check
+    // does not apply here anymore.
+    expect(client._storyDeleteCalls).toEqual([])
   })
 
-  it('does not process articles whose initial claim update failed', async () => {
+  it('does not process articles that the atomic claim RPC skipped', async () => {
+    // The claim RPC is atomic: if another runner owns a row, it is simply
+    // absent from the returned ID list. There is no per-article "failed
+    // claim" path anymore — the runner works on whatever IDs it receives.
     const client = createMockClient(
       [
-        {
-          ...TWO_SIMILAR_ARTICLES[0],
-          id: 'failed-claim',
-        },
-        {
-          ...TWO_SIMILAR_ARTICLES[1],
-          id: 'claimed-ok',
-          clustering_claimed_at: null,
-        },
+        { ...TWO_SIMILAR_ARTICLES[0], id: 'skipped-by-rpc', clustering_claimed_at: null },
       ],
       [],
-      { failInitialClaimIds: ['failed-claim'] },
+      { skipClaimIds: ['skipped-by-rpc'] },
     )
 
     const result = await clusterArticles(client as never)
 
     expect(result.assignedArticles).toBe(0)
-    expect(result.errors).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining('claim'),
-      ]),
-    )
+    expect(result.errors).toEqual([])
   })
 
-  it('releases claims in finally block if processing throws an error', async () => {
+  it('releases claims via release RPC if processing throws an error', async () => {
     const articles = TWO_SIMILAR_ARTICLES
     const client = createMockClient(articles, [], { failStoryFetch: true })
 
     await expect(clusterArticles(client as never)).rejects.toThrow('Failed to fetch existing stories: DB error')
 
-    // The finally block should have fired a release update
-    const releaseUpdates = client._articleUpdateCalls.filter(c => c.payload.clustering_claimed_at === null)
-    expect(releaseUpdates.length).toBe(articles.length)
+    // The finally block releases every claim via the owner-scoped RPC.
+    expect(client._releasedClaims.length).toBe(articles.length)
+    for (const article of articles) {
+      expect(client._releasedClaims).toContain(article.id)
+    }
   })
 
   it('matches articles to existing stories via pgvector RPC', async () => {
@@ -414,9 +451,9 @@ describe('clusterArticles', () => {
 
     expect(result.assignedArticles).toBe(1)
     expect(result.newStories).toBe(0)
-    // RPC should have been called for match_story_centroid
-    expect(client._rpcCalls.length).toBeGreaterThan(0)
-    expect(client._rpcCalls[0].fn).toBe('match_story_centroid')
+    // match_story_centroid should have been called during Pass 1 (after the
+    // atomic claim RPC).
+    expect(client._rpcCalls.some((c) => c.fn === 'match_story_centroid')).toBe(true)
   })
 
   it('falls back to JS brute-force when RPC fails without errors', async () => {

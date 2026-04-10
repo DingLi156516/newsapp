@@ -38,8 +38,8 @@ vi.mock('@/lib/pipeline/logger', () => {
   }
 })
 
-vi.mock('@/lib/rss/ingest', () => ({
-  ingestFeeds: vi.fn().mockResolvedValue({ totalFeeds: 3, newArticles: 10 }),
+vi.mock('@/lib/ingestion/ingest', () => ({
+  ingestAllSources: vi.fn().mockResolvedValue({ totalFeeds: 3, newArticles: 10 }),
 }))
 
 vi.mock('@/lib/ai/embeddings', () => ({
@@ -213,8 +213,8 @@ describe('POST /api/admin/pipeline/trigger', () => {
     expect(body.success).toBe(true)
     expect(body.data.runId).toBe('run-mock-id')
 
-    const { ingestFeeds } = await import('@/lib/rss/ingest')
-    expect(ingestFeeds).toHaveBeenCalled()
+    const { ingestAllSources } = await import('@/lib/ingestion/ingest')
+    expect(ingestAllSources).toHaveBeenCalled()
 
     const { embedUnembeddedArticles } = await import('@/lib/ai/embeddings')
     expect(embedUnembeddedArticles).not.toHaveBeenCalled()
@@ -261,8 +261,8 @@ describe('POST /api/admin/pipeline/trigger', () => {
     expect(body.data.assembly.autoPublished).toBe(1)
     expect(body.data.assembly.sentToReview).toBe(1)
 
-    const { ingestFeeds } = await import('@/lib/rss/ingest')
-    expect(ingestFeeds).not.toHaveBeenCalled()
+    const { ingestAllSources } = await import('@/lib/ingestion/ingest')
+    expect(ingestAllSources).not.toHaveBeenCalled()
 
     const { embedUnembeddedArticles } = await import('@/lib/ai/embeddings')
     const { clusterArticles } = await import('@/lib/ai/clustering')
@@ -287,11 +287,11 @@ describe('POST /api/admin/pipeline/trigger', () => {
     expect(response.status).toBe(200)
     expect(body.success).toBe(true)
 
-    const { ingestFeeds } = await import('@/lib/rss/ingest')
+    const { ingestAllSources } = await import('@/lib/ingestion/ingest')
     const { embedUnembeddedArticles } = await import('@/lib/ai/embeddings')
     const { clusterArticles } = await import('@/lib/ai/clustering')
     const { assembleStories } = await import('@/lib/ai/story-assembler')
-    expect(ingestFeeds).toHaveBeenCalled()
+    expect(ingestAllSources).toHaveBeenCalled()
     expect(embedUnembeddedArticles).toHaveBeenCalled()
     expect(clusterArticles).toHaveBeenCalled()
     // With Infinity budget, assembly runs alongside freshness stages

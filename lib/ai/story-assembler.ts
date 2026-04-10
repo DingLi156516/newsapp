@@ -22,7 +22,13 @@ import { calculateSpectrum } from '@/lib/ai/spectrum-calculator'
 import { isBlindspot } from '@/lib/ai/blindspot-detector'
 import { extractEntities } from '@/lib/ai/entity-extractor'
 import { upsertStoryTags } from '@/lib/ai/tag-upsert'
-import { ASSEMBLY_CLAIM_TTL_MS, isClaimAvailable } from '@/lib/pipeline/claim-utils'
+import {
+  claimAssemblyBatch,
+  generateClaimOwner,
+  releaseAssemblyClaim,
+  type ClaimOwner,
+} from '@/lib/pipeline/claim-utils'
+import { bumpAssemblyVersion } from '@/lib/pipeline/reassembly'
 import { decideStoryPublication } from '@/lib/pipeline/story-state'
 
 export function scheduleTagExtraction(
@@ -70,7 +76,6 @@ export interface AssembleStoriesOptions {
 
 interface PendingStory {
   id: string
-  assembly_claimed_at: string | null
   first_published: string
 }
 
@@ -91,7 +96,6 @@ interface StoryAssemblyBatchResult {
   readonly failureDbTimeMs?: number
 }
 
-const CLAIM_SCAN_MULTIPLIER = 3
 const DEFAULT_STORY_ASSEMBLY_CONCURRENCY = Math.max(
   1,
   Number(process.env.PIPELINE_ASSEMBLY_CONCURRENCY ?? 12)
@@ -118,43 +122,28 @@ function dominantValue<T extends string>(values: readonly T[], fallback: T): T {
   return dominant
 }
 
-async function claimStories(
+/**
+ * Fetch metadata for stories we atomically claimed via the
+ * `claim_stories_for_assembly` RPC. The RPC already transitioned
+ * assembly_status to 'processing'; here we pull the fields the
+ * assembler needs.
+ */
+async function fetchClaimedStoryMetadata(
   client: SupabaseClient<Database>,
-  storyIds: readonly string[],
-  claimedAt: string
-): Promise<void> {
-  if (storyIds.length === 0) {
-    return
-  }
+  claimedIds: readonly string[]
+): Promise<PendingStory[]> {
+  if (claimedIds.length === 0) return []
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const query = (client.from('stories') as any)
-    .update({
-      assembly_status: 'processing',
-      assembly_claimed_at: claimedAt,
-    })
+  const query = (client.from('stories') as any).select('id, first_published')
+  const withFilter = typeof query.in === 'function' ? query.in('id', claimedIds) : query
 
-  if (typeof query.in === 'function') {
-    const { error } = await query.in('id', storyIds)
-    if (error) {
-      throw new Error(`Failed to claim stories for assembly: ${error.message}`)
-    }
-    return
+  const { data, error } = await withFilter
+  if (error) {
+    throw new Error(`Failed to fetch claimed stories: ${error.message}`)
   }
 
-  for (const storyId of storyIds) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (client.from('stories') as any)
-      .update({
-        assembly_status: 'processing',
-        assembly_claimed_at: claimedAt,
-      })
-      .eq('id', storyId)
-
-    if (error) {
-      throw new Error(`Failed to claim story ${storyId}: ${error.message}`)
-    }
-  }
+  return (data as PendingStory[] | null) ?? []
 }
 
 // nextIndex mutation is safe: Node.js is single-threaded, and each worker
@@ -348,6 +337,7 @@ export async function assembleSingleStory(
       assembled_at: now,
       published_at: publicationDecision.publicationStatus === 'published' ? now : null,
       assembly_claimed_at: null,
+      assembly_claim_owner: null,
       last_updated: now,
     })
     .eq('id', storyId)
@@ -356,6 +346,10 @@ export async function assembleSingleStory(
   if (updateError) {
     throw new Error(`Failed to update story ${storyId}: ${updateError.message}`)
   }
+
+  // Bump assembly_version so any concurrent requeue caller with a stale
+  // version read will see a mismatch and skip its stale reset attempt.
+  await bumpAssemblyVersion(client, storyId)
 
   const tagPromise = scheduleTagExtraction(client, storyId, titles, descriptions)
 
@@ -384,55 +378,9 @@ export async function assembleSingleStory(
 export async function assembleStories(
   client: SupabaseClient<Database>,
   maxStories = 50,
-  options?: AssembleStoriesOptions
+  options?: AssembleStoriesOptions,
+  owner: ClaimOwner = generateClaimOwner()
 ): Promise<AssemblyResult> {
-  const { data: fetchedStories, error: fetchError } = await client
-    .from('stories')
-    .select('id, assembly_claimed_at, first_published')
-    .eq('assembly_status', 'pending')
-    .order('first_published', { ascending: true })
-    .order('id', { ascending: true })
-    .limit(maxStories * CLAIM_SCAN_MULTIPLIER)
-    .returns<PendingStory[]>()
-
-  if (fetchError) {
-    throw new Error(`Failed to fetch pending stories: ${fetchError.message}`)
-  }
-
-  if (!fetchedStories || fetchedStories.length === 0) {
-    return {
-      storiesProcessed: 0,
-      claimedStories: 0,
-      autoPublished: 0,
-      sentToReview: 0,
-      errors: [],
-      dbTimeMs: 0,
-      modelTimeMs: 0,
-      cheapModelTasks: 0,
-      cheapModelFallbacks: 0,
-      summaryFallbacks: 0,
-    }
-  }
-
-  const pendingStories = fetchedStories
-    .filter((story) => isClaimAvailable(story.assembly_claimed_at, ASSEMBLY_CLAIM_TTL_MS))
-    .slice(0, maxStories)
-
-  if (pendingStories.length === 0) {
-    return {
-      storiesProcessed: 0,
-      claimedStories: 0,
-      autoPublished: 0,
-      sentToReview: 0,
-      errors: [],
-      dbTimeMs: 0,
-      modelTimeMs: 0,
-      cheapModelTasks: 0,
-      cheapModelFallbacks: 0,
-      summaryFallbacks: 0,
-    }
-  }
-
   const errors: string[] = []
   let storiesProcessed = 0
   let autoPublished = 0
@@ -442,16 +390,59 @@ export async function assembleStories(
   let cheapModelTasks = 0
   let cheapModelFallbacks = 0
   let summaryFallbacks = 0
+
+  const claimStartedAt = Date.now()
+  const claimedIds = await claimAssemblyBatch(client, owner, maxStories)
+  dbTimeMs += Date.now() - claimStartedAt
+
+  if (claimedIds.length === 0) {
+    return {
+      storiesProcessed: 0,
+      claimedStories: 0,
+      autoPublished: 0,
+      sentToReview: 0,
+      errors: [],
+      dbTimeMs,
+      modelTimeMs: 0,
+      cheapModelTasks: 0,
+      cheapModelFallbacks: 0,
+      summaryFallbacks: 0,
+    }
+  }
+
+  let pendingStories: PendingStory[]
+  const fetchStartedAt = Date.now()
+  try {
+    pendingStories = await fetchClaimedStoryMetadata(client, claimedIds)
+  } catch (err) {
+    // Release claims so another run can retry.
+    await Promise.all(
+      claimedIds.map((id) => releaseAssemblyClaim(client, id, owner))
+    )
+    throw err
+  }
+  dbTimeMs += Date.now() - fetchStartedAt
+
+  if (pendingStories.length === 0) {
+    return {
+      storiesProcessed: 0,
+      claimedStories: claimedIds.length,
+      autoPublished: 0,
+      sentToReview: 0,
+      errors,
+      dbTimeMs,
+      modelTimeMs: 0,
+      cheapModelTasks: 0,
+      cheapModelFallbacks: 0,
+      summaryFallbacks: 0,
+    }
+  }
+
   const claimedStories = pendingStories.length
-  const claimedAt = new Date().toISOString()
   const concurrency = Math.max(
     1,
     Math.min(claimedStories, Math.floor(options?.concurrency ?? DEFAULT_STORY_ASSEMBLY_CONCURRENCY))
   )
-
-  const claimStartedAt = Date.now()
-  await claimStories(client, pendingStories.map((story) => story.id), claimedAt)
-  dbTimeMs += Date.now() - claimStartedAt
 
   const batchResults = await mapWithConcurrency<PendingStory, StoryAssemblyBatchResult>(
     pendingStories,
@@ -473,9 +464,11 @@ export async function assembleStories(
             review_reasons: ['assembly_failed'],
             processing_error: message,
             assembly_claimed_at: null,
+            assembly_claim_owner: null,
             last_updated: new Date().toISOString(),
           })
           .eq('id', story.id)
+        await bumpAssemblyVersion(client, story.id)
         return { storyId: story.id, error: formattedMessage, failureDbTimeMs: Date.now() - failureStartedAt }
       }
     }

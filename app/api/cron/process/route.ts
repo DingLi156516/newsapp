@@ -14,6 +14,7 @@ import { assembleStories } from '@/lib/ai/story-assembler'
 import { PipelineLogger } from '@/lib/pipeline/logger'
 import { countPipelineBacklog } from '@/lib/pipeline/backlog'
 import { runProcessPipeline } from '@/lib/pipeline/process-runner'
+import { generateClaimOwner } from '@/lib/pipeline/claim-utils'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -41,11 +42,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   try {
     await logger.startRun('process', 'cron')
+    const claimOwner = generateClaimOwner()
     const summary = await runProcessPipeline({
       countBacklog: () => countPipelineBacklog(client),
-      embed: (maxArticles) => embedUnembeddedArticles(client, maxArticles),
-      cluster: (maxArticles) => clusterArticles(client, maxArticles),
-      assemble: (maxStories) => assembleStories(client, maxStories),
+      embed: (maxArticles) => embedUnembeddedArticles(client, maxArticles, claimOwner),
+      cluster: (maxArticles) => clusterArticles(client, maxArticles, claimOwner),
+      assemble: (maxStories) => assembleStories(client, maxStories, undefined, claimOwner),
       logStep: <T,>(step: string, fn: () => Promise<T>) =>
         logger.logStep(step, () => fn() as unknown as Promise<Record<string, unknown>>) as Promise<T>,
     }, { timeBudgetMs: 280_000 })

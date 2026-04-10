@@ -58,7 +58,26 @@ function createMockClient() {
     eq: vi.fn().mockResolvedValue({ error: null }),
   })
 
+  const claimedStoriesData = [
+    { id: 'story-1', first_published: '2026-03-22T10:00:00Z' },
+    { id: 'story-2', first_published: '2026-03-22T10:00:00Z' },
+  ]
+
+  const rpc = vi.fn((name: string, _args: Record<string, unknown>) => {
+    if (name === 'claim_stories_for_assembly') {
+      return Promise.resolve({
+        data: claimedStoriesData.map((s) => s.id),
+        error: null,
+      })
+    }
+    if (name === 'release_assembly_claim') {
+      return Promise.resolve({ data: true, error: null })
+    }
+    return Promise.resolve({ data: null, error: null })
+  })
+
   return {
+    rpc,
     from: vi.fn().mockImplementation((table: string) => {
       if (table === 'stories') {
         return {
@@ -73,23 +92,15 @@ function createMockClient() {
                 }),
               }
             }
-            return {
-              eq: vi.fn().mockReturnValue({
-                order: vi.fn().mockReturnValue({
-                  order: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockReturnValue({
-                      returns: vi.fn().mockResolvedValue({
-                        data: [
-                          { id: 'story-1', assembly_claimed_at: null, first_published: '2026-03-22T10:00:00Z' },
-                          { id: 'story-2', assembly_claimed_at: null, first_published: '2026-03-22T10:00:00Z' },
-                        ],
-                        error: null,
-                      }),
-                    }),
-                  }),
+            if (columns === 'id, first_published') {
+              return {
+                in: vi.fn().mockResolvedValue({
+                  data: claimedStoriesData,
+                  error: null,
                 }),
-              }),
+              }
             }
+            return {}
           }),
           update: updateFn,
         }

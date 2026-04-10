@@ -14,7 +14,14 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
-import { ARTICLE_STAGE_CLAIM_TTL_MS, isClaimAvailable } from '@/lib/pipeline/claim-utils'
+import {
+  claimClusteringBatch,
+  generateClaimOwner,
+  releaseClusteringClaim,
+  type ClaimOwner,
+} from '@/lib/pipeline/claim-utils'
+import { fetchAssemblyVersions, requeueStoryForReassembly } from '@/lib/pipeline/reassembly'
+import { createStoryWithArticles } from '@/lib/pipeline/cluster-writes'
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -24,7 +31,6 @@ const SIMILARITY_THRESHOLD = Number(process.env.CLUSTERING_SIMILARITY_THRESHOLD 
 const SPLIT_THRESHOLD = Number(process.env.CLUSTERING_SPLIT_THRESHOLD ?? 0.60)
 const PGVECTOR_CANDIDATE_COUNT = Number(process.env.CLUSTERING_CANDIDATE_COUNT ?? 15)
 const STANDARD_MATCH_WINDOW_HOURS = 168
-const CLAIM_SCAN_MULTIPLIER = 3
 const MAX_CLUSTERING_ATTEMPTS = 3
 const PGVECTOR_BATCH_SIZE = Number(process.env.CLUSTERING_PGVECTOR_BATCH_SIZE ?? 25)
 
@@ -41,7 +47,6 @@ interface EmbeddedArticleRow {
   created_at: string
   story_id: string | null
   image_url: string | null
-  clustering_claimed_at: string | null
   clustering_attempts: number
 }
 
@@ -54,7 +59,6 @@ interface EmbeddedArticle {
   created_at: string
   story_id: string | null
   image_url: string | null
-  clustering_claimed_at: string | null
   clustering_attempts: number
 }
 
@@ -179,11 +183,12 @@ function interleaveBySource(articles: EmbeddedArticle[]): EmbeddedArticle[] {
 /*  DB helpers                                                         */
 /* ------------------------------------------------------------------ */
 
-async function clearClusteringClaim(client: SupabaseClient<Database>, articleId: string): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (client.from('articles') as any)
-    .update({ clustering_claimed_at: null })
-    .eq('id', articleId)
+async function clearClusteringClaim(
+  client: SupabaseClient<Database>,
+  articleId: string,
+  owner: ClaimOwner
+): Promise<void> {
+  await releaseClusteringClaim(client, articleId, owner)
 }
 
 async function bulkUpdateArticles(
@@ -227,94 +232,111 @@ async function bulkUpdateArticles(
   return { failedIds, message: firstMessage }
 }
 
-async function queueStoryForReassembly(
+/**
+ * Guarded batch reassembly. Reads each story's current assembly_version
+ * then calls the `requeue_story_for_reassembly` RPC for each. Any story
+ * that is currently being assembled (or whose version no longer matches)
+ * will not be reset — we log a soft "guarded" entry and leave the
+ * running assembler to finish.
+ */
+async function queueStoriesForReassembly(
   client: SupabaseClient<Database>,
-  storyId: string,
-  nowIso: string
-): Promise<{ error: { message: string } | null }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (client.from('stories') as any)
-    .update({
-      assembly_status: 'pending',
-      publication_status: 'draft',
-      review_status: 'pending',
-      review_reasons: [],
-      published_at: null,
-      assembly_claimed_at: null,
-      last_updated: nowIso,
-    })
-    .eq('id', storyId)
+  storyIds: readonly string[],
+  errors: string[]
+): Promise<void> {
+  if (storyIds.length === 0) return
+
+  let versions: Map<string, number>
+  try {
+    versions = await fetchAssemblyVersions(client, storyIds)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    errors.push(`Failed to read assembly versions before requeue: ${message}`)
+    return
+  }
+
+  for (const storyId of storyIds) {
+    const expectedVersion = versions.get(storyId)
+    if (expectedVersion === undefined) {
+      errors.push(`Cannot requeue story ${storyId}: missing assembly_version`)
+      continue
+    }
+
+    try {
+      const requeued = await requeueStoryForReassembly(client, storyId, expectedVersion)
+      if (!requeued) {
+        // Guarded: a concurrent assembler owns this story or another requeue
+        // won the race. The assembler will see the new state on its next pass.
+        errors.push(
+          `Story ${storyId} requeue guarded: currently processing or version mismatch (expected ${expectedVersion})`
+        )
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      errors.push(`Failed to queue story ${storyId} for reassembly: ${message}`)
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
-/*  Stage 1: Fetch unassigned articles                                 */
+/*  Stage 1+2: Atomically claim a clustering batch                     */
 /* ------------------------------------------------------------------ */
+//
+// Replaces the previous SELECT → filter → UPDATE pattern. The claim RPC
+// issues a DB-side compare-and-set with owner token (migration 037),
+// guaranteeing that two overlapping runners cannot claim the same rows.
+// After the RPC returns claimed IDs we fetch the full rows for processing.
 
-async function fetchUnassignedArticles(
+async function claimAndFetchArticles(
   client: SupabaseClient<Database>,
+  owner: ClaimOwner,
   maxArticles: number
-): Promise<EmbeddedArticle[]> {
-  const { data: fetchedRows, error: fetchError } = await client
-    .from('articles')
-    .select('id, title, source_id, embedding, published_at, created_at, story_id, image_url, clustering_claimed_at, clustering_attempts')
-    .eq('is_embedded', true)
-    .is('story_id', null)
-    .eq('clustering_status', 'pending')
-    .order('published_at', { ascending: true })
-    .order('id', { ascending: true })
-    .limit(maxArticles * CLAIM_SCAN_MULTIPLIER)
-    .returns<EmbeddedArticleRow[]>()
+): Promise<{ claimableArticles: EmbeddedArticle[]; errors: string[]; dbTimeMs: number }> {
+  const claimStartedAt = Date.now()
+  const claimedIds = await claimClusteringBatch(client, owner, maxArticles)
+  const claimDbTimeMs = Date.now() - claimStartedAt
 
-  if (fetchError) {
-    throw new Error(`Failed to fetch unassigned articles: ${fetchError.message}`)
+  if (claimedIds.length === 0) {
+    return { claimableArticles: [], errors: [], dbTimeMs: claimDbTimeMs }
   }
 
-  if (!fetchedRows || fetchedRows.length === 0) {
-    return []
+  const fetchStartedAt = Date.now()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const query = (client.from('articles') as any)
+    .select('id, title, source_id, embedding, published_at, created_at, story_id, image_url, clustering_attempts')
+
+  const withFilter = typeof query.in === 'function' ? query.in('id', claimedIds) : query
+  const { data: fetchedData, error: fetchError } = await withFilter
+  const fetchedRows = (fetchedData as EmbeddedArticleRow[] | null) ?? []
+  const fetchDbTimeMs = Date.now() - fetchStartedAt
+
+  if (fetchError) {
+    // Release all claims so a subsequent run can retry.
+    await Promise.all(
+      claimedIds.map((id) => releaseClusteringClaim(client, id, owner))
+    )
+    throw new Error(`Failed to fetch claimed clustering batch: ${fetchError.message}`)
+  }
+
+  if (fetchedRows.length === 0) {
+    return { claimableArticles: [], errors: [], dbTimeMs: claimDbTimeMs + fetchDbTimeMs }
   }
 
   const claimable = fetchedRows
-    .filter((row) => isClaimAvailable(row.clustering_claimed_at, ARTICLE_STAGE_CLAIM_TTL_MS))
-    .filter((row) => row.embedding !== null)
-    .map((row) => ({
+    .filter((row: EmbeddedArticleRow) => row.embedding !== null)
+    .map((row: EmbeddedArticleRow) => ({
       ...row,
       embedding: parseVector(row.embedding),
     }))
 
-  // Round-robin interleave by source_id for diversity
-  return interleaveBySource(claimable).slice(0, maxArticles)
-}
+  // Round-robin interleave by source_id for downstream diversity.
+  const claimableArticles = interleaveBySource(claimable)
 
-/* ------------------------------------------------------------------ */
-/*  Stage 2: Claim article batch                                       */
-/* ------------------------------------------------------------------ */
-
-async function claimArticleBatch(
-  client: SupabaseClient<Database>,
-  articles: readonly EmbeddedArticle[],
-  claimedAt: string
-): Promise<{ claimableArticles: EmbeddedArticle[]; errors: string[]; dbTimeMs: number }> {
-  const claimStartedAt = Date.now()
-  const { failedIds, message } = await bulkUpdateArticles(
-    client,
-    articles.map((a) => a.id),
-    { clustering_claimed_at: claimedAt }
-  )
-  const dbTimeMs = Date.now() - claimStartedAt
-
-  const errors: string[] = []
-
-  const claimableArticles = failedIds.length > 0
-    ? (() => {
-        const failedSet = new Set(failedIds)
-        errors.push(
-          `Failed to claim ${failedIds.length} articles for clustering: ${message ?? 'unknown error'}`
-        )
-        return articles.filter((a) => !failedSet.has(a.id)) as EmbeddedArticle[]
-      })()
-    : [...articles] as EmbeddedArticle[]
-
-  return { claimableArticles, errors, dbTimeMs }
+  return {
+    claimableArticles,
+    errors: [],
+    dbTimeMs: claimDbTimeMs + fetchDbTimeMs,
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -633,7 +655,8 @@ async function persistPass1Assignments(
   storyMap: Map<string, StoryTracker>,
   unhandledArticleIds: Set<string>,
   storiesNeedingReassembly: Set<string>,
-  errors: string[]
+  errors: string[],
+  owner: ClaimOwner
 ): Promise<{ assignedArticles: number; dbTimeMs: number }> {
   let assignedArticles = 0
   let dbTimeMs = 0
@@ -643,6 +666,7 @@ async function persistPass1Assignments(
     const { failedIds, message } = await bulkUpdateArticles(client, articleIds, {
       story_id: storyId,
       clustering_claimed_at: null,
+      clustering_claim_owner: null,
       clustering_status: 'clustered',
     })
     dbTimeMs += Date.now() - batchStartedAt
@@ -652,7 +676,7 @@ async function persistPass1Assignments(
       for (const aid of articleIds) {
         if (failedSet.has(aid)) {
           errors.push(`Failed to assign article ${aid}: ${message ?? 'unknown error'}`)
-          await clearClusteringClaim(client, aid)
+          await clearClusteringClaim(client, aid, owner)
           unhandledArticleIds.delete(aid)
         } else {
           assignedArticles++
@@ -685,7 +709,8 @@ async function persistNewClusters(
   storiesNeedingReassembly: Set<string>,
   unhandledArticleIds: Set<string>,
   errors: string[],
-  now: Date
+  now: Date,
+  owner: ClaimOwner
 ): Promise<{
   newStories: number
   assignedArticles: number
@@ -707,54 +732,54 @@ async function persistNewClusters(
 
       if (newAttempts >= MAX_CLUSTERING_ATTEMPTS) {
         const centroid = cluster.embeddings[0]
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: singletonStoryData, error: insertError } = await (client.from('stories') as any)
-          .insert({
-            headline: 'Pending headline generation',
-            story_kind: 'standard',
-            topic: 'politics' as const,
-            source_count: 0,
-            image_url: cluster.imageUrl,
-            cluster_centroid: centroid,
-            assembly_status: 'pending',
-            publication_status: 'draft',
-            review_status: 'pending',
-            review_reasons: [],
-            first_published: article.published_at,
-          })
-          .select('id').single()
+        const createStartedAt = Date.now()
+        try {
+          const newStoryId = await createStoryWithArticles(
+            client,
+            {
+              headline: 'Pending headline generation',
+              story_kind: 'standard',
+              topic: 'politics',
+              source_count: 0,
+              image_url: cluster.imageUrl,
+              cluster_centroid: centroid,
+              assembly_status: 'pending',
+              publication_status: 'draft',
+              review_status: 'pending',
+              review_reasons: [],
+              first_published: article.published_at,
+            },
+            [article.id]
+          )
+          dbTimeMs += Date.now() - createStartedAt
 
-        if (!insertError && singletonStoryData) {
-          const assignStartedAt = Date.now()
-          const { failedIds, message } = await bulkUpdateArticles(client, [article.id], {
-            story_id: singletonStoryData.id,
-            clustering_claimed_at: null,
-            clustering_attempts: newAttempts,
-            clustering_status: 'clustered',
-          })
-          dbTimeMs += Date.now() - assignStartedAt
+          // Even though create_story_with_articles set story_id + cleared the
+          // claim fields, we still need to bump clustering_attempts for the
+          // retry budget. Issue a follow-up UPDATE for that single column.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (client.from('articles') as any)
+            .update({ clustering_attempts: newAttempts })
+            .eq('id', article.id)
 
-          if (failedIds.length > 0) {
-            errors.push(`Failed to assign promoted singleton ${article.id}: ${message ?? 'unknown error'}`)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (client.from('stories') as any).delete().eq('id', singletonStoryData.id)
-            await clearClusteringClaim(client, article.id)
-          } else {
-            promotedSingletons++
-            assignedArticles++
-            newStories++
-            storyMap.set(singletonStoryData.id, { centroid, articleIds: [article.id] })
-          }
+          promotedSingletons++
+          assignedArticles++
+          newStories++
+          storyMap.set(newStoryId, { centroid, articleIds: [article.id] })
           unhandledArticleIds.delete(article.id)
-        } else {
-          errors.push(`Failed to promote singleton ${article.id}: ${insertError?.message}`)
-          await clearClusteringClaim(client, article.id)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          errors.push(`Failed to promote singleton ${article.id}: ${message}`)
+          await clearClusteringClaim(client, article.id, owner)
           unhandledArticleIds.delete(article.id)
         }
       } else {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (client.from('articles') as any)
-          .update({ clustering_claimed_at: null, clustering_attempts: newAttempts })
+          .update({
+            clustering_claimed_at: null,
+            clustering_claim_owner: null,
+            clustering_attempts: newAttempts,
+          })
           .eq('id', article.id)
         unmatchedSingletons++
         unhandledArticleIds.delete(article.id)
@@ -781,6 +806,7 @@ async function persistNewClusters(
       const { failedIds, message } = await bulkUpdateArticles(client, cluster.articleIds, {
         story_id: duplicateStoryId,
         clustering_claimed_at: null,
+        clustering_claim_owner: null,
         clustering_status: 'clustered',
       })
       dbTimeMs += Date.now() - dupAssignStartedAt
@@ -788,7 +814,7 @@ async function persistNewClusters(
       if (failedIds.length > 0) {
         for (const articleId of failedIds) {
           errors.push(`Failed to assign article ${articleId} to existing story: ${message ?? 'unknown error'}`)
-          await clearClusteringClaim(client, articleId)
+          await clearClusteringClaim(client, articleId, owner)
           unhandledArticleIds.delete(articleId)
         }
         assignedArticles += cluster.articleIds.length - failedIds.length
@@ -809,61 +835,49 @@ async function persistNewClusters(
       continue
     }
 
-    // Create new story
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: storyData, error: insertError } = await (client.from('stories') as any)
-      .insert({
-        headline: 'Pending headline generation',
-        story_kind: 'standard',
-        topic: 'politics' as const,
-        source_count: 0,
-        image_url: cluster.imageUrl,
-        cluster_centroid: centroid,
-        assembly_status: 'pending',
-        publication_status: 'draft',
-        review_status: 'pending',
-        review_reasons: [],
-        first_published: claimableArticles
-          .filter((article) => cluster.articleIds.includes(article.id))
-          .map((article) => article.published_at)
-          .sort()[0] ?? now.toISOString(),
-      })
-      .select('id')
-      .single()
+    // Create new story + assign articles atomically. If any step fails,
+    // the RPC rolls back the transaction and no orphan story remains.
+    const firstPublished = claimableArticles
+      .filter((article) => cluster.articleIds.includes(article.id))
+      .map((article) => article.published_at)
+      .sort()[0] ?? now.toISOString()
 
-    if (insertError || !storyData) {
-      errors.push(`Failed to create story: ${insertError?.message ?? 'no data returned'}`)
+    const createStartedAt = Date.now()
+    let newStoryId: string
+    try {
+      newStoryId = await createStoryWithArticles(
+        client,
+        {
+          headline: 'Pending headline generation',
+          story_kind: 'standard',
+          topic: 'politics',
+          source_count: 0,
+          image_url: cluster.imageUrl,
+          cluster_centroid: centroid,
+          assembly_status: 'pending',
+          publication_status: 'draft',
+          review_status: 'pending',
+          review_reasons: [],
+          first_published: firstPublished,
+        },
+        cluster.articleIds
+      )
+      dbTimeMs += Date.now() - createStartedAt
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      errors.push(`Failed to create story: ${message}`)
       for (const articleId of cluster.articleIds) {
-        await clearClusteringClaim(client, articleId)
+        await clearClusteringClaim(client, articleId, owner)
         unhandledArticleIds.delete(articleId)
       }
       continue
     }
 
     newStories++
+    assignedArticles += cluster.articleIds.length
+    cluster.articleIds.forEach((id) => unhandledArticleIds.delete(id))
 
-    const clusterAssignStartedAt = Date.now()
-    const { failedIds, message } = await bulkUpdateArticles(client, cluster.articleIds, {
-      story_id: storyData.id,
-      clustering_claimed_at: null,
-      clustering_status: 'clustered',
-    })
-    dbTimeMs += Date.now() - clusterAssignStartedAt
-
-    if (failedIds.length > 0) {
-      for (const articleId of failedIds) {
-        errors.push(`Failed to assign article ${articleId}: ${message ?? 'unknown error'}`)
-        await clearClusteringClaim(client, articleId)
-        unhandledArticleIds.delete(articleId)
-      }
-      assignedArticles += cluster.articleIds.length - failedIds.length
-      cluster.articleIds.filter((id) => !failedIds.includes(id)).forEach((id) => unhandledArticleIds.delete(id))
-    } else {
-      assignedArticles += cluster.articleIds.length
-      cluster.articleIds.forEach((id) => unhandledArticleIds.delete(id))
-    }
-
-    storyMap.set(storyData.id, {
+    storyMap.set(newStoryId, {
       centroid,
       articleIds: [...cluster.articleIds],
     })
@@ -878,28 +892,13 @@ async function persistNewClusters(
 
 export async function clusterArticles(
   client: SupabaseClient<Database>,
-  maxArticles = 1000
+  maxArticles = 1000,
+  owner: ClaimOwner = generateClaimOwner()
 ): Promise<ClusterResult> {
   const now = new Date()
 
-  /* --- Fetch unassigned articles --- */
-  const unassigned = await fetchUnassignedArticles(client, maxArticles)
-
-  if (unassigned.length === 0) {
-    return {
-      newStories: 0,
-      updatedStories: 0,
-      assignedArticles: 0,
-      unmatchedSingletons: 0,
-      promotedSingletons: 0,
-      expiredArticles: 0,
-      errors: [],
-      dbTimeMs: 0,
-    }
-  }
-
-  /* --- Claim articles for processing --- */
-  const claimResult = await claimArticleBatch(client, unassigned, now.toISOString())
+  /* --- Atomically claim + fetch articles --- */
+  const claimResult = await claimAndFetchArticles(client, owner, maxArticles)
   const { claimableArticles } = claimResult
   const errors = [...claimResult.errors]
   let dbTimeMs = claimResult.dbTimeMs
@@ -972,7 +971,8 @@ export async function clusterArticles(
       storyMap,
       unhandledArticleIds,
       storiesNeedingReassembly,
-      errors
+      errors,
+      owner
     )
     let assignedArticles = pass1Result.assignedArticles
     dbTimeMs += pass1Result.dbTimeMs
@@ -986,20 +986,19 @@ export async function clusterArticles(
       storiesNeedingReassembly,
       unhandledArticleIds,
       errors,
-      now
+      now,
+      owner
     )
 
     assignedArticles += clusterResult.assignedArticles
     dbTimeMs += clusterResult.dbTimeMs
 
-    /* --- Queue reassembly --- */
-    const nowIso = now.toISOString()
-    for (const storyId of storiesNeedingReassembly) {
-      const { error } = await queueStoryForReassembly(client, storyId, nowIso)
-      if (error) {
-        errors.push(`Failed to queue story ${storyId} for reassembly: ${error.message}`)
-      }
-    }
+    /* --- Queue reassembly (guarded) --- */
+    await queueStoriesForReassembly(
+      client,
+      Array.from(storiesNeedingReassembly),
+      errors
+    )
 
     return {
       newStories: clusterResult.newStories,
@@ -1013,8 +1012,10 @@ export async function clusterArticles(
     }
   } finally {
     if (unhandledArticleIds.size > 0) {
-      await bulkUpdateArticles(client, Array.from(unhandledArticleIds), { clustering_claimed_at: null })
-        .catch((err) => console.error('Failed to release claims in finally block', err))
+      const leftoverIds = Array.from(unhandledArticleIds)
+      await Promise.all(
+        leftoverIds.map((id) => releaseClusteringClaim(client, id, owner))
+      ).catch((err) => console.error('Failed to release claims in finally block', err))
     }
   }
 }

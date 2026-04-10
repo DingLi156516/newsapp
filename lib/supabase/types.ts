@@ -109,6 +109,8 @@ export interface DbStory {
   assembled_at: string | null
   published_at: string | null
   assembly_claimed_at: string | null
+  assembly_claim_owner: string | null
+  assembly_version: number
   review_status: 'pending' | 'approved' | 'rejected'
   reviewed_by: string | null
   reviewed_at: string | null
@@ -145,6 +147,8 @@ export interface DbStoryInsert {
   assembled_at?: string | null
   published_at?: string | null
   assembly_claimed_at?: string | null
+  assembly_claim_owner?: string | null
+  assembly_version?: number
   story_velocity?: StoryVelocity | null
   impact_score?: number | null
   source_diversity?: number | null
@@ -174,7 +178,9 @@ export interface DbArticle {
   embedding: number[] | null
   is_embedded: boolean
   embedding_claimed_at: string | null
+  embedding_claim_owner: string | null
   clustering_claimed_at: string | null
+  clustering_claim_owner: string | null
   story_id: string | null
   clustering_attempts: number
   clustering_status: 'pending' | 'clustered' | 'expired'
@@ -194,7 +200,9 @@ export interface DbArticleInsert {
   embedding?: number[] | null
   is_embedded?: boolean
   embedding_claimed_at?: string | null
+  embedding_claim_owner?: string | null
   clustering_claimed_at?: string | null
+  clustering_claim_owner?: string | null
   story_id?: string | null
   clustering_attempts?: number
   clustering_status?: 'pending' | 'clustered' | 'expired'

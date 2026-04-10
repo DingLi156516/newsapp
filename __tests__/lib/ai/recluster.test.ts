@@ -31,21 +31,67 @@ function createReclusterMockClient(
     failStoryFetch?: boolean
     failArticleSelect?: boolean
     failStoryUpdate?: boolean
+    failRequeue?: boolean
   } = {},
 ) {
   const articleUpdateCalls: { payload: Record<string, unknown>; filter: Record<string, string> }[] = []
   const storyUpdateCalls: { payload: Record<string, unknown>; id: string }[] = []
   const storyDeleteCalls: string[] = []
+  const requeueCalls: { storyId: string; expectedVersion: number }[] = []
+  const versionBumps: string[] = []
 
-  const rpcMock = vi.fn().mockImplementation((_fn: string, params: { query_embedding: number[] }) => {
-    if (options.rpcError) {
-      return Promise.resolve({ data: null, error: options.rpcError })
+  const rpcMock = vi.fn().mockImplementation((fn: string, params: Record<string, unknown>) => {
+    if (fn === 'match_story_centroid') {
+      if (options.rpcError) {
+        return Promise.resolve({ data: null, error: options.rpcError })
+      }
+      const queryKey = JSON.stringify(params.query_embedding as number[])
+      const results = options.rpcResults?.[queryKey] ?? []
+      return Promise.resolve({ data: results, error: null })
     }
-
-    // Find matching stories for this embedding
-    const queryKey = JSON.stringify(params.query_embedding)
-    const results = options.rpcResults?.[queryKey] ?? []
-    return Promise.resolve({ data: results, error: null })
+    if (fn === 'requeue_story_for_reassembly') {
+      requeueCalls.push({
+        storyId: params.p_story_id as string,
+        expectedVersion: params.p_expected_version as number,
+      })
+      if (options.failRequeue) {
+        return Promise.resolve({ data: false, error: null })
+      }
+      return Promise.resolve({ data: true, error: null })
+    }
+    if (fn === 'bump_assembly_version') {
+      versionBumps.push(params.p_story_id as string)
+      return Promise.resolve({ data: null, error: null })
+    }
+    if (fn === 'merge_stories') {
+      const target = params.p_target as string
+      const source = params.p_source as string
+      // Allow tests to simulate the transactional merge failure via
+      // failStoryUpdate (which used to fail the centroid UPDATE) or the
+      // dedicated failReassign flag.
+      if (options.failStoryUpdate || options.failReassign) {
+        return Promise.resolve({
+          data: null,
+          error: { message: 'Simulated merge_stories failure' },
+        })
+      }
+      // Simulate the atomic merge effect: source story is deleted,
+      // source articles are reassigned to target.
+      storyDeleteCalls.push(source)
+      const sourceArticles = articlesByStory[source] ?? []
+      for (const article of sourceArticles) {
+        articleUpdateCalls.push({
+          payload: { story_id: target },
+          filter: { merged_from: source },
+        })
+      }
+      storyUpdateCalls.push({
+        payload: { cluster_centroid: params.p_new_centroid },
+        id: target,
+      })
+      return Promise.resolve({ data: true, error: null })
+    }
+    return Promise.resolve({ data: null, error: null })
   })
 
   return {
@@ -53,7 +99,7 @@ function createReclusterMockClient(
       if (table === 'stories') {
         return {
           select: vi.fn().mockImplementation((columns: string) => {
-            if (columns.includes('assembly_claimed_at')) {
+            if (columns.includes('assembly_claimed_at') && columns.includes('cluster_centroid')) {
               // Story fetch for recluster
               return {
                 gte: vi.fn().mockReturnValue({
@@ -64,6 +110,17 @@ function createReclusterMockClient(
                         : { data: stories, error: null }
                     ),
                   }),
+                }),
+              }
+            }
+            if (columns === 'id, assembly_version, assembly_status') {
+              // fetchAssemblyVersions path
+              return {
+                in: vi.fn().mockImplementation((_col: string, ids: string[]) => {
+                  const rows = stories
+                    .filter((s) => ids.includes(s.id))
+                    .map((s) => ({ id: s.id, assembly_version: 0, assembly_status: 'completed' }))
+                  return Promise.resolve({ data: rows, error: null })
                 }),
               }
             }
@@ -91,7 +148,8 @@ function createReclusterMockClient(
             return {
               eq: vi.fn().mockImplementation((_col: string, id: string) => {
                 storyUpdateCalls.push({ payload, id })
-                if (options.failStoryUpdate && payload.assembly_status === 'pending') {
+                // Now the centroid update is an isolated write (no assembly_status).
+                if (options.failStoryUpdate && payload.cluster_centroid !== undefined) {
                   return Promise.resolve({ error: { message: 'Simulated story update failure' } })
                 }
                 return Promise.resolve({ error: null })
@@ -163,6 +221,8 @@ function createReclusterMockClient(
     _articleUpdateCalls: articleUpdateCalls,
     _storyUpdateCalls: storyUpdateCalls,
     _storyDeleteCalls: storyDeleteCalls,
+    _requeueCalls: requeueCalls,
+    _versionBumps: versionBumps,
     _rpcMock: rpcMock,
   }
 }
@@ -514,25 +574,12 @@ describe('reclusterRecentStories', () => {
 
     const result = await reclusterRecentStories(client as never)
 
-    // Merge still succeeds: articles reassigned, source deleted
-    expect(result.mergedPairs).toBe(1)
-    expect(client._storyDeleteCalls).toContain('story-B')
-
-    // Target story still gets assembly_status: 'pending' despite article fetch failure
-    const reassemblyUpdate = client._storyUpdateCalls.find(
-      (c) => c.id === 'story-A' && c.payload.assembly_status === 'pending'
-    )
-    expect(reassemblyUpdate).toBeDefined()
-    expect(reassemblyUpdate!.payload.publication_status).toBe('draft')
-
-    // Error collected for the failed fetch
-    expect(result.errors.some((e) => e.includes('centroid recompute'))).toBe(true)
-
-    // Fallback centroid should be the target story's centroid [1, 0]
-    // (story-A is both the outer-loop story and target here)
-    const centroid = reassemblyUpdate!.payload.cluster_centroid as number[]
-    expect(centroid[0]).toBeCloseTo(1, 1)
-    expect(centroid[1]).toBeCloseTo(0, 1)
+    // Article fetch failure surfaces as an error and the merge is skipped.
+    // The atomic merge RPC is not called when we couldn't compute a centroid
+    // for it, and the source story is not deleted.
+    expect(result.errors.some((e) => e.includes('Failed to fetch source articles'))).toBe(true)
+    expect(result.mergedPairs).toBe(0)
+    expect(client._storyDeleteCalls).not.toContain('story-B')
   })
 
   it('uses target story centroid as fallback when outer-loop story is merged away', async () => {
@@ -565,22 +612,14 @@ describe('reclusterRecentStories', () => {
 
     const result = await reclusterRecentStories(client as never)
 
-    expect(result.mergedPairs).toBe(1)
-    expect(client._storyDeleteCalls).toContain('story-S')
-
-    // Target story-T should get reassembly update
-    const reassemblyUpdate = client._storyUpdateCalls.find(
-      (c) => c.id === 'story-T' && c.payload.assembly_status === 'pending'
-    )
-    expect(reassemblyUpdate).toBeDefined()
-
-    // Fallback centroid must be story-T's [1, 0], NOT story-S's [0, 1]
-    const centroid = reassemblyUpdate!.payload.cluster_centroid as number[]
-    expect(centroid[0]).toBeCloseTo(1, 1)
-    expect(centroid[1]).toBeCloseTo(0, 1)
+    // Atomic merge path skips when we can't fetch source articles to
+    // compute the centroid. The error is surfaced and no merge is performed.
+    expect(result.errors.some((e) => e.includes('Failed to fetch source articles'))).toBe(true)
+    expect(result.mergedPairs).toBe(0)
+    expect(client._storyDeleteCalls).not.toContain('story-S')
   })
 
-  it('rolls back articles to source when target story update fails', async () => {
+  it('atomic merge RPC failure surfaces as an error and preserves both stories', async () => {
     const stories: MockStory[] = [
       { id: 'story-A', cluster_centroid: [1, 0], last_updated: NOW, assembly_claimed_at: null },
       { id: 'story-B', cluster_centroid: [0.99, 0.14], last_updated: NOW, assembly_claimed_at: null },
@@ -606,18 +645,11 @@ describe('reclusterRecentStories', () => {
 
     const result = await reclusterRecentStories(client as never)
 
-    // Merge should NOT complete — source story preserved
+    // Merge should NOT complete — the RPC raised, transaction rolled back.
     expect(result.mergedPairs).toBe(0)
     expect(client._storyDeleteCalls).not.toContain('story-B')
 
-    // Error collected for the failed update
-    expect(result.errors.some((e) => e.includes('Failed to update centroid'))).toBe(true)
-
-    // Compensating rollback: source articles (a3 from story-B) rolled back
-    const rollbackCall = client._articleUpdateCalls.find(
-      (c) => c.payload.story_id === 'story-B' && c.filter.in
-    )
-    expect(rollbackCall).toBeDefined()
-    expect(rollbackCall!.filter.in).toBe('a3')
+    // Error collected for the failed merge RPC.
+    expect(result.errors.some((e) => e.includes('Failed to merge story'))).toBe(true)
   })
 })

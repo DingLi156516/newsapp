@@ -59,19 +59,48 @@ function classificationResult(headline: string, topic: Topic = 'politics', regio
   }
 }
 
+const ASSEMBLY_TTL_MS = 60 * 60 * 1000
+
+interface MockStoryRow {
+  id: string
+  assembly_claimed_at?: string | null
+  first_published: string
+}
+
 function createMockClient(overrides: {
   articles?: { data: unknown[] | null; error: unknown | null }
   sources?: { data: unknown[] | null; error: unknown | null }
   stories?: { data: unknown[] | null; error: unknown | null }
   updateError?: unknown | null
+  fetchMetadataError?: unknown | null
 } = {}) {
   const updateFn = vi.fn().mockReturnValue({
     eq: vi.fn().mockResolvedValue({ error: overrides.updateError ?? null }),
   })
 
-  const storyReturns = vi.fn().mockResolvedValue(
-    overrides.stories ?? { data: [], error: null }
-  )
+  const storiesData = (overrides.stories?.data ?? []) as MockStoryRow[]
+  const storiesError = overrides.stories?.error ?? null
+  const fetchMetadataError = overrides.fetchMetadataError ?? storiesError
+
+  // --- RPC mock: claim + release ---
+  const rpc = vi.fn((name: string, args: { p_owner?: string; p_limit?: number }) => {
+    if (name === 'claim_stories_for_assembly') {
+      if (storiesError) return Promise.resolve({ data: null, error: null })
+      const now = Date.now()
+      const claimable = storiesData.filter((s) => {
+        const claimedAt = s.assembly_claimed_at ?? null
+        if (!claimedAt) return true
+        const claimedMs = new Date(claimedAt).getTime()
+        return Number.isNaN(claimedMs) || now - claimedMs >= ASSEMBLY_TTL_MS
+      })
+      const limit = args.p_limit ?? claimable.length
+      return Promise.resolve({ data: claimable.slice(0, limit).map((s) => s.id), error: null })
+    }
+    if (name === 'release_assembly_claim') {
+      return Promise.resolve({ data: true, error: null })
+    }
+    return Promise.resolve({ data: null, error: null })
+  })
 
   const fromFn = vi.fn().mockImplementation((table: string) => {
     if (table === 'articles') {
@@ -102,6 +131,7 @@ function createMockClient(overrides: {
     if (table === 'stories') {
       return {
         select: vi.fn().mockImplementation((columns: string) => {
+          // Path A: assembleSingleStory reads first_published.
           if (columns === 'first_published') {
             return {
               eq: vi.fn().mockReturnValue({
@@ -112,18 +142,21 @@ function createMockClient(overrides: {
               }),
             }
           }
-          return {
-            eq: vi.fn().mockReturnValue({
-              order: vi.fn().mockReturnValue({
-                order: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockReturnValue({
-                    returns: storyReturns,
-                  }),
-                }),
-              }),
-              returns: storyReturns,
-            }),
+          // Path B: assembleStories fetches metadata for claimed IDs.
+          if (columns === 'id, first_published') {
+            const inFn = vi.fn((_col: string, ids: string[]) => {
+              if (fetchMetadataError) {
+                return Promise.resolve({ data: null, error: fetchMetadataError })
+              }
+              const bySet = new Set(ids)
+              const rows = storiesData
+                .filter((s) => bySet.has(s.id))
+                .map((s) => ({ id: s.id, first_published: s.first_published }))
+              return Promise.resolve({ data: rows, error: null })
+            })
+            return { in: inFn }
           }
+          return {}
         }),
         update: updateFn,
       }
@@ -131,7 +164,7 @@ function createMockClient(overrides: {
     return {}
   })
 
-  return { from: fromFn, _updateFn: updateFn }
+  return { from: fromFn, rpc, _updateFn: updateFn, _rpc: rpc }
 }
 
 describe('assembleSingleStory', () => {
@@ -414,13 +447,17 @@ describe('assembleStories', () => {
     }))
   })
 
-  it('throws when fetching pending stories fails', async () => {
+  it('throws when fetching claimed story metadata fails', async () => {
     const client = createMockClient({
-      stories: { data: null, error: { message: 'Query failed' } },
+      stories: {
+        data: [{ id: 'story-1', first_published: '2026-03-22T10:00:00Z' }],
+        error: null,
+      },
+      fetchMetadataError: { message: 'Query failed' },
     })
 
     await expect(assembleStories(client as never)).rejects.toThrow(
-      'Failed to fetch pending stories'
+      'Failed to fetch claimed stories'
     )
   })
 
