@@ -16,6 +16,7 @@ interface MockArticleRow {
   title_fingerprint: string | null
   // Optional: simulates what the atomic claim RPC's expiry filter would see.
   embedding_claimed_at?: string | null
+  embedding_retry_count?: number
 }
 
 const CLAIM_TTL_MS = 30 * 60 * 1000
@@ -55,7 +56,7 @@ function createMockClient(
     return Promise.resolve({ data: null, error: null })
   })
 
-  // --- select('id, title, description, title_fingerprint').in('id', ids) path ---
+  // --- select('id, title, description, title_fingerprint, embedding_retry_count').in('id', ids) path ---
   const fetchByIdsIn = vi.fn((_col: string, ids: string[]) => {
     const all = (articles ?? []) as MockArticleRow[]
     const bySet = new Set(ids)
@@ -64,6 +65,7 @@ function createMockClient(
       title: a.title,
       description: a.description,
       title_fingerprint: a.title_fingerprint,
+      embedding_retry_count: a.embedding_retry_count ?? 0,
     }))
     return Promise.resolve({ data: rows, error: null })
   })
@@ -77,21 +79,29 @@ function createMockClient(
     if (fields === 'title_fingerprint, title, description, embedding') {
       return { in: cacheIn }
     }
+    if (fields === 'id, title, description, title_fingerprint, embedding_retry_count') {
+      return { in: fetchByIdsIn }
+    }
     if (fields === 'id, title, description, title_fingerprint') {
       return { in: fetchByIdsIn }
     }
     return { in: fetchByIdsIn }
   })
 
+  // --- insert path (used by pushToDeadLetter) ---
+  const insert = vi.fn().mockResolvedValue({ error: null })
+
   return {
     from: vi.fn(() => ({
       select,
       update,
       upsert,
+      insert,
     })),
     rpc,
     _update: update,
     _upsert: upsert,
+    _insert: insert,
     _cacheIn: cacheIn,
     _rpc: rpc,
     _fetchByIdsIn: fetchByIdsIn,
@@ -402,5 +412,40 @@ describe('embedUnembeddedArticles', () => {
     expect(result.cacheHits).toBe(0)
     expect(result.errors).toEqual(['Embedding cache lookup failed: index missing'])
     expect(mockGenerateEmbeddingBatch).toHaveBeenCalledTimes(1)
+  })
+
+  it('emits dlq_pushed when retry budget is exhausted', async () => {
+    mockGenerateEmbeddingBatch.mockRejectedValue(new Error('provider unavailable'))
+
+    const client = createMockClient([
+      {
+        id: 'a1',
+        title: 'First',
+        description: 'One',
+        title_fingerprint: null,
+        embedding_claimed_at: null,
+        // Already at the retry budget (5) — this failure exhausts.
+        embedding_retry_count: 5,
+      },
+    ])
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+
+    const result = await embedUnembeddedArticles(client as never, 1, undefined, emitter)
+
+    expect(result.totalProcessed).toBe(0)
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'embed',
+        level: 'error',
+        eventType: 'dlq_pushed',
+        itemId: 'a1',
+        payload: expect.objectContaining({
+          articleId: 'a1',
+          retryCount: 6,
+          error: 'provider unavailable',
+        }),
+      })
+    )
   })
 })

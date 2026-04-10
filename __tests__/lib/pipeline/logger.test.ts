@@ -174,4 +174,156 @@ describe('PipelineLogger', () => {
       )
     })
   })
+
+  describe('stageEvent', () => {
+    function makeStageEventClient(
+      insertResult: { error: { message: string } | null } | Promise<never> = { error: null }
+    ) {
+      const insertSpy = vi.fn().mockImplementation(() => {
+        if (insertResult instanceof Promise) return insertResult
+        return Promise.resolve(insertResult)
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const client: any = {
+        from: vi.fn(() => ({ insert: insertSpy })),
+      }
+      return { client, insertSpy }
+    }
+
+    it('inserts a row against pipeline_stage_events with all fields populated', async () => {
+      const { client, insertSpy } = makeStageEventClient()
+      const logger = new PipelineLogger(client)
+
+      await logger.stageEvent('run-1', 'owner-1', {
+        stage: 'embed',
+        level: 'warn',
+        eventType: 'pgvector_fallback',
+        sourceId: 'src-1',
+        provider: 'gemini',
+        itemId: 'article-1',
+        durationMs: 250,
+        payload: { reason: 'timeout' },
+      })
+
+      expect(client.from).toHaveBeenCalledWith('pipeline_stage_events')
+      expect(insertSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          run_id: 'run-1',
+          claim_owner: 'owner-1',
+          stage: 'embed',
+          source_id: 'src-1',
+          provider: 'gemini',
+          level: 'warn',
+          event_type: 'pgvector_fallback',
+          item_id: 'article-1',
+          duration_ms: 250,
+          payload: { reason: 'timeout' },
+        })
+      )
+    })
+
+    it('defaults optional fields to null and payload to {}', async () => {
+      const { client, insertSpy } = makeStageEventClient()
+      const logger = new PipelineLogger(client)
+
+      await logger.stageEvent('run-2', null, {
+        stage: 'cluster',
+        level: 'error',
+        eventType: 'cleanup_fallback_failed',
+      })
+
+      expect(insertSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          run_id: 'run-2',
+          claim_owner: null,
+          stage: 'cluster',
+          source_id: null,
+          provider: null,
+          level: 'error',
+          event_type: 'cleanup_fallback_failed',
+          item_id: null,
+          duration_ms: null,
+          payload: {},
+        })
+      )
+    })
+
+    it('swallows DB errors — never throws from an observability hook', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const { client } = makeStageEventClient({ error: { message: 'boom' } })
+      const logger = new PipelineLogger(client)
+
+      await expect(
+        logger.stageEvent('run-3', 'owner-3', {
+          stage: 'assemble',
+          level: 'error',
+          eventType: 'dlq_pushed',
+        })
+      ).resolves.toBeUndefined()
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('stageEvent persist failed')
+      )
+      warnSpy.mockRestore()
+    })
+
+    it('swallows thrown exceptions', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const client: any = {
+        from: vi.fn(() => ({
+          insert: vi.fn(() => {
+            throw new Error('network down')
+          }),
+        })),
+      }
+      const logger = new PipelineLogger(client)
+
+      await expect(
+        logger.stageEvent('run-4', 'owner-4', {
+          stage: 'recluster',
+          level: 'warn',
+          eventType: 'pgvector_fallback',
+        })
+      ).resolves.toBeUndefined()
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('stageEvent threw')
+      )
+      warnSpy.mockRestore()
+    })
+  })
+
+  describe('makeStageEmitter', () => {
+    it('returns a function that forwards to stageEvent with pre-bound runId + owner', async () => {
+      const insertSpy = vi.fn().mockResolvedValue({ error: null })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const client: any = {
+        from: vi.fn(() => ({ insert: insertSpy })),
+      }
+      const logger = new PipelineLogger(client)
+
+      const emitter = logger.makeStageEmitter('run-bound', 'owner-bound')
+
+      await emitter({
+        stage: 'embed',
+        level: 'error',
+        eventType: 'dlq_pushed',
+        itemId: 'article-z',
+        payload: { retryCount: 3 },
+      })
+
+      expect(insertSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          run_id: 'run-bound',
+          claim_owner: 'owner-bound',
+          stage: 'embed',
+          level: 'error',
+          event_type: 'dlq_pushed',
+          item_id: 'article-z',
+          payload: { retryCount: 3 },
+        })
+      )
+    })
+  })
 })

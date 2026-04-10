@@ -1490,4 +1490,27 @@ describe('clusterArticles', () => {
     expect(result.newStories).toBe(1)
     expect(result.errors.length).toBe(0)
   })
+
+  it('emits a pgvector_fallback warn event when the match_story_centroid RPC fails', async () => {
+    const client = createMockClient(
+      TWO_SIMILAR_ARTICLES,
+      [],
+      { rpcError: { message: 'function match_story_centroid does not exist' } },
+    )
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+
+    await clusterArticles(client as never, 1000, undefined, emitter)
+
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'cluster',
+        level: 'warn',
+        eventType: 'pgvector_fallback',
+        payload: expect.objectContaining({
+          error: 'function match_story_centroid does not exist',
+        }),
+      })
+    )
+  })
 })

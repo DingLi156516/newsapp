@@ -24,6 +24,8 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 
 vi.mock('@/lib/pipeline/logger', () => {
+  const stageEvent = vi.fn().mockResolvedValue(undefined)
+  const makeStageEmitter = vi.fn(() => stageEvent)
   const mockLogger = {
     startRun: vi.fn().mockResolvedValue('run-mock-id'),
     logStep: vi.fn((_name: string, fn: () => Promise<unknown>) => fn()),
@@ -31,6 +33,8 @@ vi.mock('@/lib/pipeline/logger', () => {
     fail: vi.fn().mockResolvedValue(undefined),
     getRunId: vi.fn(() => 'run-mock-id'),
     getSteps: vi.fn(() => []),
+    stageEvent,
+    makeStageEmitter,
   }
   return {
     PipelineLogger: vi.fn(() => mockLogger),
@@ -270,6 +274,16 @@ describe('POST /api/admin/pipeline/trigger', () => {
     expect(embedUnembeddedArticles).toHaveBeenCalled()
     expect(clusterArticles).toHaveBeenCalled()
     expect(assembleStories).toHaveBeenCalled()
+
+    // Stage emitter is built from (runId, claimOwner) and threaded into
+    // each stage as the trailing argument.
+    const { __mockLogger } = await import('@/lib/pipeline/logger') as never as {
+      __mockLogger: Record<string, ReturnType<typeof vi.fn>>
+    }
+    expect(__mockLogger.makeStageEmitter).toHaveBeenCalledWith(
+      'run-mock-id',
+      expect.any(String)
+    )
   })
 
   it('triggers full pipeline for type=full', async () => {

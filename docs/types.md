@@ -86,3 +86,18 @@ Claim timestamp semantics:
 
 - `PublicationDecision`: `{ reviewStatus, publicationStatus, confidenceScore, reviewReasons }`
 - `LegacyStoryState`: backfill result mapping legacy review rows into explicit assembly/publication states
+
+## Pipeline Stage Event Types (`@/lib/pipeline/stage-events`)
+
+- `StageKind`: `'ingest' | 'embed' | 'cluster' | 'assemble' | 'recluster'`
+- `StageLevel`: `'debug' | 'info' | 'warn' | 'error'`
+- `StageEventInput`: `{ stage, level, eventType, sourceId?, provider?, itemId?, durationMs?, payload? }` — shape passed to the emitter
+- `StageEventEmitter`: `(event: StageEventInput) => Promise<void>` — pre-bound to a `(runId, claimOwner)` pair by `logger.makeStageEmitter()`. `claimOwner` accepts `null` for maintenance jobs (e.g. `/api/cron/recluster`) that use a `randomUUID()` correlation id and do not hold a pipeline claim lease.
+- `noopStageEmitter`: default used when stages run outside a pipeline (tests, scripts)
+- `safeEmit(emitter, input)`: wraps an emitter call in try/catch so a rejecting/throwing emitter never stalls the pipeline. Every stage call site uses this instead of calling the emitter directly.
+
+## Pipeline Stage Event DB Types (`@/lib/supabase/types`)
+
+- `DbStageKind` / `DbStageLevel`: DB-side enum literals mirroring the contract above
+- `DbPipelineStageEvent`: row shape for `pipeline_stage_events` — `{ id, run_id, claim_owner, stage, source_id, provider, level, event_type, item_id, duration_ms, payload, created_at }`
+- `DbPipelineStageEventInsert`: insert shape used by `PipelineLogger.stageEvent`

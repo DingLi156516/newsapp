@@ -32,21 +32,37 @@ import { bumpAssemblyVersion } from '@/lib/pipeline/reassembly'
 import { computeRetryOutcome } from '@/lib/pipeline/retry-policy'
 import { pushToDeadLetter } from '@/lib/pipeline/dead-letter'
 import { decideStoryPublication } from '@/lib/pipeline/story-state'
+import {
+  noopStageEmitter,
+  safeEmit,
+  type StageEventEmitter,
+} from '@/lib/pipeline/stage-events'
 
 export function scheduleTagExtraction(
   client: SupabaseClient<Database>,
   storyId: string,
   titles: readonly string[],
-  descriptions: readonly (string | null)[]
+  descriptions: readonly (string | null)[],
+  emitter: StageEventEmitter = noopStageEmitter
 ): Promise<void> {
   return extractEntities(titles, descriptions)
     .then((entities) => upsertStoryTags(client, storyId, entities))
     .then(() => {})
     .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err)
       console.error(
         `[tag-processor] Tag extraction failed for ${storyId}:`,
-        err instanceof Error ? err.message : String(err)
+        message
       )
+      // Best-effort emit — safeEmit guarantees the emitter cannot
+      // throw even if a test/script passes in a rejecting function.
+      void safeEmit(emitter, {
+        stage: 'assemble',
+        level: 'warn',
+        eventType: 'tag_extraction_failed',
+        itemId: storyId,
+        payload: { storyId, error: message },
+      })
     })
 }
 
@@ -173,7 +189,8 @@ async function mapWithConcurrency<T, R>(
 export async function assembleSingleStory(
   client: SupabaseClient<Database>,
   storyId: string,
-  firstPublished?: string
+  firstPublished?: string,
+  emitter: StageEventEmitter = noopStageEmitter
 ): Promise<SingleStoryAssemblyResult> {
   let dbTimeMs = 0
   let modelTimeMs = 0
@@ -353,7 +370,7 @@ export async function assembleSingleStory(
   // version read will see a mismatch and skip its stale reset attempt.
   await bumpAssemblyVersion(client, storyId)
 
-  const tagPromise = scheduleTagExtraction(client, storyId, titles, descriptions)
+  const tagPromise = scheduleTagExtraction(client, storyId, titles, descriptions, emitter)
 
   return {
     publicationStatus: publicationDecision.publicationStatus,
@@ -381,7 +398,8 @@ export async function assembleStories(
   client: SupabaseClient<Database>,
   maxStories = 50,
   options?: AssembleStoriesOptions,
-  owner: ClaimOwner = generateClaimOwner()
+  owner: ClaimOwner = generateClaimOwner(),
+  emitter: StageEventEmitter = noopStageEmitter
 ): Promise<AssemblyResult> {
   const errors: string[] = []
   let storiesProcessed = 0
@@ -451,7 +469,7 @@ export async function assembleStories(
     concurrency,
     async (story) => {
       try {
-        const result = await assembleSingleStory(client, story.id, story.first_published)
+        const result = await assembleSingleStory(client, story.id, story.first_published, emitter)
         return { storyId: story.id, result }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -501,6 +519,17 @@ export async function assembleStories(
             itemId: story.id,
             retryCount: outcome.nextRetryCount,
             lastError: message,
+          })
+          await safeEmit(emitter, {
+            stage: 'assemble',
+            level: 'error',
+            eventType: 'dlq_pushed',
+            itemId: story.id,
+            payload: {
+              storyId: story.id,
+              retryCount: outcome.nextRetryCount,
+              error: message,
+            },
           })
         }
 

@@ -23,6 +23,11 @@ import {
 import { fetchAssemblyVersions, requeueStoryForReassembly } from '@/lib/pipeline/reassembly'
 import { createStoryWithArticles } from '@/lib/pipeline/cluster-writes'
 import { computeRetryOutcome } from '@/lib/pipeline/retry-policy'
+import {
+  noopStageEmitter,
+  safeEmit,
+  type StageEventEmitter,
+} from '@/lib/pipeline/stage-events'
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -217,7 +222,8 @@ async function handleClusteringFailure(
   client: SupabaseClient<Database>,
   articleIds: readonly string[],
   errorMessage: string,
-  owner: ClaimOwner
+  owner: ClaimOwner,
+  emitter: StageEventEmitter
 ): Promise<void> {
   if (articleIds.length === 0) return
 
@@ -239,6 +245,12 @@ async function handleClusteringFailure(
     console.warn(
       `[clustering] failed to read retry counts: ${readError.message}`
     )
+    await safeEmit(emitter, {
+      stage: 'cluster',
+      level: 'warn',
+      eventType: 'retry_count_read_failed',
+      payload: { error: readError.message, articleCount: articleIds.length },
+    })
   } else {
     for (const row of (data as {
       id: string
@@ -285,6 +297,22 @@ async function handleClusteringFailure(
           `migration 043 (supabase/migrations/043_atomic_clustering_failure.sql) has not been ` +
           `applied to this environment.`
       )
+    }
+
+    // RPC succeeded — if this article was exhausted, a DLQ row was
+    // inserted inside the same transaction (see migration 043).
+    if (outcome.exhausted) {
+      await safeEmit(emitter, {
+        stage: 'cluster',
+        level: 'error',
+        eventType: 'dlq_pushed',
+        itemId: articleId,
+        payload: {
+          articleId,
+          retryCount: outcome.nextRetryCount,
+          error: errorMessage,
+        },
+      })
     }
   }
 }
@@ -502,12 +530,19 @@ async function matchAgainstExistingStories(
   articles: readonly EmbeddedArticle[],
   storyMap: Map<string, StoryTracker>,
   threshold: number,
-  cutoffIso: string
+  cutoffIso: string,
+  emitter: StageEventEmitter
 ): Promise<{ pass1Assignments: Map<string, string[]>; unmatchedArticles: EmbeddedArticle[] }> {
   const pass1Assignments = new Map<string, string[]>()
   const unmatchedArticles: EmbeddedArticle[] = []
 
   let useRpc = true
+  // Dedupe the pgvector_fallback emission across the whole call. A
+  // concurrent batch can have many articles all catch the same RPC
+  // outage and each try to emit; we want exactly one warn event per
+  // matchAgainstExistingStories invocation regardless of how many
+  // articles tripped the fallback.
+  let fallbackEmitted = false
 
   // Process articles in batches to limit concurrent RPC calls
   for (let batchStart = 0; batchStart < articles.length; batchStart += PGVECTOR_BATCH_SIZE) {
@@ -521,8 +556,18 @@ async function matchAgainstExistingStories(
           try {
             dbMatch = await matchArticleViaRpc(client, article.embedding, threshold, cutoffIso)
           } catch (rpcErr) {
-            console.warn('pgvector RPC unavailable, falling back to JS brute-force:', rpcErr instanceof Error ? rpcErr.message : String(rpcErr))
+            const rpcMessage = rpcErr instanceof Error ? rpcErr.message : String(rpcErr)
+            console.warn('pgvector RPC unavailable, falling back to JS brute-force:', rpcMessage)
             useRpc = false
+            if (!fallbackEmitted) {
+              fallbackEmitted = true
+              await safeEmit(emitter, {
+                stage: 'cluster',
+                level: 'warn',
+                eventType: 'pgvector_fallback',
+                payload: { error: rpcMessage },
+              })
+            }
             dbMatch = matchArticleViaJs(article.embedding, storyMap, threshold)
           }
         } else {
@@ -781,7 +826,8 @@ async function persistPass1Assignments(
   unhandledArticleIds: Set<string>,
   storiesNeedingReassembly: Set<string>,
   errors: string[],
-  owner: ClaimOwner
+  owner: ClaimOwner,
+  emitter: StageEventEmitter
 ): Promise<{ assignedArticles: number; dbTimeMs: number }> {
   let assignedArticles = 0
   let dbTimeMs = 0
@@ -813,7 +859,8 @@ async function persistPass1Assignments(
         client,
         failedForRetry,
         `Failed to assign to story ${storyId}: ${message ?? 'unknown error'}`,
-        owner
+        owner,
+        emitter
       )
     } else {
       assignedArticles += articleIds.length
@@ -842,7 +889,8 @@ async function persistNewClusters(
   unhandledArticleIds: Set<string>,
   errors: string[],
   now: Date,
-  owner: ClaimOwner
+  owner: ClaimOwner,
+  emitter: StageEventEmitter
 ): Promise<{
   newStories: number
   assignedArticles: number
@@ -905,7 +953,8 @@ async function persistNewClusters(
             client,
             [article.id],
             `Singleton promotion failed: ${message}`,
-            owner
+            owner,
+            emitter
           )
           unhandledArticleIds.delete(article.id)
         }
@@ -957,7 +1006,8 @@ async function persistNewClusters(
           client,
           failedIds,
           `Failed to assign to duplicate story ${duplicateStoryId}: ${message ?? 'unknown error'}`,
-          owner
+          owner,
+          emitter
         )
         assignedArticles += cluster.articleIds.length - failedIds.length
         cluster.articleIds.filter((id) => !failedIds.includes(id)).forEach((id) => unhandledArticleIds.delete(id))
@@ -1012,7 +1062,8 @@ async function persistNewClusters(
         client,
         cluster.articleIds,
         `Create-story failed: ${message}`,
-        owner
+        owner,
+        emitter
       )
       cluster.articleIds.forEach((id) => unhandledArticleIds.delete(id))
       continue
@@ -1038,7 +1089,8 @@ async function persistNewClusters(
 export async function clusterArticles(
   client: SupabaseClient<Database>,
   maxArticles = 1000,
-  owner: ClaimOwner = generateClaimOwner()
+  owner: ClaimOwner = generateClaimOwner(),
+  emitter: StageEventEmitter = noopStageEmitter
 ): Promise<ClusterResult> {
   const now = new Date()
   const errors: string[] = []
@@ -1213,7 +1265,8 @@ export async function clusterArticles(
           claimableArticles,
           storyMap,
           SIMILARITY_THRESHOLD,
-          broadCutoff
+          broadCutoff,
+          emitter
         )
 
         /* --- Pass 2: Union-find clustering of unmatched articles --- */
@@ -1227,7 +1280,8 @@ export async function clusterArticles(
           unhandledArticleIds,
           storiesNeedingReassembly,
           errors,
-          owner
+          owner,
+          emitter
         )
         let assignedArticles = pass1Result.assignedArticles
         dbTimeMs += pass1Result.dbTimeMs
@@ -1242,7 +1296,8 @@ export async function clusterArticles(
           unhandledArticleIds,
           errors,
           now,
-          owner
+          owner,
+          emitter
         )
 
         assignedArticles += clusterResult.assignedArticles
@@ -1455,7 +1510,8 @@ export async function clusterArticles(
         client,
         leftoverIds,
         'Unexpected clustering pipeline error; claim reclaimed by cleanup phase',
-        owner
+        owner,
+        emitter
       )
       // Only clear after confirmed success — a throw leaves these IDs
       // in the set so an operator can see exactly what was stranded.
@@ -1481,6 +1537,15 @@ export async function clusterArticles(
         '[clustering] Secondary cleanup errors after primary failure:',
         cleanupErrors.join('; ')
       )
+      await safeEmit(emitter, {
+        stage: 'cluster',
+        level: 'error',
+        eventType: 'cleanup_fallback_failed',
+        payload: {
+          error: cleanupErrors.join('; '),
+          articleIds: Array.from(unhandledArticleIds),
+        },
+      })
     }
     throw primaryError
   }

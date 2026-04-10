@@ -20,6 +20,11 @@ import {
 } from '@/lib/pipeline/claim-utils'
 import { computeRetryOutcome } from '@/lib/pipeline/retry-policy'
 import { pushToDeadLetter } from '@/lib/pipeline/dead-letter'
+import {
+  noopStageEmitter,
+  safeEmit,
+  type StageEventEmitter,
+} from '@/lib/pipeline/stage-events'
 
 const EMBED_BATCH_SIZE = Number(process.env.EMBED_BATCH_SIZE ?? 100)
 
@@ -136,7 +141,8 @@ async function fetchClaimedArticles(
 async function handleEmbeddingFailure(
   client: SupabaseClient<Database>,
   failedArticles: readonly UnembeddedArticle[],
-  errorMessage: string
+  errorMessage: string,
+  emitter: StageEventEmitter
 ): Promise<void> {
   if (failedArticles.length === 0) return
 
@@ -166,6 +172,17 @@ async function handleEmbeddingFailure(
         retryCount: outcome.nextRetryCount,
         lastError: errorMessage,
       })
+      await safeEmit(emitter, {
+        stage: 'embed',
+        level: 'error',
+        eventType: 'dlq_pushed',
+        itemId: article.id,
+        payload: {
+          articleId: article.id,
+          retryCount: outcome.nextRetryCount,
+          error: errorMessage,
+        },
+      })
     }
   }
 }
@@ -173,7 +190,8 @@ async function handleEmbeddingFailure(
 async function bulkWriteEmbeddings(
   client: SupabaseClient<Database>,
   batch: readonly UnembeddedArticle[],
-  embeddings: readonly { readonly embedding: readonly number[] }[]
+  embeddings: readonly { readonly embedding: readonly number[] }[],
+  emitter: StageEventEmitter
 ): Promise<{ processed: number; errors: string[] }> {
   const rows = batch.map((article, index) => ({
     id: article.id,
@@ -194,9 +212,22 @@ async function bulkWriteEmbeddings(
         return { processed: rows.length, errors }
       }
       errors.push(`Batch embedding write failed: ${error.message}`)
+      await safeEmit(emitter, {
+        stage: 'embed',
+        level: 'error',
+        eventType: 'embedding_write_failed',
+        payload: { error: error.message, batchSize: rows.length },
+      })
     }
   } catch (error) {
-    errors.push(`Batch embedding write failed: ${error instanceof Error ? error.message : String(error)}`)
+    const message = error instanceof Error ? error.message : String(error)
+    errors.push(`Batch embedding write failed: ${message}`)
+    await safeEmit(emitter, {
+      stage: 'embed',
+      level: 'error',
+      eventType: 'embedding_write_failed',
+      payload: { error: message, batchSize: rows.length },
+    })
   }
 
   let processed = 0
@@ -225,7 +256,8 @@ async function bulkWriteEmbeddings(
 export async function embedUnembeddedArticles(
   client: SupabaseClient<Database>,
   maxArticles = 500,
-  owner: ClaimOwner = generateClaimOwner()
+  owner: ClaimOwner = generateClaimOwner(),
+  emitter: StageEventEmitter = noopStageEmitter
 ): Promise<EmbeddingResult> {
   let dbTimeMs = 0
   let modelTimeMs = 0
@@ -288,7 +320,7 @@ export async function embedUnembeddedArticles(
 
     if (cachedArticles.length > 0) {
       const writeStartedAt = Date.now()
-      const writeResult = await bulkWriteEmbeddings(client, cachedArticles, cachedEmbeddings)
+      const writeResult = await bulkWriteEmbeddings(client, cachedArticles, cachedEmbeddings, emitter)
       dbTimeMs += Date.now() - writeStartedAt
       totalProcessed += writeResult.processed
       cacheHits += writeResult.processed
@@ -303,7 +335,7 @@ export async function embedUnembeddedArticles(
         modelTimeMs += Date.now() - modelStartedAt
 
         const writeStartedAt = Date.now()
-        const writeResult = await bulkWriteEmbeddings(client, uncachedArticles, embeddings)
+        const writeResult = await bulkWriteEmbeddings(client, uncachedArticles, embeddings, emitter)
         dbTimeMs += Date.now() - writeStartedAt
         totalProcessed += writeResult.processed
         errors.push(...writeResult.errors)
@@ -314,7 +346,7 @@ export async function embedUnembeddedArticles(
         // handler also clears the claim so another owner can retry after
         // the backoff window expires.
         const failureStartedAt = Date.now()
-        await handleEmbeddingFailure(client, uncachedArticles, message)
+        await handleEmbeddingFailure(client, uncachedArticles, message, emitter)
         dbTimeMs += Date.now() - failureStartedAt
       }
     }

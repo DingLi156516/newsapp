@@ -271,6 +271,7 @@ Expected response:
 ```json
 {
   "success": true,
+  "correlationId": "019d791a-29e5-7c30-aca5-8a239348c7c6",
   "data": {
     "mergedPairs": 1,
     "splitArticles": 2,
@@ -278,6 +279,8 @@ Expected response:
   }
 }
 ```
+
+The `correlationId` is a per-invocation UUID that tags every stage event this run emits. Recluster does not create a `pipeline_runs` row (its run_type does not fit the `ingest|process|full` enum), so drill-down happens directly in `PipelineEventsPanel`: paste the `correlationId` into the run-id filter on `/admin/pipeline` to see this run's `pgvector_fallback` warnings and any other stage events it wrote.
 
 ### 7. Trigger blindspot digest email
 
@@ -346,6 +349,75 @@ curl -X PATCH \
     "assembly_claimed_at": null
   }'
 ```
+
+## Investigating a Degraded Run
+
+When `PipelineRunHistory` shows a run with `status = failed`, or `pipeline_runs.summary.*.errors` is non-empty, use the stage event stream to find the root cause. See `docs/architecture.md — Observability` for the data model.
+
+### 1. Find the run ID
+
+Two ways:
+
+```bash
+# From the cron response body
+curl -s http://localhost:3000/api/cron/process \
+  -H "Authorization: Bearer $CRON_SECRET" | jq '.data.runId'
+
+# Or via the runs table
+psql "$DATABASE_URL" -c \
+  "SELECT id, run_type, status, started_at FROM pipeline_runs ORDER BY started_at DESC LIMIT 10"
+```
+
+### 2. Open the Events panel
+
+Go to `/admin/pipeline`, scroll past `PipelineRunHistory` to the **Stage Events** panel. Paste the `runId` into the Run ID filter and toggle the level chips so only `warn` and `error` are selected. This narrows the view to the events that actually caused the degradation.
+
+### 3. Drill down on the failure head
+
+Click the oldest warn/error row (events are sorted newest-first; scroll to the bottom of the list). A modal opens with the pretty-printed JSONB `payload`. Common event types and what they mean:
+
+| `event_type` | Stage | Level | Meaning |
+|--------------|-------|-------|---------|
+| `pgvector_fallback` | cluster, recluster | warn | `match_story_centroid` RPC unavailable; fell back to JS brute-force. Check that `extensions.vector` is installed and the SECURITY DEFINER RPC is present. |
+| `dlq_pushed` | embed, cluster, assemble | error | A single item exhausted its retry budget and was pushed to `pipeline_dead_letter`. `payload.articleId`/`payload.storyId` + `payload.retryCount` tell you which item. |
+| `embedding_write_failed` | embed | error | `bulkWriteEmbeddings` upsert failed. `payload.batchSize` tells you how many rows were affected. |
+| `retry_count_read_failed` | cluster | warn | Couldn't read `clustering_retry_count` before scheduling a failure retry; the run continues with retry count = 0 for affected rows. Non-fatal. |
+| `cleanup_fallback_failed` | cluster | error | The cleanup phase could not release claims after a primary failure. `payload.articleIds` lists the stranded rows. Check for `apply_clustering_failure` RPC / migration 043. |
+| `tag_extraction_failed` | assemble | warn | `extractEntities` rejected; the story still publishes, it just has no tags. Usually a Gemini API error. |
+
+### 4. Query the table directly (for ad-hoc investigations)
+
+```sql
+-- All warn/error events in the last run
+SELECT stage, level, event_type, payload, created_at
+FROM pipeline_stage_events
+WHERE run_id = '<uuid>' AND level IN ('warn', 'error')
+ORDER BY created_at ASC;
+
+-- Find the most common failure mode over the last 24 hours
+SELECT stage, event_type, count(*)
+FROM pipeline_stage_events
+WHERE level IN ('warn', 'error')
+  AND created_at > now() - interval '24 hours'
+GROUP BY stage, event_type
+ORDER BY count(*) DESC;
+
+-- All DLQ pushes from a specific run
+SELECT item_id, payload->>'retryCount' AS retries, payload->>'error' AS error
+FROM pipeline_stage_events
+WHERE run_id = '<uuid>' AND event_type = 'dlq_pushed';
+```
+
+### 5. Retention
+
+`pipeline_stage_events` has no automated cleanup job. If the table grows unwieldy, run:
+
+```sql
+-- Keep 30 days
+DELETE FROM pipeline_stage_events WHERE created_at < now() - interval '30 days';
+```
+
+This is safe to run while the pipeline is live; the emit path is append-only.
 
 ## API Reference
 

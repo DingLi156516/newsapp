@@ -317,6 +317,41 @@ export interface DbPipelineRunInsert {
 }
 
 // ---------------------------------------------------------------------------
+// pipeline_stage_events table (migration 044)
+// ---------------------------------------------------------------------------
+
+export type DbStageKind = 'ingest' | 'embed' | 'cluster' | 'assemble' | 'recluster'
+export type DbStageLevel = 'debug' | 'info' | 'warn' | 'error'
+
+export interface DbPipelineStageEvent {
+  id: string
+  run_id: string
+  claim_owner: string | null
+  stage: DbStageKind
+  source_id: string | null
+  provider: string | null
+  level: DbStageLevel
+  event_type: string
+  item_id: string | null
+  duration_ms: number | null
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export interface DbPipelineStageEventInsert {
+  run_id: string
+  claim_owner?: string | null
+  stage: DbStageKind
+  source_id?: string | null
+  provider?: string | null
+  level: DbStageLevel
+  event_type: string
+  item_id?: string | null
+  duration_ms?: number | null
+  payload?: Record<string, unknown>
+}
+
+// ---------------------------------------------------------------------------
 // admin_users table
 // ---------------------------------------------------------------------------
 
@@ -472,6 +507,12 @@ export interface Database {
           summary: Record<string, unknown>
           error: string
         }>
+        Relationships: []
+      }
+      pipeline_stage_events: {
+        Row: DbPipelineStageEvent
+        Insert: DbPipelineStageEventInsert
+        Update: Partial<DbPipelineStageEventInsert>
         Relationships: []
       }
       tags: {

@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
   let ingestSummary: Record<string, unknown> | null = null
 
   try {
-    await logger.startRun(type, `admin:${user.id}`)
+    const runId = await logger.startRun(type, `admin:${user.id}`)
     const backlogBefore = await countPipelineBacklog(serviceClient)
 
     if (type === 'ingest' || type === 'full') {
@@ -98,11 +98,12 @@ export async function POST(request: NextRequest) {
 
     if (type === 'process' || type === 'full') {
       const claimOwner = generateClaimOwner()
+      const emitter = logger.makeStageEmitter(runId, claimOwner)
       const processSummary = await runProcessPipeline({
         countBacklog: () => countPipelineBacklog(serviceClient),
-        embed: (maxArticles) => embedUnembeddedArticles(serviceClient, maxArticles, claimOwner),
-        cluster: (maxArticles) => clusterArticles(serviceClient, maxArticles, claimOwner),
-        assemble: (maxStories) => assembleStories(serviceClient, maxStories, undefined, claimOwner),
+        embed: (maxArticles) => embedUnembeddedArticles(serviceClient, maxArticles, claimOwner, emitter),
+        cluster: (maxArticles) => clusterArticles(serviceClient, maxArticles, claimOwner, emitter),
+        assemble: (maxStories) => assembleStories(serviceClient, maxStories, undefined, claimOwner, emitter),
         logStep: <T,>(step: string, fn: () => Promise<T>) =>
           logger.logStep(step, () => fn() as unknown as Promise<Record<string, unknown>>) as Promise<T>,
       })

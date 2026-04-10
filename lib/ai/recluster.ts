@@ -14,6 +14,11 @@ import type { Database } from '@/lib/supabase/types'
 import { ASSEMBLY_CLAIM_TTL_MS } from '@/lib/pipeline/claim-utils'
 import { fetchAssemblyVersions, requeueStoryForReassembly } from '@/lib/pipeline/reassembly'
 import { mergeStories } from '@/lib/pipeline/cluster-writes'
+import {
+  noopStageEmitter,
+  safeEmit,
+  type StageEventEmitter,
+} from '@/lib/pipeline/stage-events'
 
 /**
  * Returns true if a claim timestamp is absent or older than the TTL.
@@ -65,12 +70,19 @@ interface PhaseResult {
 async function detectAndMergeStories(
   client: SupabaseClient<Database>,
   stories: readonly StoryRow[],
-  cutoffIso: string
+  cutoffIso: string,
+  emitter: StageEventEmitter
 ): Promise<PhaseResult> {
   let mergedPairs = 0
   const errors: string[] = []
   const deletedIds = new Set<string>()
   const availableIds = new Set(stories.map(s => s.id))
+  // Emit at most ONE pgvector_fallback event per recluster run. Without
+  // this flag, the per-story loop below would write a warn event for
+  // every story in the window during an RPC outage — polluting the
+  // event stream with thousands of duplicate rows exactly when the
+  // pipeline is already degraded.
+  let fallbackEmitted = false
 
   // For each story, find similar stories via RPC
   for (const story of stories) {
@@ -91,7 +103,17 @@ async function detectAndMergeStories(
       if (error) throw new Error(error.message)
       candidates = (data ?? []) as { story_id: string; similarity: number }[]
     } catch (rpcErr) {
-      console.warn('recluster: pgvector RPC unavailable, falling back to JS:', rpcErr instanceof Error ? rpcErr.message : String(rpcErr))
+      const rpcMessage = rpcErr instanceof Error ? rpcErr.message : String(rpcErr)
+      console.warn('recluster: pgvector RPC unavailable, falling back to JS:', rpcMessage)
+      if (!fallbackEmitted) {
+        fallbackEmitted = true
+        await safeEmit(emitter, {
+          stage: 'recluster',
+          level: 'warn',
+          eventType: 'pgvector_fallback',
+          payload: { error: rpcMessage },
+        })
+      }
       // Fall back to JS comparison against other stories in window
       for (const other of stories) {
         if (other.id === story.id || deletedIds.has(other.id)) continue
@@ -335,7 +357,8 @@ async function detectAndSplitArticles(
 
 export async function reclusterRecentStories(
   client: SupabaseClient<Database>,
-  windowHours = DEFAULT_WINDOW_HOURS
+  windowHours = DEFAULT_WINDOW_HOURS,
+  emitter: StageEventEmitter = noopStageEmitter
 ): Promise<ReclusterResult> {
   const cutoff = new Date(
     Date.now() - windowHours * 60 * 60 * 1000
@@ -370,7 +393,7 @@ export async function reclusterRecentStories(
   }
 
   // Run merge detection first, then split detection
-  const mergeResult = await detectAndMergeStories(client, availableStories, cutoff)
+  const mergeResult = await detectAndMergeStories(client, availableStories, cutoff, emitter)
 
   // Re-fetch stories if merges occurred — centroids may have changed
   let storiesForSplit = availableStories

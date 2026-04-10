@@ -41,13 +41,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const logger = new PipelineLogger(client)
 
   try {
-    await logger.startRun('process', 'cron')
+    const runId = await logger.startRun('process', 'cron')
     const claimOwner = generateClaimOwner()
+    const emitter = logger.makeStageEmitter(runId, claimOwner)
     const summary = await runProcessPipeline({
       countBacklog: () => countPipelineBacklog(client),
-      embed: (maxArticles) => embedUnembeddedArticles(client, maxArticles, claimOwner),
-      cluster: (maxArticles) => clusterArticles(client, maxArticles, claimOwner),
-      assemble: (maxStories) => assembleStories(client, maxStories, undefined, claimOwner),
+      embed: (maxArticles) => embedUnembeddedArticles(client, maxArticles, claimOwner, emitter),
+      cluster: (maxArticles) => clusterArticles(client, maxArticles, claimOwner, emitter),
+      assemble: (maxStories) => assembleStories(client, maxStories, undefined, claimOwner, emitter),
       logStep: <T,>(step: string, fn: () => Promise<T>) =>
         logger.logStep(step, () => fn() as unknown as Promise<Record<string, unknown>>) as Promise<T>,
     }, { timeBudgetMs: 280_000 })

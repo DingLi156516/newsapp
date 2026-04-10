@@ -382,6 +382,7 @@ lib/hooks/       — SWR data-fetching hooks + auth hooks + utilities (23 files)
 | `GET` | `/api/admin/pipeline/sources` | Source health data for pipeline admin (admin required) |
 | `GET` | `/api/admin/pipeline/stats` | Pipeline statistics (admin required) |
 | `POST` | `/api/admin/pipeline/trigger` | Trigger pipeline run manually (admin required) |
+| `GET` | `/api/admin/pipeline/events` | Pipeline stage event drill-down; filters `runId`, `stage`, `level`, `limit`, `offset` (admin required) |
 | `POST` | `/api/cron/digest` | Weekly blindspot digest email (protected by CRON_SECRET) |
 | `GET` | `/api/cron/recluster` | Hourly re-clustering maintenance — merge fragmented stories, eject misassigned articles (protected by CRON_SECRET) |
 | `GET` | `/api/admin/sources` | List all sources with filters (admin required) |
@@ -435,6 +436,46 @@ The **articles** table also stores ingest/pipeline helpers including `canonical_
 **pgvector** extension enables storing and searching 768-dimensional embedding vectors with a fast HNSW index. The `match_story_centroid` RPC function performs HNSW-accelerated centroid similarity search for clustering Pass 1 (migration 031).
 
 **Row Level Security** ensures the browser can only read data — writes are restricted to the service role used by the cron jobs.
+
+---
+
+## Observability
+
+Pipeline observability is split across two complementary tables:
+
+| Table | Purpose | Written by | Granularity |
+|-------|---------|-----------|-------------|
+| `pipeline_runs` | High-level run summary — type, trigger, status, aggregate metrics, per-step durations. One row per cron or admin invocation. | `PipelineLogger.startRun/complete/fail` | Per-run |
+| `pipeline_stage_events` | Structured drill-down of warn/error events that fire inside a stage (pgvector fallback, DLQ push, tag extraction failure, retry count read failure, cleanup fallback). Multiple rows per run. | `PipelineLogger.stageEvent` via a pre-bound `StageEventEmitter` | Per-event within a run |
+
+The two tables share a correlation key: `pipeline_stage_events.run_id` points to `pipeline_runs.id`. When an operator notices a degraded run in `PipelineRunHistory`, they can click through to `PipelineEventsPanel` and filter by that `runId` to see every warn/error that contributed.
+
+**Write path.** Cron and admin trigger routes build the emitter once per run:
+
+```ts
+const runId = await logger.startRun('process', 'cron')
+const claimOwner = generateClaimOwner()
+const emitter = logger.makeStageEmitter(runId, claimOwner)
+
+await runProcessPipeline({
+  embed: (max) => embedUnembeddedArticles(client, max, claimOwner, emitter),
+  cluster: (max) => clusterArticles(client, max, claimOwner, emitter),
+  assemble: (max) => assembleStories(client, max, undefined, claimOwner, emitter),
+  // …
+})
+```
+
+Stage functions accept an optional trailing `emitter?: StageEventEmitter` parameter that defaults to `noopStageEmitter`, so they remain callable from tests and one-off scripts without any observability wiring. Every stage call site wraps its emit through the `safeEmit(emitter, input)` helper from `lib/pipeline/stage-events.ts` — `StageEventEmitter` is a bare function type so nothing at the type level forbids a caller from passing in a rejecting emitter. `safeEmit` catches both thrown and rejected errors and logs them via `console.warn`, keeping the "observability outage can never stall the pipeline" contract intact regardless of which emitter got passed in. `PipelineLogger.stageEvent` itself is also best-effort: it catches DB errors and never throws, so the wrapper is a no-op in the common case.
+
+**Dedupe.** Fallback emissions that would otherwise fire once per article/story (e.g. `pgvector_fallback` during an RPC outage) are gated by a local `fallbackEmitted` flag inside `matchAgainstExistingStories` (clustering) and `detectAndMergeStories` (recluster). Exactly one warn event is written per call regardless of how many items tripped the fallback.
+
+**Recluster correlation.** The hourly `/api/cron/recluster` route does not fit the `pipeline_runs.run_type` enum (`ingest|process|full`), so it generates a per-invocation `correlationId` via `randomUUID()` and calls `logger.makeStageEmitter(correlationId, null)` — `claimOwner` is `null` because recluster does not hold a pipeline claim lease. Operators see recluster events tagged with that correlation ID in `pipeline_stage_events` even though no corresponding `pipeline_runs` row exists. The `correlationId` is returned in the cron route response.
+
+**When to emit vs. when to use `pipeline_runs.steps`.** Prefer `pipeline_runs.steps` (via `logger.logStep`) for the happy-path per-pass timing and result. Prefer `stageEvent` for error and warn sites that need a payload, a correlation ID, and a free-text event type (`pgvector_fallback`, `dlq_pushed`, `tag_extraction_failed`, `retry_count_read_failed`, `cleanup_fallback_failed`, `embedding_write_failed`). Debug/info emissions are currently reserved for high-value checkpoints; routine stage entry/exit duplicates `pipeline_runs.steps` and should not be emitted.
+
+**Read path.** Admins use `GET /api/admin/pipeline/events?runId=…&stage=…&level=warn,error` (Zod-validated, limit capped at 500) from the `PipelineEventsPanel` organism on `/admin/pipeline`. The route uses the service-role client because the table's RLS policy only grants access to service_role (see `supabase/migrations/044_pipeline_stage_events.sql`).
+
+**Retention.** `pipeline_stage_events` grows unbounded. No automated retention job exists yet — operators can manually run `DELETE FROM pipeline_stage_events WHERE created_at < now() - interval '30 days'` if the table balloons. This is noted in `docs/operations.md`.
 
 ---
 

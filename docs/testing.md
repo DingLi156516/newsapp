@@ -37,6 +37,7 @@ __tests__/
     pipeline/
       backlog.test.ts
       logger.test.ts
+      stage-events.test.ts
       process-runner.test.ts
       process-runner-freshness.test.ts
       story-state.test.ts
@@ -121,10 +122,11 @@ __tests__/
       admin/pipeline/sources/route.test.ts
       admin/pipeline/stats/route.test.ts
       admin/pipeline/trigger/route.test.ts
+      admin/pipeline/events/route.test.ts
   components/
     atoms/   (10 test files — includes Skeleton.test.tsx, ReviewStatusBadge.test.tsx, OfflineIndicator.test.tsx, ShareButton.test.tsx, Toast.test.tsx)
     molecules/  (8 test files — adds BiasComparisonBar.test.tsx, StatsRow.test.tsx, ForYouCta.test.tsx, ReviewListItem.test.tsx, ReviewDetail.test.tsx)
-    organisms/  (24 test files — adds HeroCard.test.tsx, ViewSwitcher.test.tsx, SourcesView.test.tsx, BiasProfileChart.test.tsx, SettingsForm.test.tsx, StickyFilterBar.test.tsx, SuggestionsList.test.tsx, SearchFilters.test.tsx, ReviewQueue.test.tsx, CoverageIntelligence.test.tsx, SourceDirectoryInsights.test.tsx, PipelineControls.test.tsx, PipelineRunHistory.test.tsx, PipelineSummaryStats.test.tsx, SourceHealthTable.test.tsx; AppNavigation.test.tsx, PerspectiveSlider.test.tsx and RegionSelector.test.tsx removed)
+    organisms/  (25 test files — adds HeroCard.test.tsx, ViewSwitcher.test.tsx, SourcesView.test.tsx, BiasProfileChart.test.tsx, SettingsForm.test.tsx, StickyFilterBar.test.tsx, SuggestionsList.test.tsx, SearchFilters.test.tsx, ReviewQueue.test.tsx, CoverageIntelligence.test.tsx, SourceDirectoryInsights.test.tsx, PipelineControls.test.tsx, PipelineRunHistory.test.tsx, PipelineSummaryStats.test.tsx, SourceHealthTable.test.tsx, PipelineEventsPanel.test.tsx; AppNavigation.test.tsx, PerspectiveSlider.test.tsx and RegionSelector.test.tsx removed)
     pages/
       SourceProfilePage.test.tsx
       SourceComparisonPage.test.tsx

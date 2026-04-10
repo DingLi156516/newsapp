@@ -418,6 +418,31 @@ describe('scheduleTagExtraction', () => {
 
     consoleSpy.mockRestore()
   })
+
+  it('emits a tag_extraction_failed warn event when extraction rejects', async () => {
+    mockExtractEntities.mockRejectedValue(new Error('AI failure'))
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const emitter = vi.fn().mockResolvedValue(undefined)
+
+    scheduleTagExtraction({} as never, 'story-1', ['Title'], [null], emitter)
+
+    await vi.waitFor(() => {
+      expect(emitter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stage: 'assemble',
+          level: 'warn',
+          eventType: 'tag_extraction_failed',
+          itemId: 'story-1',
+          payload: expect.objectContaining({
+            storyId: 'story-1',
+            error: 'AI failure',
+          }),
+        })
+      )
+    })
+
+    consoleSpy.mockRestore()
+  })
 })
 
 describe('assembleStories', () => {

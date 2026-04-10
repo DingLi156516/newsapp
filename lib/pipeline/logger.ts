@@ -8,6 +8,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
+import type { StageEventEmitter, StageEventInput } from '@/lib/pipeline/stage-events'
 
 export type PipelineRunType = 'ingest' | 'process' | 'full'
 export type PipelineStepStatus = 'success' | 'error' | 'skipped'
@@ -124,5 +125,55 @@ export class PipelineLogger {
         error,
       })
       .eq('id', this.runId)
+  }
+
+  /**
+   * Persist a structured stage event to `pipeline_stage_events`.
+   *
+   * BEST-EFFORT — never throws. A DB write failure here must not stall
+   * the pipeline. See docs/architecture.md — Observability.
+   */
+  async stageEvent(
+    runId: string,
+    claimOwner: string | null,
+    input: StageEventInput
+  ): Promise<void> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (this.client.from('pipeline_stage_events') as any)
+        .insert({
+          run_id: runId,
+          claim_owner: claimOwner,
+          stage: input.stage,
+          source_id: input.sourceId ?? null,
+          provider: input.provider ?? null,
+          level: input.level,
+          event_type: input.eventType,
+          item_id: input.itemId ?? null,
+          duration_ms: input.durationMs ?? null,
+          payload: input.payload ?? {},
+        })
+      if (error) {
+        console.warn(`[logger] stageEvent persist failed: ${error.message}`)
+      }
+    } catch (err) {
+      console.warn(
+        `[logger] stageEvent threw: ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  }
+
+  /**
+   * Build an emitter pre-bound to a specific run_id + claim_owner.
+   * Pass this into stage functions instead of manually plumbing IDs.
+   *
+   * `claimOwner` accepts `null` for maintenance jobs (e.g. the hourly
+   * `/api/cron/recluster` route) that do not participate in the normal
+   * claim-lease flow but still want to correlate their stage events to
+   * a run/correlation UUID. Cron `process`/`ingest`/`full` entry points
+   * pass the run's `generateClaimOwner()` UUID.
+   */
+  makeStageEmitter(runId: string, claimOwner: string | null): StageEventEmitter {
+    return (event) => this.stageEvent(runId, claimOwner, event)
   }
 }

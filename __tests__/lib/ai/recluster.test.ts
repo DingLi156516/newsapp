@@ -652,4 +652,33 @@ describe('reclusterRecentStories', () => {
     // Error collected for the failed merge RPC.
     expect(result.errors.some((e) => e.includes('Failed to merge story'))).toBe(true)
   })
+
+  it('emits pgvector_fallback when the match_story_centroid RPC errors', async () => {
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stories: MockStory[] = [
+      { id: 'story-A', cluster_centroid: [1, 0], last_updated: NOW, assembly_claimed_at: null },
+      { id: 'story-B', cluster_centroid: [0.9, 0.1], last_updated: NOW, assembly_claimed_at: null },
+    ]
+
+    const client = createReclusterMockClient(stories, {}, {
+      rpcError: { message: 'function match_story_centroid does not exist' },
+    })
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+
+    await reclusterRecentStories(client as never, 24, emitter)
+
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'recluster',
+        level: 'warn',
+        eventType: 'pgvector_fallback',
+        payload: expect.objectContaining({
+          error: 'function match_story_centroid does not exist',
+        }),
+      })
+    )
+
+    consoleSpy.mockRestore()
+  })
 })
