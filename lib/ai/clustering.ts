@@ -17,11 +17,12 @@ import type { Database } from '@/lib/supabase/types'
 import {
   claimClusteringBatch,
   generateClaimOwner,
-  releaseClusteringClaim,
+  releaseClusteringClaims,
   type ClaimOwner,
 } from '@/lib/pipeline/claim-utils'
 import { fetchAssemblyVersions, requeueStoryForReassembly } from '@/lib/pipeline/reassembly'
 import { createStoryWithArticles } from '@/lib/pipeline/cluster-writes'
+import { computeRetryOutcome } from '@/lib/pipeline/retry-policy'
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -187,12 +188,105 @@ function interleaveBySource(articles: EmbeddedArticle[]): EmbeddedArticle[] {
 /*  DB helpers                                                         */
 /* ------------------------------------------------------------------ */
 
-async function clearClusteringClaim(
+/**
+ * Handle per-article clustering failure with exponential backoff and DLQ
+ * escalation when the retry budget is exhausted. Mirrors the embedding and
+ * assembly failure handlers so every stage shares the same retry semantics.
+ *
+ * Delegates the actual state mutation to the `apply_clustering_failure`
+ * SECURITY DEFINER RPC (migration 043) which performs the owner-scoped
+ * UPDATE and (on exhaustion) the pipeline_dead_letter INSERT in a single
+ * transaction. That atomicity is required — a prior two-write version of
+ * this handler could leave an exhausted article in status='failed' +
+ * next_attempt_at='2099-01-01' with no DLQ row if the worker crashed
+ * between the UPDATE commit and the DLQ INSERT. Operators had no way to
+ * recover such stranded rows.
+ *
+ * On each article:
+ *   - clustering_retry_count += 1
+ *   - clustering_next_attempt_at = now + backoff (gates the claim RPC)
+ *   - clustering_last_error = error message
+ *   - clustering_status → 'failed' when exhausted, 'pending' otherwise
+ *   - claim cleared so another owner can pick it up after the backoff
+ *   - DLQ entry inserted in the same transaction on exhaustion
+ *
+ * When the RPC returns false the UPDATE was a no-op (owner moved) —
+ * the new owner is now responsible for retry and DLQ escalation.
+ */
+async function handleClusteringFailure(
   client: SupabaseClient<Database>,
-  articleId: string,
+  articleIds: readonly string[],
+  errorMessage: string,
   owner: ClaimOwner
 ): Promise<void> {
-  await releaseClusteringClaim(client, articleId, owner)
+  if (articleIds.length === 0) return
+
+  const FAR_FUTURE = '2099-01-01T00:00:00Z'
+
+  // Read current retry counts so we can apply per-article backoff. The
+  // RPC is owner-scoped, so a stale row we mis-read here just results
+  // in a no-op RPC return.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const query = (client.from('articles') as any)
+    .select('id, clustering_retry_count')
+  const withFilter = typeof query.in === 'function'
+    ? query.in('id', articleIds)
+    : query
+  const { data, error: readError } = await withFilter
+
+  const retryCounts = new Map<string, number>()
+  if (readError) {
+    console.warn(
+      `[clustering] failed to read retry counts: ${readError.message}`
+    )
+  } else {
+    for (const row of (data as {
+      id: string
+      clustering_retry_count: number | null
+    }[] | null) ?? []) {
+      retryCounts.set(row.id, row.clustering_retry_count ?? 0)
+    }
+  }
+
+  for (const articleId of articleIds) {
+    const previous = retryCounts.get(articleId) ?? 0
+    const outcome = computeRetryOutcome('cluster', previous)
+    const nextAttemptAt = outcome.exhausted
+      ? FAR_FUTURE
+      : outcome.nextAttemptAt.toISOString()
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: rpcError } = await (client as any).rpc(
+      'apply_clustering_failure',
+      {
+        p_article_id: articleId,
+        p_owner: owner,
+        p_retry_count: outcome.nextRetryCount,
+        p_next_attempt_at: nextAttemptAt,
+        p_last_error: errorMessage,
+        p_exhausted: outcome.exhausted,
+      }
+    )
+
+    if (rpcError) {
+      // Fail loud. An RPC error here almost always means the
+      // `apply_clustering_failure` function is missing (migration 043
+      // not applied) or the service role cannot execute it. Either
+      // way, silently continuing would drop the retry + DLQ state for
+      // every failing article in this pipeline run — exactly the kind
+      // of silent data loss this hardening series exists to prevent.
+      //
+      // Throwing here lets the error bubble up to the pipeline step's
+      // error aggregator so operators see a loud failure in their
+      // run logs and fix the deployment before the next pass.
+      throw new Error(
+        `apply_clustering_failure RPC failed for ${articleId}: ${rpcError.message}. ` +
+          `If this message mentions "function does not exist" or "not found in schema cache", ` +
+          `migration 043 (supabase/migrations/043_atomic_clustering_failure.sql) has not been ` +
+          `applied to this environment.`
+      )
+    }
+  }
 }
 
 async function bulkUpdateArticles(
@@ -290,20 +384,29 @@ async function queueStoriesForReassembly(
 // issues a DB-side compare-and-set with owner token (migration 037),
 // guaranteeing that two overlapping runners cannot claim the same rows.
 // After the RPC returns claimed IDs we fetch the full rows for processing.
+//
+// NOTE: this helper deliberately does NOT call handleClusteringFailure on
+// its own errors. The caller (`clusterArticles`) registers every claimed
+// ID into `unhandledArticleIds` *before* awaiting the fetch, so that if
+// the fetch throws, the caller's outer try/finally still owns cleanup of
+// those claims. Keeping the failure routing single-sourced in the outer
+// function prevents a class of bugs where an early-phase throw aborts
+// the function before the cleanup scope is established.
 
-async function claimAndFetchArticles(
+async function claimClusteringIds(
   client: SupabaseClient<Database>,
   owner: ClaimOwner,
   maxArticles: number
-): Promise<{ claimableArticles: EmbeddedArticle[]; errors: string[]; dbTimeMs: number }> {
+): Promise<{ claimedIds: string[]; dbTimeMs: number }> {
   const claimStartedAt = Date.now()
   const claimedIds = await claimClusteringBatch(client, owner, maxArticles)
-  const claimDbTimeMs = Date.now() - claimStartedAt
+  return { claimedIds, dbTimeMs: Date.now() - claimStartedAt }
+}
 
-  if (claimedIds.length === 0) {
-    return { claimableArticles: [], errors: [], dbTimeMs: claimDbTimeMs }
-  }
-
+async function fetchClaimedClusterRows(
+  client: SupabaseClient<Database>,
+  claimedIds: readonly string[]
+): Promise<{ claimableArticles: EmbeddedArticle[]; dbTimeMs: number }> {
   const fetchStartedAt = Date.now()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const query = (client.from('articles') as any)
@@ -311,19 +414,15 @@ async function claimAndFetchArticles(
 
   const withFilter = typeof query.in === 'function' ? query.in('id', claimedIds) : query
   const { data: fetchedData, error: fetchError } = await withFilter
-  const fetchedRows = (fetchedData as EmbeddedArticleRow[] | null) ?? []
-  const fetchDbTimeMs = Date.now() - fetchStartedAt
+  const dbTimeMs = Date.now() - fetchStartedAt
 
   if (fetchError) {
-    // Release all claims so a subsequent run can retry.
-    await Promise.all(
-      claimedIds.map((id) => releaseClusteringClaim(client, id, owner))
-    )
     throw new Error(`Failed to fetch claimed clustering batch: ${fetchError.message}`)
   }
 
+  const fetchedRows = (fetchedData as EmbeddedArticleRow[] | null) ?? []
   if (fetchedRows.length === 0) {
-    return { claimableArticles: [], errors: [], dbTimeMs: claimDbTimeMs + fetchDbTimeMs }
+    return { claimableArticles: [], dbTimeMs }
   }
 
   const claimable = fetchedRows
@@ -335,12 +434,7 @@ async function claimAndFetchArticles(
 
   // Round-robin interleave by source_id for downstream diversity.
   const claimableArticles = interleaveBySource(claimable)
-
-  return {
-    claimableArticles,
-    errors: [],
-    dbTimeMs: claimDbTimeMs + fetchDbTimeMs,
-  }
+  return { claimableArticles, dbTimeMs }
 }
 
 /* ------------------------------------------------------------------ */
@@ -704,16 +798,23 @@ async function persistPass1Assignments(
 
     if (failedIds.length > 0) {
       const failedSet = new Set(failedIds)
+      const failedForRetry: string[] = []
       for (const aid of articleIds) {
         if (failedSet.has(aid)) {
           errors.push(`Failed to assign article ${aid}: ${message ?? 'unknown error'}`)
-          await clearClusteringClaim(client, aid, owner)
+          failedForRetry.push(aid)
           unhandledArticleIds.delete(aid)
         } else {
           assignedArticles++
           unhandledArticleIds.delete(aid)
         }
       }
+      await handleClusteringFailure(
+        client,
+        failedForRetry,
+        `Failed to assign to story ${storyId}: ${message ?? 'unknown error'}`,
+        owner
+      )
     } else {
       assignedArticles += articleIds.length
       articleIds.forEach((id) => unhandledArticleIds.delete(id))
@@ -800,7 +901,12 @@ async function persistNewClusters(
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           errors.push(`Failed to promote singleton ${article.id}: ${message}`)
-          await clearClusteringClaim(client, article.id, owner)
+          await handleClusteringFailure(
+            client,
+            [article.id],
+            `Singleton promotion failed: ${message}`,
+            owner
+          )
           unhandledArticleIds.delete(article.id)
         }
       } else {
@@ -845,9 +951,14 @@ async function persistNewClusters(
       if (failedIds.length > 0) {
         for (const articleId of failedIds) {
           errors.push(`Failed to assign article ${articleId} to existing story: ${message ?? 'unknown error'}`)
-          await clearClusteringClaim(client, articleId, owner)
           unhandledArticleIds.delete(articleId)
         }
+        await handleClusteringFailure(
+          client,
+          failedIds,
+          `Failed to assign to duplicate story ${duplicateStoryId}: ${message ?? 'unknown error'}`,
+          owner
+        )
         assignedArticles += cluster.articleIds.length - failedIds.length
         cluster.articleIds.filter((id) => !failedIds.includes(id)).forEach((id) => unhandledArticleIds.delete(id))
       } else {
@@ -897,10 +1008,13 @@ async function persistNewClusters(
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       errors.push(`Failed to create story: ${message}`)
-      for (const articleId of cluster.articleIds) {
-        await clearClusteringClaim(client, articleId, owner)
-        unhandledArticleIds.delete(articleId)
-      }
+      await handleClusteringFailure(
+        client,
+        cluster.articleIds,
+        `Create-story failed: ${message}`,
+        owner
+      )
+      cluster.articleIds.forEach((id) => unhandledArticleIds.delete(id))
       continue
     }
 
@@ -927,128 +1041,464 @@ export async function clusterArticles(
   owner: ClaimOwner = generateClaimOwner()
 ): Promise<ClusterResult> {
   const now = new Date()
-
-  /* --- Atomically claim + fetch articles --- */
-  const claimResult = await claimAndFetchArticles(client, owner, maxArticles)
-  const { claimableArticles } = claimResult
-  const errors = [...claimResult.errors]
-  let dbTimeMs = claimResult.dbTimeMs
-
-  if (claimableArticles.length === 0) {
-    return {
-      newStories: 0,
-      updatedStories: 0,
-      assignedArticles: 0,
-      unmatchedSingletons: 0,
-      promotedSingletons: 0,
-      expiredArticles: 0,
-      errors,
-      dbTimeMs,
-    }
-  }
-
+  const errors: string[] = []
+  let dbTimeMs = 0
   const storyMap = new Map<string, StoryTracker>()
   const storiesNeedingReassembly = new Set<string>()
-  const unhandledArticleIds = new Set(claimableArticles.map((a) => a.id))
+
+  // Two cleanup queues. Every claimed article ID lives in exactly one
+  // of these sets until the claim is confirmed released — either via
+  // the happy-path writes inside the work block, via the atomic
+  // failure RPC (retry treatment), or via the clean release helper.
+  //
+  //   - unhandledArticleIds: articles that attempted real clustering
+  //     work and either failed or are waiting for a happy-path write.
+  //     Routed through handleClusteringFailure (retry + DLQ).
+  //   - cleanReleaseArticleIds: articles whose claims need to be
+  //     cleared WITHOUT burning retry budget — e.g., the fetch
+  //     filtered them out (null embedding) or the fetch returned
+  //     zero rows. Routed through releaseClusteringClaims.
+  //
+  // CRITICAL INVARIANTS:
+  //   1. Every claimed ID enters one set before any throwable work.
+  //   2. IDs are NEVER removed from a set until their release has
+  //      been confirmed successful.
+  //   3. The dedicated cleanup phase below processes both sets and
+  //      throws loudly on any failure so the pipeline step cannot
+  //      silently "succeed" with stranded claims.
+  const unhandledArticleIds = new Set<string>()
+  const cleanReleaseArticleIds = new Set<string>()
+
+  let primaryResult: ClusterResult | null = null
+  let primaryError: unknown = null
 
   try {
-    /* --- Load existing stories for Pass 1 --- */
-    const broadCutoff = new Date(
-      now.getTime() - STANDARD_MATCH_WINDOW_HOURS * 60 * 60 * 1000
-    ).toISOString()
+    /* --- Stage 1: Atomically claim a clustering batch --- */
+    const { claimedIds, dbTimeMs: claimDbTimeMs } = await claimClusteringIds(
+      client,
+      owner,
+      maxArticles
+    )
+    dbTimeMs += claimDbTimeMs
 
-    const { data: existingStoryRows, error: storyError } = await client
-      .from('stories')
-      .select('id, cluster_centroid, last_updated')
-      .gte('last_updated', broadCutoff)
-      .not('cluster_centroid', 'is', null)
-      .returns<StoryWithCentroidRow[]>()
+    if (claimedIds.length === 0) {
+      primaryResult = {
+        newStories: 0,
+        updatedStories: 0,
+        assignedArticles: 0,
+        unmatchedSingletons: 0,
+        promotedSingletons: 0,
+        expiredArticles: 0,
+        errors,
+        dbTimeMs,
+      }
+    } else {
+      /* --- Stage 2: Fetch the full rows for the claimed IDs --- */
+      // Register every claimed ID for retry-treatment cleanup before
+      // awaiting the fetch. A throw here leaves them in the retry set
+      // for the cleanup phase. We'll move the subset that clustering
+      // never actually processes to the clean-release set below.
+      for (const id of claimedIds) {
+        unhandledArticleIds.add(id)
+      }
 
-    if (storyError) {
-      throw new Error(`Failed to fetch existing stories: ${storyError.message}`)
+      const fetchResult = await fetchClaimedClusterRows(client, claimedIds)
+      dbTimeMs += fetchResult.dbTimeMs
+      const claimableArticles = fetchResult.claimableArticles
+
+      // Any claimed IDs that did NOT survive the fetch filter (null
+      // embedding, concurrent delete) move to the clean-release queue.
+      const claimableIdSet = new Set(claimableArticles.map((a) => a.id))
+      for (const id of claimedIds) {
+        if (!claimableIdSet.has(id)) {
+          unhandledArticleIds.delete(id)
+          cleanReleaseArticleIds.add(id)
+        }
+      }
+
+      // Try to release the filtered/non-processable claims INLINE,
+      // right now, before the long clustering work begins. Known-bad
+      // rows should never be held across the whole run — if the
+      // worker crashes during matching/persist/reassembly, those
+      // claims would otherwise sit until the 30-minute TTL expiry.
+      //
+      // Invariant: if ANY filtered ID cannot be released cleanly
+      // here, the work phase is a hard stop. Continuing would
+      // reopen the stranding window for the unreleased IDs. Before
+      // throwing we also move the surviving claimable IDs OUT of
+      // the retry-treatment queue and into the clean-release queue
+      // — clustering never actually ran on them, so the cleanup
+      // phase must not burn their retry budget via the atomic
+      // failure RPC. The throw hands control to the cleanup phase
+      // (via primaryError); the cleanup phase retries the release
+      // and either succeeds (clean run with a thrown primary error)
+      // or fails loudly with the wrapper.
+      if (cleanReleaseArticleIds.size > 0) {
+        const filteredIds = Array.from(cleanReleaseArticleIds)
+        const { failed } = await releaseClusteringClaims(client, filteredIds, owner)
+        if (failed.length === 0) {
+          cleanReleaseArticleIds.clear()
+        } else {
+          // Remove the ones that succeeded; failed IDs stay in the
+          // set for the cleanup phase to retry.
+          const failedIds = new Set(failed.map((f) => f.id))
+          for (const id of filteredIds) {
+            if (!failedIds.has(id)) {
+              cleanReleaseArticleIds.delete(id)
+            }
+          }
+          // Move surviving claimable IDs to the clean-release queue
+          // so the cleanup phase doesn't burn retry budget on them.
+          // Clustering was never attempted for any of these rows.
+          for (const article of claimableArticles) {
+            unhandledArticleIds.delete(article.id)
+            cleanReleaseArticleIds.add(article.id)
+          }
+          throw new Error(
+            `Inline clean-release failed for ${failed.length} claim(s); ` +
+              `aborting work phase to avoid stranding: ` +
+              failed.map((f) => `${f.id}: ${f.message}`).join('; ')
+          )
+        }
+      }
+
+      if (claimableArticles.length === 0) {
+        // Zero claimable articles: all claims went to cleanReleaseArticleIds.
+        // The cleanup phase will release them and throw if release fails.
+        primaryResult = {
+          newStories: 0,
+          updatedStories: 0,
+          assignedArticles: 0,
+          unmatchedSingletons: 0,
+          promotedSingletons: 0,
+          expiredArticles: 0,
+          errors,
+          dbTimeMs,
+        }
+      } else {
+        /* --- Load existing stories for Pass 1 --- */
+        const broadCutoff = new Date(
+          now.getTime() - STANDARD_MATCH_WINDOW_HOURS * 60 * 60 * 1000
+        ).toISOString()
+
+        const { data: existingStoryRows, error: storyError } = await client
+          .from('stories')
+          .select('id, cluster_centroid, last_updated')
+          .gte('last_updated', broadCutoff)
+          .not('cluster_centroid', 'is', null)
+          .returns<StoryWithCentroidRow[]>()
+
+        if (storyError) {
+          throw new Error(`Failed to fetch existing stories: ${storyError.message}`)
+        }
+
+        const existingStories: StoryWithCentroid[] = (existingStoryRows ?? [])
+          .filter((row) => row.cluster_centroid !== null)
+          .filter((row) => shouldStoryBeMatchable(row.last_updated, now))
+          .map((row) => ({
+            ...row,
+            cluster_centroid: parseVector(row.cluster_centroid),
+          }))
+
+        for (const story of existingStories) {
+          storyMap.set(story.id, {
+            centroid: story.cluster_centroid,
+            articleIds: [],
+          })
+        }
+
+        /* --- Pass 1: Match against existing stories --- */
+        const { pass1Assignments, unmatchedArticles } = await matchAgainstExistingStories(
+          client,
+          claimableArticles,
+          storyMap,
+          SIMILARITY_THRESHOLD,
+          broadCutoff
+        )
+
+        /* --- Pass 2: Union-find clustering of unmatched articles --- */
+        const newClusters = clusterUnmatchedArticles(unmatchedArticles, SIMILARITY_THRESHOLD)
+
+        /* --- Persist Pass 1 assignments --- */
+        const pass1Result = await persistPass1Assignments(
+          client,
+          pass1Assignments,
+          storyMap,
+          unhandledArticleIds,
+          storiesNeedingReassembly,
+          errors,
+          owner
+        )
+        let assignedArticles = pass1Result.assignedArticles
+        dbTimeMs += pass1Result.dbTimeMs
+
+        /* --- Persist new clusters --- */
+        const clusterResult = await persistNewClusters(
+          client,
+          newClusters,
+          claimableArticles,
+          storyMap,
+          storiesNeedingReassembly,
+          unhandledArticleIds,
+          errors,
+          now,
+          owner
+        )
+
+        assignedArticles += clusterResult.assignedArticles
+        dbTimeMs += clusterResult.dbTimeMs
+
+        /* --- Queue reassembly (guarded) --- */
+        await queueStoriesForReassembly(
+          client,
+          Array.from(storiesNeedingReassembly),
+          errors
+        )
+
+        primaryResult = {
+          newStories: clusterResult.newStories,
+          updatedStories: storiesNeedingReassembly.size,
+          assignedArticles,
+          unmatchedSingletons: clusterResult.unmatchedSingletons,
+          promotedSingletons: clusterResult.promotedSingletons,
+          expiredArticles: 0,
+          errors,
+          dbTimeMs,
+        }
+      }
     }
+  } catch (err) {
+    primaryError = err
+  }
 
-    const existingStories: StoryWithCentroid[] = (existingStoryRows ?? [])
-      .filter((row) => row.cluster_centroid !== null)
-      .filter((row) => shouldStoryBeMatchable(row.last_updated, now))
-      .map((row) => ({
-        ...row,
-        cluster_centroid: parseVector(row.cluster_centroid),
-      }))
+  /* ---------------------------------------------------------------- */
+  /*  Dedicated cleanup phase                                         */
+  /* ---------------------------------------------------------------- */
+  // Runs regardless of primary outcome. Processes both cleanup queues
+  // and collects cleanup errors. After the cleanup phase we decide
+  // which error (primary vs cleanup) to surface. Cleanup failures
+  // MUST throw when the primary path was otherwise successful —
+  // otherwise the pipeline runner sees a returned result and marks
+  // the step "successful" while claims are stranded.
 
-    for (const story of existingStories) {
-      storyMap.set(story.id, {
-        centroid: story.cluster_centroid,
-        articleIds: [],
-      })
-    }
+  const cleanupErrors: string[] = []
 
-    /* --- Pass 1: Match against existing stories (pgvector + JS fallback) --- */
-    const { pass1Assignments, unmatchedArticles } = await matchAgainstExistingStories(
-      client,
-      claimableArticles,
-      storyMap,
-      SIMILARITY_THRESHOLD,
-      broadCutoff
-    )
+  if (cleanReleaseArticleIds.size > 0) {
+    const ids = Array.from(cleanReleaseArticleIds)
+    try {
+      const { failed } = await releaseClusteringClaims(client, ids, owner)
+      const stillFailing: Array<{ id: string; message: string }> = []
+      const ownershipMovedIds: string[] = []
 
-    /* --- Pass 2: Union-find clustering of unmatched articles --- */
-    const newClusters = clusterUnmatchedArticles(unmatchedArticles, SIMILARITY_THRESHOLD)
+      if (failed.length === 0) {
+        cleanReleaseArticleIds.clear()
+      } else {
+        // Fallback path: the release RPC is broken (missing,
+        // permission error, etc.) but the articles table may still
+        // be reachable. Issue an owner-scoped direct UPDATE with
+        // `{ count: 'exact' }` so we can distinguish three outcomes
+        // and MIRROR the RPC contract:
+        //   1. error → fallback genuinely failed; keep in recovery set
+        //   2. count > 0 → confirmed release; claim cleared
+        //   3. count === 0 → row missing or owner moved since the RPC
+        //      call; claim is no longer ours to release. We remove
+        //      the ID from the recovery set (nothing to retry) and
+        //      log a diagnostic so operators see the anomaly.
+        const resolvedViaFallback = new Set<string>()
+        for (const f of failed) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { error: fbError, count: fbCount } = await (client.from('articles') as any)
+              .update(
+                {
+                  clustering_claimed_at: null,
+                  clustering_claim_owner: null,
+                },
+                { count: 'exact' }
+              )
+              .eq('id', f.id)
+              .eq('clustering_claim_owner', owner)
 
-    /* --- Persist Pass 1 assignments --- */
-    const pass1Result = await persistPass1Assignments(
-      client,
-      pass1Assignments,
-      storyMap,
-      unhandledArticleIds,
-      storiesNeedingReassembly,
-      errors,
-      owner
-    )
-    let assignedArticles = pass1Result.assignedArticles
-    dbTimeMs += pass1Result.dbTimeMs
+            if (fbError) {
+              stillFailing.push({
+                id: f.id,
+                message: `${f.message}; fallback UPDATE also failed: ${fbError.message}`,
+              })
+            } else if (typeof fbCount === 'number' && fbCount === 0) {
+              // Count=0 is ambiguous: it could be (a) row missing,
+              // (b) another worker reclaimed after TTL, or (c) RLS
+              // policy / permission drift that prevents us from
+              // clearing an owner-matching row. Do an explicit
+              // verification read so we only declare success when
+              // the claim is positively gone.
+              //
+              // Architectural assumption: the pipeline always runs
+              // under the Supabase service role (via
+              // getSupabaseServiceClient). Service role bypasses
+              // RLS, so the verify SELECT below cannot be filtered
+              // by a read policy — `data: null` unambiguously means
+              // the row does not exist in the articles table. If
+              // this stage is ever called from a non-service-role
+              // client (e.g., an anon RLS path), the `!verifyData`
+              // branch would become theoretically ambiguous and
+              // would need a SECURITY DEFINER RPC instead. Call
+              // sites: app/api/cron/process/route.ts,
+              // app/api/admin/pipeline/trigger/route.ts — both
+              // wire getSupabaseServiceClient() explicitly.
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const verify = (client.from('articles') as any)
+                  .select('clustering_claim_owner')
+                  .eq('id', f.id)
+                const withLimit = typeof verify.maybeSingle === 'function'
+                  ? verify.maybeSingle()
+                  : typeof verify.single === 'function'
+                    ? verify.single()
+                    : verify
+                const { data: verifyData, error: verifyError } = await withLimit
 
-    /* --- Persist new clusters --- */
-    const clusterResult = await persistNewClusters(
-      client,
-      newClusters,
-      claimableArticles,
-      storyMap,
-      storiesNeedingReassembly,
-      unhandledArticleIds,
-      errors,
-      now,
-      owner
-    )
+                if (verifyError) {
+                  stillFailing.push({
+                    id: f.id,
+                    message:
+                      `${f.message}; fallback UPDATE count=0 and verify read failed: ${verifyError.message}`,
+                  })
+                } else if (!verifyData) {
+                  // Row genuinely missing — claim is gone.
+                  resolvedViaFallback.add(f.id)
+                  ownershipMovedIds.push(f.id)
+                } else {
+                  const currentOwner = (verifyData as { clustering_claim_owner: string | null })
+                    .clustering_claim_owner
+                  if (currentOwner === null || currentOwner !== owner) {
+                    // Another worker holds the claim (or it's been
+                    // cleared by someone else). Not our concern.
+                    resolvedViaFallback.add(f.id)
+                    ownershipMovedIds.push(f.id)
+                  } else {
+                    // Claim is still ours but the UPDATE matched
+                    // zero rows. This means the write layer is
+                    // broken — policy drift, permission, etc. Fail
+                    // loud so operators see the schema-level issue
+                    // rather than silently stranding the claim.
+                    stillFailing.push({
+                      id: f.id,
+                      message:
+                        `${f.message}; fallback UPDATE matched zero rows but claim still ` +
+                        `held by this owner — suspected policy / permission drift`,
+                    })
+                  }
+                }
+              } catch (verifyErr) {
+                stillFailing.push({
+                  id: f.id,
+                  message:
+                    `${f.message}; fallback UPDATE count=0 and verify read threw: ` +
+                    (verifyErr instanceof Error ? verifyErr.message : String(verifyErr)),
+                })
+              }
+            } else {
+              // count > 0 or count undefined (client doesn't report
+              // count but no error) → treat as confirmed release.
+              resolvedViaFallback.add(f.id)
+            }
+          } catch (fbErr) {
+            stillFailing.push({
+              id: f.id,
+              message:
+                `${f.message}; fallback UPDATE threw: ` +
+                (fbErr instanceof Error ? fbErr.message : String(fbErr)),
+            })
+          }
+        }
 
-    assignedArticles += clusterResult.assignedArticles
-    dbTimeMs += clusterResult.dbTimeMs
+        // Clear entries that went through either the RPC or the
+        // fallback path (including the count=0 "not ours" branch).
+        const failedIds = new Set(failed.map((f) => f.id))
+        for (const id of ids) {
+          if (!failedIds.has(id) || resolvedViaFallback.has(id)) {
+            cleanReleaseArticleIds.delete(id)
+          }
+        }
 
-    /* --- Queue reassembly (guarded) --- */
-    await queueStoriesForReassembly(
-      client,
-      Array.from(storiesNeedingReassembly),
-      errors
-    )
+        if (ownershipMovedIds.length > 0) {
+          // Non-fatal diagnostic: surface via errors[] so the
+          // operator sees which claims had moved between the RPC
+          // and fallback attempts. This is not a cleanup failure;
+          // the claim is already gone from our perspective.
+          errors.push(
+            `Clean-release fallback observed ${ownershipMovedIds.length} claim(s) ` +
+              `with no matching owner (row missing or reclaimed): ` +
+              ownershipMovedIds.join(', ')
+          )
+        }
 
-    return {
-      newStories: clusterResult.newStories,
-      updatedStories: storiesNeedingReassembly.size,
-      assignedArticles,
-      unmatchedSingletons: clusterResult.unmatchedSingletons,
-      promotedSingletons: clusterResult.promotedSingletons,
-      expiredArticles: 0,
-      errors,
-      dbTimeMs,
-    }
-  } finally {
-    if (unhandledArticleIds.size > 0) {
-      const leftoverIds = Array.from(unhandledArticleIds)
-      await Promise.all(
-        leftoverIds.map((id) => releaseClusteringClaim(client, id, owner))
-      ).catch((err) => console.error('Failed to release claims in finally block', err))
+        if (stillFailing.length > 0) {
+          cleanupErrors.push(
+            `Failed to release ${stillFailing.length} clustering claim(s) ` +
+              `(tried RPC and direct UPDATE fallback): ` +
+              stillFailing.map((f) => `${f.id}: ${f.message}`).join('; ')
+          )
+        }
+      }
+    } catch (err) {
+      cleanupErrors.push(
+        `Clean-release cleanup threw: ${err instanceof Error ? err.message : String(err)}`
+      )
     }
   }
+
+  if (unhandledArticleIds.size > 0) {
+    const leftoverIds = Array.from(unhandledArticleIds)
+    try {
+      await handleClusteringFailure(
+        client,
+        leftoverIds,
+        'Unexpected clustering pipeline error; claim reclaimed by cleanup phase',
+        owner
+      )
+      // Only clear after confirmed success — a throw leaves these IDs
+      // in the set so an operator can see exactly what was stranded.
+      unhandledArticleIds.clear()
+    } catch (err) {
+      cleanupErrors.push(
+        `Retry-treatment cleanup failed for ${leftoverIds.length} claim(s): ` +
+          (err instanceof Error ? err.message : String(err))
+      )
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /*  Error resolution                                                */
+  /* ---------------------------------------------------------------- */
+  // Primary error always wins. If no primary error but cleanup
+  // failed, we throw with the cleanup errors so the pipeline runner
+  // marks this step as errored instead of success-with-stranded-claims.
+
+  if (primaryError) {
+    if (cleanupErrors.length > 0) {
+      console.error(
+        '[clustering] Secondary cleanup errors after primary failure:',
+        cleanupErrors.join('; ')
+      )
+    }
+    throw primaryError
+  }
+
+  if (cleanupErrors.length > 0) {
+    throw new Error(
+      `Clustering cleanup phase failed; claims may be stranded until TTL expiry: ` +
+        cleanupErrors.join('; ')
+    )
+  }
+
+  if (!primaryResult) {
+    // Defensive: should be unreachable because either primaryResult
+    // or primaryError is always populated.
+    throw new Error('Clustering run ended without a result and no error')
+  }
+
+  return primaryResult
 }
 
 /* ------------------------------------------------------------------ */

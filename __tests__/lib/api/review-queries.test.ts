@@ -218,7 +218,7 @@ describe('updateReviewStatus', () => {
     )
   })
 
-  it('reprocesses a story by resetting metadata and calling guarded requeue RPC', async () => {
+  it('reprocesses a story entirely inside the guarded requeue RPC (no pre-wipe UPDATE)', async () => {
     const builder = createMockQueryBuilder(mockStory)
     const client = createMockClient(builder)
 
@@ -226,30 +226,35 @@ describe('updateReviewStatus', () => {
       action: 'reprocess',
     })
 
-    // Non-status fields are written via the UPDATE path.
-    expect(builder.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        headline: 'Pending headline generation',
-        processing_error: null,
-        assembled_at: null,
-      })
-    )
-    // The status reset is delegated to the guarded RPC.
+    // All resets (content + status + claims + retry metadata) are delegated
+    // to the guarded requeue RPC with clearContent=true. Phase 7b remediation
+    // moved the content wipe inside the RPC so a failed CAS can't leave the
+    // story half-wiped.
     expect(client.rpc).toHaveBeenCalledWith(
       'requeue_story_for_reassembly',
       expect.objectContaining({
         p_story_id: 'story-1',
+        p_clear_content: true,
       })
     )
+
+    // The destructive UPDATE path must NOT run for reprocess — that's the
+    // whole point of the remediation. Approve/reject still use UPDATE.
+    expect(builder.update).not.toHaveBeenCalled()
   })
 
-  it('throws when reprocess is guarded because story is currently being assembled', async () => {
+  it('throws without wiping content when reprocess is guarded by an active assembler', async () => {
     const builder = createMockQueryBuilder(mockStory)
     const client = createMockClient(builder, { requeueReturn: false })
 
     await expect(
       updateReviewStatus(client, 'story-1', 'admin-user-id', { action: 'reprocess' })
     ).rejects.toThrow(/currently being assembled/)
+
+    // Critical: no UPDATE was issued before the guarded RPC returned false.
+    // In the old code path, an UPDATE had already committed the content
+    // wipe before the throw — we'd return a half-reset story to the user.
+    expect(builder.update).not.toHaveBeenCalled()
   })
 
   it('throws on update error', async () => {

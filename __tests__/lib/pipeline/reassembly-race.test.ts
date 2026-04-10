@@ -148,4 +148,38 @@ describe('guarded reassembly', () => {
     const result = await requeueStoryForReassembly(client as never, 'story-1', expected)
     expect(result).toBe(false)
   })
+
+  it('propagates p_clear_content=false by default (automated requeue paths)', async () => {
+    const client = createStateClient([
+      { id: 'story-1', assembly_version: 5, assembly_status: 'completed' },
+    ])
+
+    await requeueStoryForReassembly(client as never, 'story-1', 5)
+
+    expect(client.rpc).toHaveBeenCalledWith(
+      'requeue_story_for_reassembly',
+      expect.objectContaining({
+        p_story_id: 'story-1',
+        p_expected_version: 5,
+        p_clear_content: false,
+      })
+    )
+  })
+
+  it('propagates p_clear_content=true for admin reprocess path', async () => {
+    const client = createStateClient([
+      { id: 'story-1', assembly_version: 5, assembly_status: 'completed' },
+    ])
+
+    await requeueStoryForReassembly(client as never, 'story-1', 5, true)
+
+    expect(client.rpc).toHaveBeenCalledWith(
+      'requeue_story_for_reassembly',
+      expect.objectContaining({
+        p_story_id: 'story-1',
+        p_expected_version: 5,
+        p_clear_content: true,
+      })
+    )
+  })
 })

@@ -143,7 +143,9 @@ export async function replayDeadLetterEntry(
     if (error) throw new Error(`Failed to reset article ${itemId}: ${error.message}`)
   } else {
     // story_assemble: reuse the guarded requeue helper imported lazily
-    // to avoid a circular import at module load time.
+    // to avoid a circular import at module load time. The RPC itself
+    // (migration 042) clears assembly retry/backoff metadata on every
+    // successful requeue, so we no longer need a pre-clear step.
     const { fetchAssemblyVersions, requeueStoryForReassembly } = await import(
       '@/lib/pipeline/reassembly'
     )
@@ -152,16 +154,18 @@ export async function replayDeadLetterEntry(
     if (expected === undefined) {
       throw new Error(`Cannot replay DLQ entry ${dlqId}: story ${itemId} has no assembly_version`)
     }
-    // Also clear the retry metadata on the story.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (client.from('stories') as any)
-      .update({
-        assembly_retry_count: 0,
-        assembly_next_attempt_at: null,
-        assembly_last_error: null,
-      })
-      .eq('id', itemId)
-    await requeueStoryForReassembly(client, itemId, expected)
+    const requeued = await requeueStoryForReassembly(client, itemId, expected)
+    if (!requeued) {
+      // Fail closed: do NOT mark the DLQ entry replayed. The story is
+      // currently being assembled or its assembly_version moved — leave
+      // the entry visible so an operator can retry. Without this guard
+      // the admin API would report success, the DLQ evidence would be
+      // gone, and the story would never actually be reset.
+      throw new Error(
+        `Cannot replay DLQ entry ${dlqId}: story ${itemId} is currently being ` +
+          `assembled or its assembly_version moved. Retry after assembly completes.`
+      )
+    }
   }
 
   // 3. Mark the DLQ entry as replayed.

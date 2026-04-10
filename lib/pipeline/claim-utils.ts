@@ -144,17 +144,51 @@ export async function releaseEmbeddingClaims(
   )
 }
 
-/** Release a clustering claim iff the caller still owns it. */
+/**
+ * Release a clustering claim iff the caller still owns it.
+ *
+ * Throws on RPC error so callers can surface deploy-skew problems
+ * (e.g., migration 037 missing) instead of silently stranding claims.
+ */
 export async function releaseClusteringClaim(
   client: SupabaseClient<Database>,
   articleId: string,
   owner: ClaimOwner
 ): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (client as any).rpc('release_clustering_claim', {
+  const { error } = await (client as any).rpc('release_clustering_claim', {
     p_article_id: articleId,
     p_owner: owner,
   })
+  if (error) {
+    throw new Error(
+      `release_clustering_claim RPC failed for ${articleId}: ${error.message}`
+    )
+  }
+}
+
+/**
+ * Release many clustering claims, returning a list of IDs that could
+ * not be released. Does NOT throw — callers decide how to surface the
+ * partial failure (usually via the stage's `errors` array).
+ */
+export async function releaseClusteringClaims(
+  client: SupabaseClient<Database>,
+  articleIds: readonly string[],
+  owner: ClaimOwner
+): Promise<{ failed: Array<{ id: string; message: string }> }> {
+  const failed: Array<{ id: string; message: string }> = []
+  for (const id of articleIds) {
+    try {
+      await releaseClusteringClaim(client, id, owner)
+    } catch (err) {
+      failed.push({
+        id,
+        message: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+  return { failed }
 }
 
 /** Release an assembly claim iff the caller still owns it. */

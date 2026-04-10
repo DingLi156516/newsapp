@@ -78,6 +78,40 @@ export async function updateReviewStatus(
   adminUserId: string,
   action: ReviewAction
 ): Promise<void> {
+  // Reprocess is the only guarded path: its reset (status + claim + retry
+  // metadata + content wipe) all happens atomically inside the guarded
+  // `requeue_story_for_reassembly` RPC (migration 042). If the story is
+  // currently assembling or its assembly_version moved, the RPC returns
+  // false and we surface a conflict — the story is left fully intact.
+  //
+  // This fixes the earlier bug where we committed destructive metadata
+  // resets (headline, ai_summary, assembled_at, reviewer fields) BEFORE
+  // attempting the CAS, which could wipe content on a story that the
+  // reprocess wasn't actually allowed to touch.
+  if (action.action === 'reprocess') {
+    const versions = await fetchAssemblyVersions(client, [storyId])
+    const expectedVersion = versions.get(storyId)
+    if (expectedVersion === undefined) {
+      throw new Error(`Failed to reprocess story ${storyId}: missing assembly_version`)
+    }
+
+    const requeued = await requeueStoryForReassembly(
+      client,
+      storyId,
+      expectedVersion,
+      true /* clearContent: wipe headline/ai_summary/assembled_at atomically */
+    )
+    if (!requeued) {
+      throw new Error(
+        `Story ${storyId} is currently being assembled; reprocess was not applied. ` +
+          `Retry after assembly completes.`
+      )
+    }
+    return
+  }
+
+  // Approve / reject paths are not guarded — they only touch review
+  // metadata and publication status, never the assembly lifecycle.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updateData: Record<string, any> = {
     reviewed_by: adminUserId,
@@ -100,24 +134,6 @@ export async function updateReviewStatus(
       updateData.review_status = 'rejected'
       updateData.publication_status = 'rejected'
       break
-    case 'reprocess': {
-      // The status-reset fields (assembly_status, publication_status, review_status,
-      // review_reasons, published_at, assembly_claim_*) are handled by the
-      // guarded requeue RPC below. Here we only set the admin-specific
-      // metadata resets that don't affect assembly state.
-      updateData.headline = 'Pending headline generation'
-      updateData.ai_summary = {
-        commonGround: '',
-        leftFraming: '',
-        rightFraming: '',
-      }
-      updateData.processing_error = null
-      updateData.confidence_score = null
-      updateData.assembled_at = null
-      updateData.reviewed_by = null
-      updateData.reviewed_at = null
-      break
-    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -127,25 +143,6 @@ export async function updateReviewStatus(
 
   if (error) {
     throw new Error(`Failed to update review status: ${error.message}`)
-  }
-
-  // Reprocess requires a guarded state reset — if an assembler is currently
-  // working on this story, we should NOT stomp its in-flight work. Read the
-  // current assembly_version then call the compare-and-set RPC.
-  if (action.action === 'reprocess') {
-    const versions = await fetchAssemblyVersions(client, [storyId])
-    const expectedVersion = versions.get(storyId)
-    if (expectedVersion === undefined) {
-      throw new Error(`Failed to reprocess story ${storyId}: missing assembly_version`)
-    }
-
-    const requeued = await requeueStoryForReassembly(client, storyId, expectedVersion)
-    if (!requeued) {
-      throw new Error(
-        `Story ${storyId} is currently being assembled; reprocess was not applied. ` +
-          `Retry after assembly completes.`
-      )
-    }
   }
 }
 

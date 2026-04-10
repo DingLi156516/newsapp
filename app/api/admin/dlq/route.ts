@@ -92,6 +92,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, data: { id, dismissed: true } })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Internal server error'
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
+    // Guarded requeue conflict: the underlying item could not be reset
+    // because another worker currently owns it or its version moved.
+    // Surface a 409 so operators know to retry instead of seeing a
+    // generic 500. Dead-letter.ts throws with a distinctive message.
+    const isConflict = /currently being assembled or its assembly_version moved/i.test(message)
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: isConflict ? 409 : 500 }
+    )
   }
 }

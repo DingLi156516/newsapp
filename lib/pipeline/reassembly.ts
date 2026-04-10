@@ -52,16 +52,25 @@ export async function fetchAssemblyVersions(
  * Attempt a guarded requeue. Returns `true` if the story was reset to
  * pending, `false` if either the story is currently being assembled or
  * another requeue already bumped the version.
+ *
+ * The RPC (migration 042) unconditionally clears retry/backoff metadata
+ * so any exhausted story becomes claimable again after a successful
+ * requeue. Passing `clearContent = true` also wipes headline + ai_summary
+ * + assembled_at + reviewer fields in the same atomic UPDATE — used by
+ * admin manual reprocess so a failed CAS does not leave the story half-
+ * wiped.
  */
 export async function requeueStoryForReassembly(
   client: SupabaseClient<Database>,
   storyId: string,
-  expectedVersion: number
+  expectedVersion: number,
+  clearContent = false
 ): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (client as any).rpc('requeue_story_for_reassembly', {
     p_story_id: storyId,
     p_expected_version: expectedVersion,
+    p_clear_content: clearContent,
   })
 
   if (error) {
