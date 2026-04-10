@@ -33,6 +33,10 @@ const PGVECTOR_CANDIDATE_COUNT = Number(process.env.CLUSTERING_CANDIDATE_COUNT ?
 const STANDARD_MATCH_WINDOW_HOURS = 168
 const MAX_CLUSTERING_ATTEMPTS = 3
 const PGVECTOR_BATCH_SIZE = Number(process.env.CLUSTERING_PGVECTOR_BATCH_SIZE ?? 25)
+// Cap the unmatched-set used for O(n²) union-find clustering. Beyond this
+// point the quadratic cost dominates the batch budget, and the oldest
+// unmatched articles are least likely to form new clusters anyway.
+const UNMATCHED_CLUSTER_CAP = Number(process.env.CLUSTERING_UNMATCHED_CAP ?? 1000)
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -471,14 +475,31 @@ function clusterUnmatchedArticles(
   articles: readonly ClusterableArticle[],
   threshold: number
 ): ClusterCandidate[] {
-  const n = articles.length
-  if (n === 0) return []
+  // Cap the O(n²) window. Union-find is O(α(n)) but the pair-generation
+  // step is strictly quadratic; above ~1000 items the time dominates a 60s
+  // cron budget. The excess is returned as singleton clusters so those
+  // articles still progress (and will be retried in a subsequent pass).
+  const bounded = articles.length > UNMATCHED_CLUSTER_CAP
+    ? articles.slice(0, UNMATCHED_CLUSTER_CAP)
+    : articles
+  const excess = articles.length > UNMATCHED_CLUSTER_CAP
+    ? articles.slice(UNMATCHED_CLUSTER_CAP)
+    : []
+
+  const n = bounded.length
+  if (n === 0) {
+    return excess.map((article) => ({
+      articleIds: [article.id],
+      embeddings: [article.embedding],
+      imageUrl: article.image_url,
+    }))
+  }
 
   // --- 1. Compute all pairwise similarities above threshold ---
   const pairs: { i: number; j: number; sim: number }[] = []
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      const sim = cosineSimilarity(articles[i].embedding, articles[j].embedding)
+      const sim = cosineSimilarity(bounded[i].embedding, bounded[j].embedding)
       if (sim >= threshold) {
         pairs.push({ i, j, sim })
       }
@@ -534,7 +555,7 @@ function clusterUnmatchedArticles(
 
   for (const members of clusterMap.values()) {
     if (members.length === 1) {
-      const article = articles[members[0]]
+      const article = bounded[members[0]]
       clusters.push({
         articleIds: [article.id],
         embeddings: [article.embedding],
@@ -543,14 +564,14 @@ function clusterUnmatchedArticles(
       continue
     }
 
-    const embeddings = members.map((i) => articles[i].embedding)
+    const embeddings = members.map((i) => bounded[i].embedding)
     const centroid = computeCentroid(embeddings)
 
     const valid: number[] = []
     const ejected: number[] = []
 
     for (const idx of members) {
-      const sim = cosineSimilarity(articles[idx].embedding, centroid)
+      const sim = cosineSimilarity(bounded[idx].embedding, centroid)
       if (sim >= threshold) {
         valid.push(idx)
       } else {
@@ -560,21 +581,31 @@ function clusterUnmatchedArticles(
 
     if (valid.length > 0) {
       clusters.push({
-        articleIds: valid.map((i) => articles[i].id),
-        embeddings: valid.map((i) => articles[i].embedding),
-        imageUrl: valid.map((i) => articles[i].image_url).find((u) => u !== null) ?? null,
+        articleIds: valid.map((i) => bounded[i].id),
+        embeddings: valid.map((i) => bounded[i].embedding),
+        imageUrl: valid.map((i) => bounded[i].image_url).find((u) => u !== null) ?? null,
       })
     }
 
     // Ejected articles become singletons
     for (const idx of ejected) {
-      const article = articles[idx]
+      const article = bounded[idx]
       clusters.push({
         articleIds: [article.id],
         embeddings: [article.embedding],
         imageUrl: article.image_url,
       })
     }
+  }
+
+  // Any articles above the cap become singletons so they still progress
+  // (they'll be claimed again on the next pass).
+  for (const article of excess) {
+    clusters.push({
+      articleIds: [article.id],
+      embeddings: [article.embedding],
+      imageUrl: article.image_url,
+    })
   }
 
   return clusters

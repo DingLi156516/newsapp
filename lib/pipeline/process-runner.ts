@@ -99,7 +99,19 @@ interface MutableAssemblySummary extends MutableStageSummary {
   errors: string[]
 }
 
-const DEFAULT_OPTIONS: Required<ProcessPipelineOptions> = {
+/**
+ * Single source of truth for pipeline batch/target defaults. Docs must
+ * reference these names rather than hard-coded numbers.
+ *
+ * The batch-size values are adaptive CEILINGS: per-run tuning in
+ * `lib/pipeline/batch-tuner.ts` shrinks them when stage wall-time breaches
+ * its budget and restores them when consistently under-budget. Env
+ * variables set the ceiling, not the exact value.
+ *
+ * Targets are per-run work ceilings: a single run will not process more
+ * than `embedTarget` articles, etc.
+ */
+export const PIPELINE_DEFAULTS: Required<ProcessPipelineOptions> = {
   embedTarget: Number(process.env.PIPELINE_PROCESS_EMBED_TARGET ?? 1500),
   clusterTarget: Number(process.env.PIPELINE_PROCESS_CLUSTER_TARGET ?? 1500),
   assembleTarget: Number(process.env.PIPELINE_PROCESS_ASSEMBLE_TARGET ?? 100),
@@ -113,6 +125,8 @@ const DEFAULT_OPTIONS: Required<ProcessPipelineOptions> = {
   assembleReserveMs: Number(process.env.PIPELINE_PROCESS_ASSEMBLE_RESERVE_MS ?? 15_000),
   concurrentStages: process.env.PIPELINE_CONCURRENT_STAGES === 'true',
 }
+
+const DEFAULT_OPTIONS = PIPELINE_DEFAULTS
 
 function hasBudget(startMs: number, now: () => number, timeBudgetMs: number): boolean {
   return now() - startMs < timeBudgetMs

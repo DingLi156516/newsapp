@@ -7,7 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, DbArticleInsert, FetchStatus } from '@/lib/supabase/types'
-import type { ParsedFeedItem, FeedError } from '@/lib/ingestion/types'
+import type { ParsedFeedItem, FeedError, ExtractionFailure } from '@/lib/ingestion/types'
 import { normalizeArticleUrl, createTitleFingerprint } from '@/lib/rss/normalization'
 import { filterNewArticles } from '@/lib/rss/dedup'
 
@@ -28,6 +28,7 @@ export function toArticleInsert(
     title_fingerprint: createTitleFingerprint(item.title),
     image_url: item.imageUrl,
     published_at: item.publishedAt,
+    published_at_estimated: item.publishedAt === null,
   }
 }
 
@@ -63,8 +64,10 @@ export async function deduplicateItems(
   client: SupabaseClient<Database>,
   allItems: readonly { readonly item: ParsedFeedItem; readonly sourceId: string }[]
 ): Promise<readonly { readonly item: ParsedFeedItem; readonly sourceId: string }[]> {
-  const parsedItems = allItems.map((entry) => entry.item)
-  const newItems = await filterNewArticles(client, parsedItems)
+  // Pass source IDs through so filterNewArticles can also dedup by
+  // (title_fingerprint, source_id) — catches same-source republishes with
+  // a new URL that would otherwise slip past the canonical-URL check.
+  const newItems = await filterNewArticles(client, allItems)
   const newCanonicalSet = new Set(
     newItems.map((item) => getCanonicalIdentity(item.url))
   )
@@ -129,6 +132,35 @@ export async function batchInsertArticles(
   }
 
   return { totalInserted, insertedBySource }
+}
+
+/**
+ * Persist per-item extraction failures to `pipeline_extraction_failures`
+ * (migration 040) so operators can see what the crawler dropped instead of
+ * the failures being silently swallowed. Best-effort: on DB error we log
+ * and move on so a failing audit table never blocks ingestion.
+ */
+export async function persistExtractionFailures(
+  client: SupabaseClient<Database>,
+  sourceId: string,
+  failures: readonly ExtractionFailure[]
+): Promise<void> {
+  if (failures.length === 0) return
+
+  const rows = failures.map((f) => ({
+    source_id: sourceId,
+    url: f.url,
+    failure_kind: f.kind,
+    error_message: f.message,
+  }))
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (client.from('pipeline_extraction_failures') as any).insert(rows)
+  if (error) {
+    console.warn(
+      `[ingest] failed to persist ${failures.length} extraction failures for source ${sourceId}: ${error.message}`
+    )
+  }
 }
 
 /**

@@ -88,6 +88,8 @@ describe('Database type interfaces', () => {
       clustering_attempts: 0,
       clustering_status: 'pending' as const,
       created_at: '2026-01-01T00:00:00Z',
+      fetched_at: '2026-01-01T00:00:00Z',
+      published_at_estimated: false,
     }
     expect(article.id).toBe('a1')
     expect(article.source_id).toBe('s1')

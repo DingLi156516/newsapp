@@ -173,7 +173,7 @@ export interface DbArticle {
   canonical_url: string | null
   title_fingerprint: string | null
   image_url: string | null
-  published_at: string
+  published_at: string | null
   ingested_at: string
   embedding: number[] | null
   is_embedded: boolean
@@ -185,6 +185,8 @@ export interface DbArticle {
   clustering_attempts: number
   clustering_status: 'pending' | 'clustered' | 'expired'
   created_at: string
+  fetched_at: string
+  published_at_estimated: boolean
 }
 
 export interface DbArticleInsert {
@@ -196,7 +198,12 @@ export interface DbArticleInsert {
   canonical_url?: string | null
   title_fingerprint?: string | null
   image_url?: string | null
-  published_at: string
+  // Null when the upstream source omitted or gave us an unparseable date.
+  // When null, `published_at_estimated` should be set to true so downstream
+  // consumers can fall back to `fetched_at` for ordering.
+  published_at?: string | null
+  fetched_at?: string
+  published_at_estimated?: boolean
   embedding?: number[] | null
   is_embedded?: boolean
   embedding_claimed_at?: string | null

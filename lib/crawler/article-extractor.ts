@@ -67,7 +67,7 @@ function extractWithReadability(
   }
 }
 
-function extractPublishedAt(html: string): string {
+function extractPublishedAt(html: string): string | null {
   const $ = cheerio.load(html)
 
   // Try meta tags
@@ -113,7 +113,9 @@ function extractPublishedAt(html: string): string {
     }
   }
 
-  return new Date().toISOString()
+  // Return null so the ingestion layer can mark published_at_estimated = true
+  // instead of fabricating a spurious "crawl time" that pollutes feed ordering.
+  return null
 }
 
 function extractImage(html: string, config: CrawlerConfig): string | null {

@@ -19,6 +19,54 @@ describe('normalizeArticleUrl', () => {
       normalizeArticleUrl('HTTPS://WWW.EXAMPLE.COM/story/')
     ).toBe('https://www.example.com/story')
   })
+
+  it('collapses the amp. subdomain to the parent host', () => {
+    expect(
+      normalizeArticleUrl('https://amp.example.com/story')
+    ).toBe('https://example.com/story')
+  })
+
+  it('collapses the m. mobile subdomain to the parent host', () => {
+    expect(
+      normalizeArticleUrl('https://m.example.com/story')
+    ).toBe('https://example.com/story')
+  })
+
+  it('collapses the mobile. subdomain to the parent host', () => {
+    expect(
+      normalizeArticleUrl('https://mobile.example.com/story')
+    ).toBe('https://example.com/story')
+  })
+
+  it('strips a leading /amp/ path segment', () => {
+    expect(
+      normalizeArticleUrl('https://example.com/amp/story')
+    ).toBe('https://example.com/story')
+  })
+
+  it('strips a trailing /amp path segment', () => {
+    expect(
+      normalizeArticleUrl('https://example.com/story/amp')
+    ).toBe('https://example.com/story')
+  })
+
+  it('drops empty query params', () => {
+    expect(
+      normalizeArticleUrl('https://example.com/story?id=42&empty=&blank=')
+    ).toBe('https://example.com/story?id=42')
+  })
+
+  it('lowercases query param keys', () => {
+    expect(
+      normalizeArticleUrl('https://example.com/story?ID=42')
+    ).toBe('https://example.com/story?id=42')
+  })
+
+  it('collapses an amp subdomain + /amp/ path + tracking to canonical form', () => {
+    expect(
+      normalizeArticleUrl('https://amp.example.com/amp/story?utm_source=fb')
+    ).toBe('https://example.com/story')
+  })
 })
 
 describe('createTitleFingerprint', () => {

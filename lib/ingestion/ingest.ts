@@ -28,6 +28,7 @@ import {
   deduplicateItems,
   batchInsertArticles,
   updateSourceHealth,
+  persistExtractionFailures,
 } from '@/lib/ingestion/pipeline-helpers'
 
 const CONCURRENCY_DEFAULTS: Record<SourceType, number> = {
@@ -134,9 +135,14 @@ export async function ingestAllSources(
         errors.push(err)
         outcomes.push({ source, items: [], error: err })
       } else {
-        const { items, error } = result.value
+        const { items, error, failedUrls } = result.value
         if (error) errors.push(error)
         outcomes.push({ source, items, error })
+        // Persist per-item extraction failures so operators can see what
+        // was dropped instead of them vanishing silently.
+        if (failedUrls && failedUrls.length > 0) {
+          await persistExtractionFailures(client, source.sourceId, failedUrls)
+        }
       }
     }
   }

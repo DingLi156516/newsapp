@@ -27,9 +27,12 @@ interface GdeltResponse {
 }
 
 /**
- * Converts GDELT date format (YYYYMMDDTHHMMSS) to ISO string.
+ * Converts GDELT date format (YYYYMMDDTHHMMSS) to ISO string, or null
+ * if the upstream date is missing/invalid. Callers should mark the
+ * resulting row as `published_at_estimated = true`.
  */
-function parseGdeltDate(dateStr: string): string {
+function parseGdeltDate(dateStr: string | undefined | null): string | null {
+  if (!dateStr) return null
   try {
     // Format: 20240115T143000Z or 20240115T143000
     const year = dateStr.slice(0, 4)
@@ -40,10 +43,10 @@ function parseGdeltDate(dateStr: string): string {
     const second = dateStr.slice(13, 15) || '00'
 
     const parsed = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`)
-    if (isNaN(parsed.getTime())) return new Date().toISOString()
+    if (isNaN(parsed.getTime())) return null
     return parsed.toISOString()
   } catch {
-    return new Date().toISOString()
+    return null
   }
 }
 

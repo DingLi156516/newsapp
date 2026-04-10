@@ -97,7 +97,7 @@ describe('parseFeed', () => {
     expect(items[0].description).toBe('Summary text')
   })
 
-  it('uses current date for invalid date strings', async () => {
+  it('returns null publishedAt for invalid date strings', async () => {
     mockParseURL.mockResolvedValue({
       items: [
         {
@@ -108,13 +108,25 @@ describe('parseFeed', () => {
       ],
     })
 
-    const before = new Date().toISOString()
     const parseFeed = await loadParseFeed()
     const items = await parseFeed('https://example.com/feed')
-    const after = new Date().toISOString()
 
-    expect(items[0].publishedAt >= before).toBe(true)
-    expect(items[0].publishedAt <= after).toBe(true)
+    // Rather than fabricating "now", we expose the missing-date signal so
+    // the ingestion layer can mark the row as published_at_estimated = true.
+    expect(items[0].publishedAt).toBeNull()
+  })
+
+  it('returns null publishedAt when both isoDate and pubDate are absent', async () => {
+    mockParseURL.mockResolvedValue({
+      items: [
+        { title: 'No Date', link: 'https://example.com/no-date' },
+      ],
+    })
+
+    const parseFeed = await loadParseFeed()
+    const items = await parseFeed('https://example.com/feed')
+
+    expect(items[0].publishedAt).toBeNull()
   })
 
   it('handles empty feed', async () => {

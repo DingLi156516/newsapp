@@ -18,5 +18,7 @@ export interface ExtractedArticle {
   readonly description: string | null
   readonly content: string | null
   readonly imageUrl: string | null
-  readonly publishedAt: string
+  // Null when the page had no parseable date. Ingestion marks these as
+  // published_at_estimated = true instead of fabricating a timestamp.
+  readonly publishedAt: string | null
 }

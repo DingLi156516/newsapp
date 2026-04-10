@@ -28,6 +28,26 @@ export interface SourceFetcher {
 export interface FetchResult {
   readonly items: readonly ParsedFeedItem[]
   readonly error: FeedError | null
+  /**
+   * Per-item failures captured by the fetcher (e.g. crawler URLs that
+   * failed to extract). The orchestrator persists these to the
+   * `pipeline_extraction_failures` table so operators can investigate
+   * instead of the failures being silently dropped.
+   */
+  readonly failedUrls?: readonly ExtractionFailure[]
+}
+
+export type ExtractionFailureKind =
+  | 'fetch_error'
+  | 'extraction_failed'
+  | 'robots_blocked'
+  | 'parse_error'
+  | 'ssrf_blocked'
+
+export interface ExtractionFailure {
+  readonly url: string
+  readonly kind: ExtractionFailureKind
+  readonly message: string
 }
 
 export interface FeedError {

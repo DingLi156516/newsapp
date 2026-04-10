@@ -124,10 +124,22 @@ New stories begin as `assembly_status = 'pending'` and `publication_status = 'dr
 
 Every article gets a **768-number fingerprint** that represents its meaning. The title + description are sent to Google Gemini's embedding model, which returns a vector like `[0.023, -0.018, 0.041, ...]`. Articles about the same event produce similar vectors, even if the words are completely different.
 
-- Processes bounded batches driven by the process runner (50 articles per pass by default), in batches of 20 at the model layer
-- Uses `embedding_claimed_at` to claim bounded batches safely between runs
-- Fresh claims are skipped; claims older than 30 minutes are treated as stale and retried
-- Once embedded, the article is flagged `is_embedded = true` and its claim is cleared
+- Processes bounded batches driven by the process runner. Defaults live
+  in `PIPELINE_DEFAULTS` (`lib/pipeline/process-runner.ts`): embed batch
+  ceiling = 200, cluster batch ceiling = 300, assemble batch ceiling = 50;
+  per-run targets = 1500 / 1500 / 100. These are adaptive CEILINGS —
+  `lib/pipeline/batch-tuner.ts` shrinks the next pass when the EMA of the
+  last 5 runs exceeds the per-stage target budget and restores when
+  consistently under.
+- Claims use the atomic `claim_articles_for_embedding`/`claim_articles_for_clustering`
+  SECURITY DEFINER RPCs (migration 037) with a per-run `claim_owner` UUID.
+  The RPCs issue a DB-side compare-and-set under `FOR UPDATE SKIP LOCKED`
+  so two overlapping runners can never claim the same row, and releases are
+  owner-scoped so a stale worker cannot release a newer worker's claim.
+- Claims older than 30 minutes (article stages) or 60 minutes (assembly)
+  are considered expired and become re-claimable.
+- Once embedded, the article is flagged `is_embedded = true` and its claim
+  is cleared atomically.
 
 The process runner in `lib/pipeline/process-runner.ts` no longer drains stages linearly. It works in rounds, refreshes backlog between rounds, reserves time for downstream work, and records per-stage `passes`, `skipped`, and `skipReason` metadata so operators can see whether a stage had no backlog, made no progress, or was intentionally held back to protect clustering/assembly.
 

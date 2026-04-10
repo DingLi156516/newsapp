@@ -13,7 +13,10 @@ export interface ParsedFeedItem {
   readonly description: string | null
   readonly content: string | null
   readonly imageUrl: string | null
-  readonly publishedAt: string
+  // Null when the upstream feed either omitted pubDate or gave us an
+  // unparseable value. The ingestion layer records these as
+  // `published_at_estimated = true` rather than fabricating a timestamp.
+  readonly publishedAt: string | null
 }
 
 const parser = new RssParser({
@@ -41,14 +44,14 @@ function extractImageUrl(item: RssParser.Item): string | null {
   return null
 }
 
-function normalizeDate(dateString: string | undefined): string {
+function normalizeDate(dateString: string | undefined): string | null {
   if (!dateString) {
-    return new Date().toISOString()
+    return null
   }
 
   const parsed = new Date(dateString)
   if (isNaN(parsed.getTime())) {
-    return new Date().toISOString()
+    return null
   }
 
   return parsed.toISOString()

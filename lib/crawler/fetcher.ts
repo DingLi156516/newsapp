@@ -5,7 +5,12 @@
  * and produces ParsedFeedItem[] for the unified ingestion pipeline.
  */
 
-import type { SourceFetcher, IngestionSource, FetchResult } from '@/lib/ingestion/types'
+import type {
+  SourceFetcher,
+  IngestionSource,
+  FetchResult,
+  ExtractionFailure,
+} from '@/lib/ingestion/types'
 import type { ParsedFeedItem } from '@/lib/rss/parser'
 import type { CrawlerConfig } from '@/lib/crawler/types'
 import { crawlerConfigSchema } from '@/lib/crawler/validation'
@@ -67,16 +72,30 @@ export const crawlerFetcher: SourceFetcher = {
     try {
       const articleUrls = await discoverArticleUrls(config)
 
+      // Wrap extraction so rejection reasons are paired with the URL they
+      // came from. Otherwise Promise.allSettled loses the URL↔error mapping.
       const results = await processInBatches(
         articleUrls,
         EXTRACT_CONCURRENCY,
-        (url) => extractArticle(url, config)
+        async (url) => {
+          try {
+            return { url, article: await extractArticle(url, config), error: null as Error | null }
+          } catch (err) {
+            return { url, article: null, error: err instanceof Error ? err : new Error(String(err)) }
+          }
+        }
       )
 
       const items: ParsedFeedItem[] = []
+      const failedUrls: ExtractionFailure[] = []
+
       for (const result of results) {
-        if (result.status === 'fulfilled') {
-          const article = result.value
+        if (result.status === 'rejected') {
+          // Shouldn't happen with the try/catch above, but be defensive.
+          continue
+        }
+        const { url, article, error } = result.value
+        if (article) {
           items.push({
             title: article.title,
             url: article.url,
@@ -85,8 +104,19 @@ export const crawlerFetcher: SourceFetcher = {
             imageUrl: article.imageUrl,
             publishedAt: article.publishedAt,
           })
+          continue
         }
-        // Silently skip failed extractions — partial success is expected
+        // Extraction failed or returned null: capture the failure so the
+        // orchestrator can persist it to pipeline_extraction_failures.
+        const message = error?.message ?? 'extraction returned null'
+        const kind: ExtractionFailure['kind'] = message.includes('robots.txt')
+          ? 'robots_blocked'
+          : message.includes('SSRF') || message.includes('private')
+            ? 'ssrf_blocked'
+            : message.includes('HTTP')
+              ? 'fetch_error'
+              : 'extraction_failed'
+        failedUrls.push({ url, kind, message })
       }
 
       // Clear robots cache after each source to avoid stale data across runs
@@ -101,10 +131,11 @@ export const crawlerFetcher: SourceFetcher = {
             error: `Discovered ${articleUrls.length} URLs but failed to extract any articles`,
             errorType: 'extraction_failed',
           },
+          failedUrls,
         }
       }
 
-      return { items, error: null }
+      return { items, error: null, failedUrls }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       clearRobotsCache()

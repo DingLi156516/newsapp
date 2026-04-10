@@ -90,8 +90,12 @@ export async function fetchNewsApi(
       description: article.description?.trim() ?? null,
       content: article.content?.trim() ?? null,
       imageUrl: article.urlToImage ?? null,
-      publishedAt: article.publishedAt
-        ? new Date(article.publishedAt).toISOString()
-        : new Date().toISOString(),
+      publishedAt: normalizeNewsApiDate(article.publishedAt),
     }))
+}
+
+function normalizeNewsApiDate(raw: string | undefined | null): string | null {
+  if (!raw) return null
+  const parsed = new Date(raw)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
 }
