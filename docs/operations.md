@@ -354,6 +354,8 @@ curl -X PATCH \
 
 When `PipelineRunHistory` shows a run with `status = failed`, or `pipeline_runs.summary.*.errors` is non-empty, use the stage event stream to find the root cause. See `docs/architecture.md — Observability` for the data model.
 
+If the degradation looks ingest-side (empty feeds, repeated `last_fetch_error` on the same sources), jump to **Source-health interpretation (Phase 11)** below for the cooldown ramp and auto-disable semantics. If a stage event panel shows `dlq_pushed`, see the **Dead Letter Queue Replay Runbook** below for the replay/dismiss workflow.
+
 ### 1. Find the run ID
 
 Two ways:
@@ -379,7 +381,7 @@ Click the oldest warn/error row (events are sorted newest-first; scroll to the b
 | `event_type` | Stage | Level | Meaning |
 |--------------|-------|-------|---------|
 | `pgvector_fallback` | cluster, recluster | warn | `match_story_centroid` RPC unavailable; fell back to JS brute-force. Check that `extensions.vector` is installed and the SECURITY DEFINER RPC is present. |
-| `dlq_pushed` | embed, cluster, assemble | error | A single item exhausted its retry budget and was pushed to `pipeline_dead_letter`. `payload.articleId`/`payload.storyId` + `payload.retryCount` tell you which item. |
+| `dlq_pushed` | embed, cluster, assemble | error | A single item exhausted its retry budget and was pushed to `pipeline_dead_letter`. `payload.articleId`/`payload.storyId` + `payload.retryCount` tell you which item. See **Dead Letter Queue Replay Runbook** below for how to replay or dismiss an entry. |
 | `embedding_write_failed` | embed | error | `bulkWriteEmbeddings` upsert failed. `payload.batchSize` tells you how many rows were affected. |
 | `retry_count_read_failed` | cluster | warn | Couldn't read `clustering_retry_count` before scheduling a failure retry; the run continues with retry count = 0 for affected rows. Non-fatal. |
 | `cleanup_fallback_failed` | cluster | error | The cleanup phase could not release claims after a primary failure. `payload.articleIds` lists the stranded rows. Check for `apply_clustering_failure` RPC / migration 043. |
@@ -418,6 +420,95 @@ DELETE FROM pipeline_stage_events WHERE created_at < now() - interval '30 days';
 ```
 
 This is safe to run while the pipeline is live; the emit path is append-only.
+
+### Dead Letter Queue Replay Runbook
+
+The DLQ (`pipeline_dead_letter`, migration 041) collects single items whose retry budget ran out: embed budget = 5, cluster budget = 5, assemble budget = 3. Items land here instead of being silently abandoned or retried forever. Source of truth: `lib/pipeline/dead-letter.ts` + `app/api/admin/dlq/route.ts`. Admin UI: `/admin/pipeline` → DLQ panel (Phase 13B). For the architectural context — retry policy, backoff formula, and owner-scoped write coupling — see `docs/pipeline.md` → **Claim Leases** → **Retry budget + DLQ**.
+
+**1. Find DLQ entries.**
+
+The primary surface is the UI:
+
+1. Visit `/admin/pipeline` → scroll to the **Dead Letter Queue** panel.
+2. Each row shows `itemKind` (`article_embed` | `article_cluster` | `story_assemble`), the underlying `itemId`, `retryCount`, `lastError`, and `failedAt`. Only unreplayed entries appear — replayed/dismissed entries are hidden.
+
+Or query the API directly:
+
+```bash
+curl -s "http://localhost:3000/api/admin/dlq" \
+  -H "Cookie: <auth-cookies>" | jq .
+```
+
+Or the table:
+
+```sql
+SELECT id, item_kind, item_id, retry_count, left(last_error, 120) AS error,
+       failed_at, replayed_at
+FROM pipeline_dead_letter
+WHERE replayed_at IS NULL
+ORDER BY failed_at DESC
+LIMIT 50;
+```
+
+**2. Decide: replay vs. dismiss.**
+
+| Symptom | Action |
+|---------|--------|
+| Transient failure — upstream (Gemini, RPC) was down when the item ran; retrying now should succeed. | **Replay.** Resets the underlying row's retry metadata so the next pipeline pass picks it up. |
+| Structural failure — the article is a parsing edge case, the source is broken, or the story was created from bad input. | **Dismiss.** Marks the DLQ entry replayed without touching the underlying row. The item stays in whatever terminal state it reached; it will not be retried. |
+| `lastError` looks like a code bug (e.g. `TypeError`) | Neither — fix the code first, deploy, then replay once the fix is in production. Dismissing now will hide the evidence. |
+
+**3. Replay.**
+
+```bash
+curl -s -X POST "http://localhost:3000/api/admin/dlq" \
+  -H "Cookie: <auth-cookies>" \
+  -H "Content-Type: application/json" \
+  -d '{"action": "replay", "id": "<dlq-entry-uuid>"}' | jq .
+```
+
+Success response:
+```json
+{ "success": true, "data": { "id": "<dlq-entry-uuid>", "replayed": true } }
+```
+
+Under the hood `replayDeadLetterEntry` (a) clears `embedding_retry_count` / `clustering_retry_count` / assembly retry metadata and the claim fields on the underlying row, and (b) marks the DLQ entry `replayed_at = now()`. For `story_assemble` entries the reset goes through the assembly_version CAS (`requeueStoryForReassembly`) to avoid stepping on an in-flight assembler.
+
+**4. 409 conflict on replay.**
+
+If the response is `409 Conflict` with a message containing `currently being assembled or its assembly_version moved`, another admin already replayed this entry (or the underlying story started assembling between your list-call and your replay-call). The DLQ entry is intentionally left visible so you can retry:
+
+- Wait ~60s for the concurrent assembly pass to finish.
+- Re-list the DLQ; if the entry is still there, retry the replay call.
+- If the same 409 keeps firing, inspect `pipeline_stage_events` for the story id — a runaway assembler may be stuck.
+
+The 409 mapping is in `app/api/admin/dlq/route.ts`: the route regex-matches the distinctive error string thrown by `dead-letter.ts` and returns 409 instead of a generic 500.
+
+**5. Dismiss.**
+
+```bash
+curl -s -X POST "http://localhost:3000/api/admin/dlq" \
+  -H "Cookie: <auth-cookies>" \
+  -H "Content-Type: application/json" \
+  -d '{"action": "dismiss", "id": "<dlq-entry-uuid>"}' | jq .
+```
+
+Success response:
+```json
+{ "success": true, "data": { "id": "<dlq-entry-uuid>", "dismissed": true } }
+```
+
+Dismiss simply stamps `replayed_at` on the DLQ entry without touching the underlying article/story. Use this for items you've decided are permanently un-processable.
+
+**6. Retention.**
+
+`pipeline_dead_letter` has no automated cleanup. Dismissed/replayed entries stay in the table as an audit trail. If it grows large:
+
+```sql
+DELETE FROM pipeline_dead_letter
+WHERE replayed_at IS NOT NULL
+  AND replayed_at < now() - interval '90 days';
+```
 
 ### Stale-worker race diagnosis (Phase 10)
 

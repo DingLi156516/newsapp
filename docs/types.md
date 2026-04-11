@@ -102,8 +102,21 @@ Claim timestamp semantics:
 - `PublicationDecision`: `{ reviewStatus, publicationStatus, confidenceScore, reviewReasons }`
 - `LegacyStoryState`: backfill result mapping legacy review rows into explicit assembly/publication states
 
-## Claim Utility Types (`@/lib/pipeline/claim-utils`)
+## Pipeline Claim Types
 
+### Claim ownership (`@/lib/pipeline/claim-utils`)
+
+- `ClaimOwner`: UUID string alias. One owner UUID is minted per pipeline
+  run by `generateClaimOwner()` (wraps `crypto.randomUUID`). Threaded
+  from the route handler → stage functions → the `p_owner` parameter on
+  every claim/release RPC defined in `supabase/migrations/037_atomic_claim_leases.sql`,
+  and also used as the `claim_owner` on every stage event emitted by
+  that run.
+- TTL constants (same file):
+  - `ARTICLE_STAGE_CLAIM_TTL_MS` — 30 minutes. Applies to embed
+    (`embedding_claimed_at`) and cluster (`clustering_claimed_at`).
+  - `ASSEMBLY_CLAIM_TTL_MS` — 60 minutes. Applies to assemble
+    (`assembly_claimed_at`).
 - `OwnershipMoveOutcome` (Phase 10): discriminated union returned by
   `runOwnerScopedUpdate`. Variants: `'applied'` (write landed),
   `'ownership_moved'` (row exists but claim belongs to another owner —
@@ -117,6 +130,85 @@ Claim timestamp semantics:
   payload }`. Returns `Promise<OwnershipMoveOutcome>`. NEVER throws.
   Used by every Phase 10 stage write site in `lib/ai/embeddings.ts`,
   `lib/ai/clustering.ts`, and `lib/ai/story-assembler.ts`.
+
+### Retry policy (`@/lib/pipeline/retry-policy`)
+
+- `StageKind`: `'embed' | 'cluster' | 'assemble'` — the three stages
+  with per-item retry budgets (note: distinct from the wider
+  `StageKind` in `@/lib/pipeline/stage-events` which also includes
+  `'ingest'` and `'recluster'`).
+- `RETRY_BUDGET: Record<StageKind, number>` — `{ embed: 5, cluster: 5,
+  assemble: 3 }`. A retry that would push `retry_count` above the
+  stage's budget is treated as exhausted and routed to the DLQ.
+- `RetryOutcome`: `{ exhausted: boolean, nextRetryCount: number,
+  nextAttemptAt: Date }`. Returned by `computeRetryOutcome(stage,
+  previousRetryCount, now?, rand?)`. `exhausted` tells callers
+  whether to schedule a retry or push to `pipeline_dead_letter`.
+- `nextAttemptAfter(retryCount, now?, rand?)`: pure helper behind
+  `computeRetryOutcome`. Backoff = base 60s × 2^retryCount, ±25%
+  jitter, capped at 60 minutes. The claim RPCs (migration 041) skip
+  rows whose `*_next_attempt_at > now()` so retries naturally defer.
+
+> **Note.** There is no `RetryMetadata` TS type. Per-item retry state
+> lives in DB columns (`embedding_retry_count`, `clustering_retry_count`,
+> `assembly_retry_count`, and the matching `*_next_attempt_at` /
+> `*_last_error` columns) added by
+> `supabase/migrations/041_retry_metadata_and_dlq.sql`.
+
+### Dead letter queue (`@/lib/pipeline/dead-letter`)
+
+- `DlqItemKind`: `'article_embed' | 'article_cluster' | 'story_assemble'`.
+- `DlqEntry`: `{ id, itemKind, itemId, retryCount, lastError, failedAt,
+  replayedAt }` — the shape returned by `listUnreplayed()` and consumed
+  by the `/admin/pipeline` DLQ panel.
+- `DlqInsert`: `{ itemKind, itemId, retryCount, lastError }` — the
+  payload `pushToDeadLetter()` writes when a stage exhausts an item's
+  retry budget. `pushToDeadLetter` is best-effort: it logs a warning on
+  write failure and never fails the stage.
+- `replayDeadLetterEntry(client, dlqId)` resets the underlying row and
+  stamps `replayed_at`. For `'story_assemble'` it routes through
+  `requeueStoryForReassembly` so the assembly_version CAS guards against
+  replaying into an in-flight assembler — failure throws a distinctive
+  error string that `app/api/admin/dlq/route.ts` maps to HTTP 409.
+- `dismissDeadLetterEntry(client, dlqId)` stamps `replayed_at` without
+  touching the underlying row.
+
+### Adaptive batch sizing (`@/lib/pipeline/batch-tuner`)
+
+- `StageKind` (local to this module): `'embed' | 'cluster' | 'assemble'`.
+- `StageBudget`: `{ min: number, ceiling: number, targetMs: number,
+  stepPrefix: string }` — `min` = absolute floor, `ceiling` = env-var
+  default (never recommend larger), `targetMs` = target wall-time per
+  pass (shrink when breached), `stepPrefix` = key used to fish this
+  stage's entries out of `pipeline_runs.steps`.
+- `StageRecommendation`: `{ stage, recommendedBatch, reason, emaMs }`
+  where `reason` is `'no_history' | 'under_budget' | 'over_budget' |
+  'at_ceiling'`. Returned by `recommendBatchSize(stage, durations,
+  previousBatch, budget)`.
+- `STAGE_BUDGETS: Record<StageKind, StageBudget>` — canonical per-stage
+  config, the source of truth referenced by `docs/pipeline.md`:
+  - `embed` → `{ min: 25, ceiling: 200, targetMs: 15000, stepPrefix:
+    'embed_pass_' }`
+  - `cluster` → `{ min: 50, ceiling: 300, targetMs: 20000, stepPrefix:
+    'cluster_pass_' }`
+  - `assemble` → `{ min: 10, ceiling: 50, targetMs: 25000, stepPrefix:
+    'assemble_pass_' }`
+- `fetchRecentStageDurations(client, stepPrefix, limit?)` reads the
+  last N completed runs from `pipeline_runs` and extracts every step
+  whose name starts with `stepPrefix`. Used once per process run at
+  the start of the loop; a `batch_tuner_recommendation` info stage
+  event is emitted per stage before its first pass so operators can
+  see the tuner's decision in the `/admin/pipeline` Events panel.
+
+### Extraction failures (`@/lib/ingestion/types`)
+
+- `ExtractionFailureKind`: `'fetch_error' | 'extraction_failed' |
+  'robots_blocked' | 'parse_error' | 'ssrf_blocked'`.
+- `ExtractionFailure`: `{ url: string, kind: ExtractionFailureKind,
+  message: string }` — carried on `FetchResult.failedUrls` so the
+  orchestrator can persist per-item ingest failures to the
+  `pipeline_extraction_failures` table instead of silently dropping
+  them.
 
 ## Cluster Write Types (`@/lib/pipeline/cluster-writes`)
 

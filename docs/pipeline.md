@@ -249,39 +249,120 @@ The `countPipelineBacklog()` function returns 5 metrics checked at the start of 
 
 Backlog is refreshed after clustering makes progress (so newly created stories can be assembled in the same run) and at the end of every loop iteration.
 
-## Claim System
+## Claim Leases
 
-**File:** `lib/pipeline/claim-utils.ts`
+**Files:** `lib/pipeline/claim-utils.ts`, `lib/pipeline/cluster-writes.ts`, `lib/pipeline/reassembly.ts`, `lib/pipeline/retry-policy.ts`, `lib/pipeline/dead-letter.ts`
+**Migrations:** `supabase/migrations/037_atomic_claim_leases.sql`, `038_assembly_version_guard.sql`, `041_retry_metadata_and_dlq.sql`, `042_phase_7b_remediation.sql`, `043_atomic_clustering_failure.sql`, `045_claim_safe_cluster_writes.sql`
 
-Instead of a global pipeline lock, each row has a `*_claimed_at` timestamp that acts as a time-limited lease:
+Instead of a global pipeline lock, each row holds a time-limited lease marked by a `*_claimed_at` timestamp and a `*_claim_owner` UUID. Leases are issued by `SECURITY DEFINER` RPCs so overlapping runners cannot claim the same row and a stale worker cannot release a newer worker's claim.
 
-| Stage | Claim Field | TTL |
-|-------|------------|-----|
-| Embed | `embedding_claimed_at` | 30 min |
-| Cluster | `clustering_claimed_at` | 30 min |
-| Assemble | `assembly_claimed_at` | 60 min |
+### ClaimOwner model
 
-### Claim Lifecycle
+- `ClaimOwner` (`lib/pipeline/claim-utils.ts`) is a plain UUID string alias. One owner UUID is minted per pipeline run by `generateClaimOwner()`.
+- The route handler mints the owner, then threads it into every stage function and through to the RPC's `p_owner` parameter. Example: `app/api/cron/process/route.ts` — `const claimOwner = generateClaimOwner()` → `embedUnembeddedArticles(client, maxArticles, claimOwner, emitter)` → `claim_articles_for_embedding(p_owner, p_limit, p_ttl_seconds)`.
+- The same owner UUID is used as the `claim_owner` on every `pipeline_stage_events` row emitted by that run (`logger.makeStageEmitter(runId, claimOwner)`), so operators can filter the Events panel by ownership when drilling in.
 
-1. **Scan:** Fetch 3x the batch size (to find enough unclaimed rows)
-2. **Filter:** Keep rows where claim is `null` or TTL has expired
-3. **Slice:** Take first N available
-4. **Claim:** Set `*_claimed_at = now`
-5. **Process:** Run the stage logic
-6. **Release on success:** Set `*_claimed_at = null`
-7. **Release on error:** Clear claim immediately for retry
+### TTL constants
 
-If a worker crashes, another worker can pick up the row after TTL expires. Claims are operational markers only -- readiness is determined by `is_embedded`, `story_id`, and `assembly_status`.
+Named constants live in `lib/pipeline/claim-utils.ts`:
+
+| Constant | Value | Applies to |
+|----------|-------|------------|
+| `ARTICLE_STAGE_CLAIM_TTL_MS` | 30 min | Embed (`embedding_claimed_at`), Cluster (`clustering_claimed_at`) |
+| `ASSEMBLY_CLAIM_TTL_MS` | 60 min | Assemble (`assembly_claimed_at`) |
+
+Each claim RPC takes `p_ttl_seconds` derived from these constants so there is exactly one source of truth for the lease window.
+
+### Atomic claim RPCs (migration 037)
+
+| RPC | Purpose |
+|-----|---------|
+| `claim_articles_for_embedding` | Atomic batch claim for embed stage |
+| `claim_articles_for_clustering` | Atomic batch claim for cluster stage |
+| `claim_stories_for_assembly` | Atomic batch claim for assemble stage (also flips `assembly_status` to `'processing'`) |
+| `release_embedding_claim` | Owner-scoped release |
+| `release_clustering_claim` | Owner-scoped release |
+| `release_assembly_claim` | Owner-scoped release |
+
+Each claim RPC runs an `UPDATE ... WHERE (owner IS NULL OR claim expired) RETURNING id` with `FOR UPDATE SKIP LOCKED`, so two overlapping runners are guaranteed disjoint result sets. Releases match on `(id, owner)` so a stale worker cannot clear a successor's claim. All RPCs are callable by `service_role` only.
+
+Claims are operational markers — readiness is still determined by `is_embedded`, `story_id`, and `assembly_status`.
+
+### Owner-scoped stage writes (Phase 10)
+
+After a claim lands, every stage-state write goes through `runOwnerScopedUpdate` in `lib/pipeline/claim-utils.ts`. The helper issues an `UPDATE ... WHERE id = ? AND <owner column> = ?` with `{ count: 'exact' }`, then performs a verify read when the count is zero, and returns an `OwnershipMoveOutcome` discriminated union:
+
+| Variant | Meaning | Caller action |
+|---------|---------|---------------|
+| `applied` | Update matched one row — the claim is still ours and the write landed. | Continue. |
+| `ownership_moved` | Row exists but its `*_claim_owner` now belongs to a different worker (stale-worker race past TTL). | **Benign.** Emit `ownership_moved` info stage event and skip follow-up writes (no DLQ push, no version bump). |
+| `row_missing` | Row was deleted between claim and write. | Benign, skip follow-up. |
+| `policy_drift` | Zero-match update **and** the verify read says the claim is still ours. A schema/RLS regression. | **LOUD failure.** Throws `[<stage>/policy_drift]` tagged error. Operators grep cron logs for `\[(embed|assemble|cluster)/policy_drift\]`. |
+| `error` | The update itself errored. | Bubble up to normal retry path. |
+
+Callers live in `lib/ai/embeddings.ts`, `lib/ai/clustering.ts`, and `lib/ai/story-assembler.ts`. The `ownership_moved` path NEVER maps to policy drift — silently masking a stale-owner race was the root cause of the Phase 10 audit.
+
+The parallel path for new-cluster writes is `createStoryWithArticles` in `lib/pipeline/cluster-writes.ts`, which wraps the `create_story_with_articles` RPC (migration 045). When the RPC raises `SQLSTATE P0010`, the wrapper returns `{ kind: 'ownership_moved' }`. `P0001` errors remain caller bugs (null article ids, null owner) and surface as `{ kind: 'error' }`.
+
+### assembly_version CAS (migration 038)
+
+Reassembly transitions use a compare-and-set against the story's `assembly_version`:
+
+1. Reader calls `fetchAssemblyVersions(client, storyIds)` (`lib/pipeline/reassembly.ts`) to snapshot the current version per story.
+2. Reader calls `requeueStoryForReassembly(client, storyId, expectedVersion)` which invokes the `requeue_story_for_reassembly` RPC. The RPC atomically resets retry/backoff metadata and flips state back to `pending` **only if** `assembly_version = expectedVersion`.
+3. When the RPC returns `false` the caller skips: either the story is currently being assembled or a concurrent requeue already bumped the version. Clustering surfaces this to the stage summary as `"Story X requeue guarded: ..."` in `errors[]`; recluster logs a warning; `replayDeadLetterEntry` (see below) surfaces it as a distinctive error string the DLQ route maps to HTTP 409.
+4. After a successful assembly write, `bumpAssemblyVersion(client, storyId)` increments the version so any concurrent requeue caller with a stale snapshot will mismatch and skip its now out-of-date reset.
+
+### Retry budget + DLQ (migrations 041, 042)
+
+Per-item failures are routed through `lib/pipeline/retry-policy.ts`:
+
+- `RETRY_BUDGET`: embed `5`, cluster `5`, assemble `3`.
+- `computeRetryOutcome(stage, previousRetryCount)` returns a `RetryOutcome`:
+  - `exhausted: boolean` — `true` when the next attempt would exceed the stage's budget.
+  - `nextRetryCount: number`
+  - `nextAttemptAt: Date` — computed by `nextAttemptAfter`: base 60s × 2^retryCount, ±25% jitter, capped at 60 min.
+- Migration 041 adds `{embedding,clustering,assembly}_{retry_count,next_attempt_at,last_error}` columns. The claim RPCs were extended (041) to skip rows whose `next_attempt_at > now()` so retries naturally defer.
+- When `exhausted === true`, the stage calls `pushToDeadLetter(client, { itemKind, itemId, retryCount, lastError })` (`lib/pipeline/dead-letter.ts`) and emits a `dlq_pushed` stage event. `DlqItemKind` is `'article_embed' | 'article_cluster' | 'story_assemble'`.
+
+DLQ entries are listed unreplayed-first via `listUnreplayed()`. The admin dashboard (`/admin/pipeline` → DLQ panel) calls `POST /api/admin/dlq { action: 'replay'|'dismiss', id }`:
+- **Replay** — `replayDeadLetterEntry` resets the underlying row's retry metadata and (for `story_assemble`) goes through `requeueStoryForReassembly` under the assembly_version CAS. A failed CAS throws an error that the route maps to HTTP 409; the DLQ entry stays visible so the operator can retry after the concurrent assembler finishes.
+- **Dismiss** — `dismissDeadLetterEntry` marks the entry replayed without touching the underlying row. Used for known-bad items.
+
+See `docs/operations.md` → **Dead Letter Queue Replay Runbook** for the operator workflow.
+
+### Adaptive batch sizing (Phase 13A)
+
+**File:** `lib/pipeline/batch-tuner.ts`
+
+`STAGE_BUDGETS` is the canonical per-stage configuration — the numeric values live in one place so docs and tests can reference them:
+
+| Stage | `min` | `ceiling` | `targetMs` | `stepPrefix` |
+|-------|-------|-----------|------------|--------------|
+| `embed` | 25 | 200 | 15000 | `embed_pass_` |
+| `cluster` | 50 | 300 | 20000 | `cluster_pass_` |
+| `assemble` | 10 | 50 | 25000 | `assemble_pass_` |
+
+At the start of each process run the runner reads the last 5 completed runs' step durations (`fetchRecentStageDurations`) and folds them into an EMA (`EMA_ALPHA = 0.4`, oldest-first). `recommendBatchSize(stage, durations, previousBatch, budget)` then emits a `StageRecommendation`:
+
+- `no_history` — fewer than 1 observation, keep `previousBatch`.
+- `over_budget` — EMA exceeds `targetMs`; shrink towards `min` using `targetMs / ema` as a linear ratio.
+- `under_budget` — EMA ≤ 60% of target; grow towards `ceiling` by `ceil(previousBatch * 1.25)`.
+- `at_ceiling` — growth clipped by `budget.ceiling` (or the caller's per-run override, whichever is smaller).
+
+The runner re-clamps the recommendation against the caller-supplied per-run ceiling (env-var defaults) and emits a `batch_tuner_recommendation` info stage event before each stage's first pass. The payload includes `{ stage, ema, reason, recommendedBatch, ceiling, historyCount }` so operators can see the tuner's decision in the `/admin/pipeline` Events panel without polluting `pipeline_runs.steps`. A tuner failure (Supabase outage, bug) is logged once and falls back to the static ceiling — it never fails the run.
 
 ## Concurrency
 
 No distributed lock exists. Concurrent runs are safe because:
 
-1. **Per-row claims** prevent duplicate processing of the same article/story
-2. **Idempotent operations** -- upserts on `canonical_url` (ingest), updates by ID (embed/cluster/assemble)
-3. **WHERE guards on updates** -- the expiry sweep re-checks `clustering_status = 'pending'` and `story_id IS NULL` before updating, preventing TOCTOU races
+1. **Atomic per-row claims** — migration 037 RPCs use `FOR UPDATE SKIP LOCKED` so two overlapping runners get disjoint result sets. A stale worker past its TTL cannot clobber a newer worker because every stage-state write goes through `runOwnerScopedUpdate` with an owner-scoped `WHERE` clause (Phase 10).
+2. **CAS on reassembly transitions** — `assembly_version` guards requeue paths (Phase 7) so a late reclustering run cannot step on an in-flight assembler.
+3. **Idempotent operations** — upserts on `canonical_url` (ingest), updates by ID (embed/cluster/assemble).
+4. **WHERE guards on updates** — the expiry sweep re-checks `clustering_status = 'pending'` and `story_id IS NULL` before updating, preventing TOCTOU races.
+5. **Retry budget + DLQ** — single-item failures retry with exponential backoff until their budget is exhausted, then land in `pipeline_dead_letter` instead of being silently abandoned or retried forever.
 
-Worst case with concurrent runs: some redundant work (two workers claim different articles from the same batch), but no data corruption.
+Worst case with concurrent runs: some redundant work (two workers each read stale `pipeline_runs.steps` and recommend slightly different batch sizes), but no data corruption and no stranded claims.
 
 ## Article Status Flow
 
