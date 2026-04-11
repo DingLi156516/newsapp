@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
 vi.mock('@/lib/hooks/use-pipeline', () => ({
   useSourceHealth: vi.fn(),
@@ -25,6 +25,9 @@ const mockSources: SourceHealthEntry[] = [
     last_fetch_error: null,
     consecutive_failures: 0,
     total_articles_ingested: 1250,
+    cooldown_until: null,
+    auto_disabled_at: null,
+    auto_disabled_reason: null,
   },
   {
     id: 'src-2',
@@ -40,6 +43,9 @@ const mockSources: SourceHealthEntry[] = [
     consecutive_failures: 3,
     total_articles_ingested: 980,
     needs_attention: true,
+    cooldown_until: null,
+    auto_disabled_at: null,
+    auto_disabled_reason: null,
   },
   {
     id: 'src-3',
@@ -55,6 +61,9 @@ const mockSources: SourceHealthEntry[] = [
     consecutive_failures: 0,
     total_articles_ingested: 0,
     needs_attention: false,
+    cooldown_until: null,
+    auto_disabled_at: null,
+    auto_disabled_reason: null,
   },
 ]
 
@@ -189,5 +198,109 @@ describe('SourceHealthTable', () => {
     render(<SourceHealthTable />)
 
     expect(screen.getByText('Source Health')).toBeInTheDocument()
+  })
+
+  it('renders an Auto-disabled badge when auto_disabled_at is set', () => {
+    const auto: SourceHealthEntry = {
+      ...mockSources[0],
+      id: 'src-auto',
+      slug: 'auto-source',
+      name: 'Auto Source',
+      cooldown_until: new Date(Date.now() + 60 * 60000).toISOString(),
+      auto_disabled_at: new Date(Date.now() - 60_000).toISOString(),
+      auto_disabled_reason: 'Auto-disabled: 12 consecutive failures',
+    }
+
+    mockUseSourceHealth.mockReturnValue({
+      sources: [auto],
+      isLoading: false,
+      mutate: vi.fn(),
+    })
+
+    render(<SourceHealthTable />)
+
+    expect(screen.getByText('Auto-disabled')).toBeInTheDocument()
+    // Cooldown badge should NOT render when source is auto-disabled — the
+    // auto-disable status is the more severe state and takes precedence.
+    expect(screen.queryByText(/^Cooldown/)).not.toBeInTheDocument()
+  })
+
+  it('renders a Cooldown badge with countdown when in cooldown', () => {
+    const cooling: SourceHealthEntry = {
+      ...mockSources[1],
+      id: 'src-cool',
+      slug: 'cool-source',
+      name: 'Cool Source',
+      cooldown_until: new Date(Date.now() + 14 * 60_000).toISOString(),
+      auto_disabled_at: null,
+      auto_disabled_reason: null,
+    }
+
+    mockUseSourceHealth.mockReturnValue({
+      sources: [cooling],
+      isLoading: false,
+      mutate: vi.fn(),
+    })
+
+    render(<SourceHealthTable />)
+
+    // Cooldown badge text format: "Cooldown 14m"
+    expect(screen.getByText(/Cooldown\s*1[34]m/)).toBeInTheDocument()
+  })
+
+  it('shows Reactivate button when source is auto-disabled and POSTs on click', async () => {
+    const auto: SourceHealthEntry = {
+      ...mockSources[0],
+      id: 'src-auto',
+      slug: 'auto-source',
+      name: 'Auto Source',
+      auto_disabled_at: new Date(Date.now() - 60_000).toISOString(),
+      auto_disabled_reason: 'Auto-disabled: 12 consecutive failures',
+    }
+    const mutate = vi.fn()
+
+    mockUseSourceHealth.mockReturnValue({
+      sources: [auto],
+      isLoading: false,
+      mutate,
+    })
+
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ success: true, data: { id: 'src-auto' } }), {
+          status: 200,
+        })
+      )
+
+    render(<SourceHealthTable />)
+
+    const button = screen.getByRole('button', { name: /reactivate/i })
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        '/api/admin/sources/src-auto/reactivate',
+        expect.objectContaining({ method: 'POST' })
+      )
+    })
+
+    expect(mutate).toHaveBeenCalled()
+
+    fetchSpy.mockRestore()
+  })
+
+  it('hides the Reactivate button for healthy sources', () => {
+    mockUseSourceHealth.mockReturnValue({
+      sources: [mockSources[0]],
+      isLoading: false,
+      mutate: vi.fn(),
+    })
+
+    render(<SourceHealthTable />)
+
+    expect(
+      screen.queryByRole('button', { name: /reactivate/i })
+    ).not.toBeInTheDocument()
   })
 })

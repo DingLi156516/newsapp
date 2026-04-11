@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useSourceHealth } from '@/lib/hooks/use-pipeline'
 import { Skeleton } from '@/components/atoms/Skeleton'
 import type { SourceHealthEntry } from '@/lib/hooks/use-pipeline'
@@ -41,8 +42,41 @@ function formatRelativeTime(iso: string | null): string {
   return `${days}d ago`
 }
 
-function SourceRow({ source }: { readonly source: SourceHealthEntry }) {
+function formatCooldownCountdown(iso: string): string {
+  const diffMs = new Date(iso).getTime() - Date.now()
+  if (diffMs <= 0) return '0m'
+  const minutes = Math.ceil(diffMs / 60000)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`
+}
+
+interface SourceRowProps {
+  readonly source: SourceHealthEntry
+  readonly onReactivate: (id: string) => Promise<void>
+}
+
+function SourceRow({ source, onReactivate }: SourceRowProps) {
   const statusClass = STATUS_COLORS[source.last_fetch_status] ?? STATUS_COLORS.unknown
+  const isAutoDisabled = source.auto_disabled_at !== null
+  const isInCooldown =
+    !isAutoDisabled &&
+    source.cooldown_until !== null &&
+    new Date(source.cooldown_until).getTime() > Date.now()
+  const showReactivate = isAutoDisabled || isInCooldown
+
+  const [isReactivating, setIsReactivating] = useState(false)
+
+  async function handleReactivate() {
+    if (isReactivating) return
+    setIsReactivating(true)
+    try {
+      await onReactivate(source.id)
+    } finally {
+      setIsReactivating(false)
+    }
+  }
 
   return (
     <div className="glass-sm flex items-center justify-between px-4 py-3">
@@ -62,29 +96,75 @@ function SourceRow({ source }: { readonly source: SourceHealthEntry }) {
         <span className={`glass-pill px-2 py-0.5 text-xs ${statusClass}`}>
           {source.last_fetch_status}
         </span>
-        {source.needs_attention && (
+
+        {isAutoDisabled && (
+          <span
+            className="glass-pill px-2 py-0.5 text-xs bg-red-500/20 text-red-300"
+            title={source.auto_disabled_reason ?? undefined}
+          >
+            Auto-disabled
+          </span>
+        )}
+
+        {isInCooldown && source.cooldown_until && (
+          <span className="glass-pill px-2 py-0.5 text-xs bg-amber-400/20 text-amber-300">
+            Cooldown {formatCooldownCountdown(source.cooldown_until)}
+          </span>
+        )}
+
+        {!isAutoDisabled && !isInCooldown && source.needs_attention && (
           <span className="glass-pill px-2 py-0.5 text-xs text-amber-300">
             Needs attention
           </span>
         )}
+
         {source.consecutive_failures > 0 && (
           <span className="text-xs text-red-400 tabular-nums">
             {source.consecutive_failures} fail{source.consecutive_failures !== 1 ? 's' : ''}
           </span>
         )}
+
         <span className="text-xs text-white/40 tabular-nums">
           {source.total_articles_ingested} articles
         </span>
+
         <span className="text-xs text-white/30 w-16 text-right">
           {formatRelativeTime(source.last_fetch_at)}
         </span>
+
+        {showReactivate && (
+          <button
+            type="button"
+            onClick={handleReactivate}
+            disabled={isReactivating}
+            className="glass-pill px-3 py-1 text-xs text-emerald-300 hover:bg-emerald-400/20 disabled:opacity-50"
+          >
+            {isReactivating ? 'Reactivating…' : 'Reactivate'}
+          </button>
+        )}
       </div>
     </div>
   )
 }
 
 export function SourceHealthTable() {
-  const { sources, isLoading } = useSourceHealth()
+  const { sources, isLoading, mutate } = useSourceHealth()
+
+  async function handleReactivate(id: string) {
+    try {
+      const res = await fetch(`/api/admin/sources/${id}/reactivate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? `HTTP ${res.status}`)
+      }
+      await mutate()
+    } catch (err) {
+      console.error('Failed to reactivate source:', err)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -113,7 +193,11 @@ export function SourceHealthTable() {
       ) : (
         <div className="space-y-2">
           {sources.map((source) => (
-            <SourceRow key={source.id} source={source} />
+            <SourceRow
+              key={source.id}
+              source={source}
+              onReactivate={handleReactivate}
+            />
           ))}
         </div>
       )}

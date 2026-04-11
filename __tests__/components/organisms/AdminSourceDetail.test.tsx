@@ -40,6 +40,9 @@ function makeSource(overrides: Partial<DbSource> = {}): DbSource {
     bias_sources_synced_at: '2026-04-01T00:00:00Z',
     source_type: 'rss',
     ingestion_config: {},
+    cooldown_until: null,
+    auto_disabled_at: null,
+    auto_disabled_reason: null,
     ...overrides,
   }
 }

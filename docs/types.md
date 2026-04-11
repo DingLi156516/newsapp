@@ -41,6 +41,11 @@ DB schema types (`DbSource`, `DbStory`, `DbArticle`, and their `Insert` variants
 Pipeline-specific DB fields:
 - `DbStory`: `assembly_status`, `publication_status`, `review_reasons`, `confidence_score`, `processing_error`, `assembled_at`, `published_at`, `assembly_claimed_at`
 - `DbArticle`: `canonical_url`, `title_fingerprint`, `embedding_claimed_at`, `clustering_claimed_at`
+- `DbSource` (Phase 11 source-health control plane, migration 046):
+  - `cooldown_until: string | null` — ISO timestamp; while `> now()` the source is skipped by `isSourceEligible`. Advanced by `increment_source_failure` on an exponential ramp (2^min(consecutive,8) minutes, capped at 240).
+  - `auto_disabled_at: string | null` — ISO timestamp set when `consecutive_failures >= 10 AND total_articles_ingested < 20`. While non-null the source is skipped entirely by the eligibility filter.
+  - `auto_disabled_reason: string | null` — human-readable explanation stored alongside `auto_disabled_at` (e.g., `"Auto-disabled: 12 consecutive failures"`).
+  - All three clear together when an admin hits `POST /api/admin/sources/:id/reactivate`. The TS source of truth for the ramp + predicate is `lib/ingestion/source-policy.ts`.
 
 Story-kind semantics:
 - `standard` — clustered story with multi-source comparative treatment (only kind; unclustered singletons expire after 7 days)

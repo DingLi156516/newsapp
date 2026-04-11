@@ -60,6 +60,10 @@ export interface DbSource {
   bias_sources_synced_at: string | null
   source_type: SourceType
   ingestion_config: Record<string, unknown>
+  // Source-health control plane (migration 046):
+  cooldown_until: string | null
+  auto_disabled_at: string | null
+  auto_disabled_reason: string | null
 }
 
 export interface DbSourceInsert {
@@ -81,6 +85,9 @@ export interface DbSourceInsert {
   bias_sources_synced_at?: string | null
   source_type?: SourceType
   ingestion_config?: Record<string, unknown>
+  cooldown_until?: string | null
+  auto_disabled_at?: string | null
+  auto_disabled_reason?: string | null
 }
 
 // ---------------------------------------------------------------------------

@@ -29,6 +29,10 @@ interface SourceHealthEntry {
   readonly consecutive_failures: number
   readonly total_articles_ingested: number
   readonly needs_attention?: boolean
+  // Source-health control plane (Phase 11):
+  readonly cooldown_until: string | null
+  readonly auto_disabled_at: string | null
+  readonly auto_disabled_reason: string | null
 }
 
 interface SourceHealthResponse {

@@ -1,6 +1,18 @@
 import { getActiveSources, groupByType } from '@/lib/ingestion/source-registry'
 import type { IngestionSource } from '@/lib/ingestion/types'
 
+function defaults(overrides: Record<string, unknown> = {}) {
+  return {
+    is_active: true,
+    cooldown_until: null,
+    auto_disabled_at: null,
+    ingestion_config: {},
+    rss_url: null,
+    source_type: 'rss',
+    ...overrides,
+  }
+}
+
 function createMockClient(overrides: {
   data?: unknown[] | null
   error?: { message: string } | null
@@ -12,7 +24,8 @@ function createMockClient(overrides: {
 
   const returnsMock = vi.fn().mockResolvedValue(result)
   const orderMock = vi.fn().mockReturnValue({ returns: returnsMock })
-  const eqMock = vi.fn().mockReturnValue({ order: orderMock })
+  const isMock = vi.fn().mockReturnValue({ order: orderMock })
+  const eqMock = vi.fn().mockReturnValue({ is: isMock })
   const selectMock = vi.fn().mockReturnValue({ eq: eqMock })
 
   return {
@@ -21,19 +34,18 @@ function createMockClient(overrides: {
 }
 
 describe('getActiveSources', () => {
-  it('returns IngestionSource objects for all active sources', async () => {
+  it('returns IngestionSource objects for all eligible sources', async () => {
     const client = createMockClient({
       data: [
-        {
+        defaults({
           id: 'id-1', slug: 'reuters', name: 'Reuters',
           source_type: 'rss', rss_url: 'https://reuters.com/feed',
-          ingestion_config: {},
-        },
-        {
+        }),
+        defaults({
           id: 'id-2', slug: 'crawler-src', name: 'Crawler Source',
-          source_type: 'crawler', rss_url: null,
+          source_type: 'crawler',
           ingestion_config: { articleListUrl: 'https://example.com/news' },
-        },
+        }),
       ],
     })
 
@@ -61,11 +73,11 @@ describe('getActiveSources', () => {
   it('defaults source_type to rss when null', async () => {
     const client = createMockClient({
       data: [
-        {
+        defaults({
           id: 'id-1', slug: 'old-source', name: 'Old Source',
           source_type: null, rss_url: 'https://old.com/feed',
           ingestion_config: null,
-        },
+        }),
       ],
     })
 
@@ -86,6 +98,61 @@ describe('getActiveSources', () => {
     await expect(getActiveSources(client as never)).rejects.toThrow(
       'Failed to fetch active sources: db down'
     )
+  })
+
+  it('filters out auto-disabled sources', async () => {
+    const client = createMockClient({
+      data: [
+        defaults({
+          id: 'id-1', slug: 'healthy', name: 'Healthy',
+        }),
+        defaults({
+          id: 'id-2', slug: 'auto-disabled', name: 'Auto Disabled',
+          auto_disabled_at: '2026-04-10T00:00:00Z',
+        }),
+      ],
+    })
+
+    const sources = await getActiveSources(client as never)
+
+    expect(sources).toHaveLength(1)
+    expect(sources[0].slug).toBe('healthy')
+  })
+
+  it('filters out sources with active cooldown', async () => {
+    // Cooldown 100 years in the future ensures the test never flakes.
+    const client = createMockClient({
+      data: [
+        defaults({
+          id: 'id-1', slug: 'healthy', name: 'Healthy',
+        }),
+        defaults({
+          id: 'id-2', slug: 'cooling', name: 'Cooling',
+          cooldown_until: '2126-04-11T00:00:00Z',
+        }),
+      ],
+    })
+
+    const sources = await getActiveSources(client as never)
+
+    expect(sources).toHaveLength(1)
+    expect(sources[0].slug).toBe('healthy')
+  })
+
+  it('includes sources with expired cooldown', async () => {
+    const client = createMockClient({
+      data: [
+        defaults({
+          id: 'id-1', slug: 'recovered', name: 'Recovered',
+          cooldown_until: '2020-01-01T00:00:00Z',
+        }),
+      ],
+    })
+
+    const sources = await getActiveSources(client as never)
+
+    expect(sources).toHaveLength(1)
+    expect(sources[0].slug).toBe('recovered')
   })
 })
 

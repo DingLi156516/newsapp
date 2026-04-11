@@ -460,6 +460,93 @@ Events panel.
    action needed. P0001 errors from this RPC are caller bugs (null
    article ids or null owner) and should be investigated.
 
+### Source-health interpretation (Phase 11)
+
+Phase 11 replaced the manual disable path with a policy-driven control
+plane. Every failure bumps `consecutive_failures`, advances
+`cooldown_until` along an exponential ramp, and — once the thresholds
+are crossed — sets `auto_disabled_at`. Each of these columns feeds the
+`/admin/pipeline` Source Health table and the eligibility filter in
+`lib/ingestion/source-registry.ts`. Source code of truth:
+`lib/ingestion/source-policy.ts`; SQL mirror:
+`supabase/migrations/046_source_health_control.sql`.
+
+**Cooldown ramp** (per consecutive failure):
+
+| Consecutive failures | Cooldown |
+|----------------------|----------|
+| 1                    | 2 minutes |
+| 2                    | 4 minutes |
+| 3                    | 8 minutes |
+| 4                    | 16 minutes |
+| 5                    | 32 minutes |
+| 6                    | 64 minutes |
+| 7                    | 128 minutes |
+| 8+                   | 240 minutes (capped) |
+
+A success resets `consecutive_failures` to 0 (`increment_source_success`
+in migration 036), which naturally restarts the ramp on the next
+failure. The in-memory eligibility filter treats a past
+`cooldown_until` as eligible, so stale values do not need to be cleared
+on success.
+
+**Auto-disable predicate.** `consecutive_failures >= 10` AND
+`total_articles_ingested < 20`. The AND-join shields high-value sources
+that have been stable historically — during a transient outage burst
+their `consecutive_failures` climbs and surfaces in the dashboard for
+an operator to decide whether to intervene. Only low-traffic sources
+that were never productive auto-disable on their own.
+
+**Known limitation.** `total_articles_ingested` is a lifetime counter,
+not a recent-window ratio. A source that ingested 50k articles a year
+ago but is now permanently broken will NOT auto-disable on its own —
+its `consecutive_failures` will keep climbing and operators must
+intervene via the dashboard. This is acceptable for the first cut of
+the control plane and is tracked in the Phase 11 commit notes.
+
+**Interpreting the Source Health panel:**
+- **Green (`success`)** — source is eligible, recent fetch succeeded.
+- **Amber (`Cooldown Xm`)** — source hit a failure and is paused for
+  `X` minutes. Nothing to do unless the cooldown badge keeps appearing
+  after each ingest cycle, in which case inspect `last_fetch_error`.
+- **Red (`Auto-disabled`)** — threshold crossed. The row shows a
+  `Reactivate` button. Click to clear the three health columns and
+  reset `consecutive_failures` to 0.
+
+**How to manually reactivate a source.**
+
+The primary path is the UI: `/admin/pipeline` → Source Health table →
+locate the row → click `Reactivate`. The button appears on any row
+where `auto_disabled_at` is set or `cooldown_until` is in the future.
+The endpoint is idempotent: repeat clicks on a healthy source return
+200 without writing.
+
+The reactivate endpoint is admin-only and delegates to
+`getAdminUser()`, which expects the same cookie-based Supabase session
+used by the rest of the admin dashboard (with Bearer fallback for
+mobile — see `lib/api/auth-helpers.ts`). There is no machine-to-machine
+service-role auth for this endpoint, so scripted reactivation is not
+supported: run it from a browser signed in as an admin. If you need to
+script it, use `psql` directly:
+
+```sql
+UPDATE sources
+SET
+  cooldown_until = NULL,
+  auto_disabled_at = NULL,
+  auto_disabled_reason = NULL,
+  consecutive_failures = 0,
+  last_fetch_error = NULL,
+  updated_at = now()
+WHERE id = '<source-uuid>';
+```
+
+Expected API response (from the UI path):
+`{ "success": true, "data": { "id": "...", "reactivatedAt": "..." } }`.
+When the source was already healthy the response additionally includes
+`"noop": true` so you can tell an idempotent no-op from a real change.
+404 if the id does not match a row. 400 if the id is not a UUID.
+
 ## API Reference
 
 ### Public Endpoints
