@@ -359,6 +359,38 @@ export interface DbPipelineStageEventInsert {
 }
 
 // ---------------------------------------------------------------------------
+// pipeline_maintenance_audit table (migration 047)
+// ---------------------------------------------------------------------------
+
+export type DbMaintenanceAction =
+  | 'purge_unembedded_articles'
+  | 'purge_orphan_stories'
+  | 'purge_expired_articles'
+
+export interface DbPipelineMaintenanceAudit {
+  id: string
+  action: DbMaintenanceAction
+  dry_run: boolean
+  options: Record<string, unknown>
+  deleted_count: number | null
+  sample_ids: string[] | null
+  error: string | null
+  triggered_by: string | null
+  triggered_at: string
+  completed_at: string | null
+}
+
+export interface DbPipelineMaintenanceAuditInsert {
+  action: DbMaintenanceAction
+  dry_run: boolean
+  options?: Record<string, unknown>
+  deleted_count?: number | null
+  sample_ids?: string[] | null
+  error?: string | null
+  triggered_by?: string | null
+}
+
+// ---------------------------------------------------------------------------
 // admin_users table
 // ---------------------------------------------------------------------------
 
@@ -520,6 +552,12 @@ export interface Database {
         Row: DbPipelineStageEvent
         Insert: DbPipelineStageEventInsert
         Update: Partial<DbPipelineStageEventInsert>
+        Relationships: []
+      }
+      pipeline_maintenance_audit: {
+        Row: DbPipelineMaintenanceAudit
+        Insert: DbPipelineMaintenanceAuditInsert
+        Update: Partial<DbPipelineMaintenanceAuditInsert>
         Relationships: []
       }
       tags: {

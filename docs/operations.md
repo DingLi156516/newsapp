@@ -513,6 +513,66 @@ the control plane and is tracked in the Phase 11 commit notes.
   `Reactivate` button. Click to clear the three health columns and
   reset `consecutive_failures` to 0.
 
+### Maintenance operations (Phase 12)
+
+Phase 12 replaced the destructive cleanups previously baked into
+migrations 025 and 026 with an operator-facing purge tool. Schema
+history is now additive; the next cleanup must go through this tool,
+**not** a new migration.
+
+**Available purges** (all audited in `pipeline_maintenance_audit`,
+migration 047):
+
+| Action | Predicate | Replaces |
+|--------|-----------|----------|
+| `purge_unembedded_articles` | `is_embedded = false AND created_at < now() - INTERVAL '7 days'` (configurable via `olderThanDays`) | migration 025 #1 |
+| `purge_orphan_stories` | stories with no referencing `articles.story_id` | migration 025 #5 / 026 #3 |
+| `purge_expired_articles` | `clustering_status = 'expired'` | migration 025 #2 |
+
+**Guardrails.**
+
+- Every call writes an audit row BEFORE the delete, finalizes it AFTER,
+  and preserves the audit row on failure with the error message. Dry-
+  runs also write audit rows so an operator can review planned cleanups
+  without executing them.
+- Each call is bounded to 1000 rows per invocation so row-level locks
+  stay short. Repeat to drain larger backlogs.
+- Every button in the UI performs a **dry-run first** and surfaces the
+  count + sample IDs in a confirmation modal. The real run fires only
+  after the operator clicks **Confirm**.
+
+**How to run a purge.**
+
+1. Visit `/admin/pipeline` → scroll to the **Maintenance** panel.
+2. Click the purge button you want. The dry-run call fires immediately.
+3. Review the count and sample ids in the confirmation modal.
+4. Click **Confirm** to execute the real run, or **Cancel** to abort.
+5. The green banner shows the audit id for the successful run — look
+   it up in `pipeline_maintenance_audit` if you need to diff plan vs.
+   outcome.
+
+**How to query the audit log.**
+
+```sql
+-- Last 20 maintenance runs (dry-run + real)
+SELECT
+  triggered_at,
+  action,
+  dry_run,
+  deleted_count,
+  completed_at,
+  error,
+  triggered_by
+FROM pipeline_maintenance_audit
+ORDER BY triggered_at DESC
+LIMIT 20;
+```
+
+**Guardrail box.** Future data cleanups MUST use this tool, not new
+migrations. Migrations are for schema only. If you ever need a
+cleanup predicate that is not yet in `lib/admin/pipeline-maintenance.ts`,
+add the TS function + a new `action` enum value, not a new migration.
+
 **How to manually reactivate a source.**
 
 The primary path is the UI: `/admin/pipeline` → Source Health table →

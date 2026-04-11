@@ -17,6 +17,7 @@ import { PipelineSummaryStats } from '@/components/organisms/PipelineSummaryStat
 import { PipelineRunHistory } from '@/components/organisms/PipelineRunHistory'
 import { SourceHealthTable } from '@/components/organisms/SourceHealthTable'
 import { PipelineEventsPanel } from '@/components/organisms/PipelineEventsPanel'
+import { PipelineMaintenancePanel } from '@/components/organisms/PipelineMaintenancePanel'
 import { Skeleton } from '@/components/atoms/Skeleton'
 
 export default function AdminPipelinePage() {
@@ -107,6 +108,7 @@ export default function AdminPipelinePage() {
         <PipelineRunHistory />
         <SourceHealthTable />
         <PipelineEventsPanel />
+        <PipelineMaintenancePanel />
       </div>
     </div>
   )

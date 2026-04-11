@@ -41,6 +41,16 @@ DB schema types (`DbSource`, `DbStory`, `DbArticle`, and their `Insert` variants
 Pipeline-specific DB fields:
 - `DbStory`: `assembly_status`, `publication_status`, `review_reasons`, `confidence_score`, `processing_error`, `assembled_at`, `published_at`, `assembly_claimed_at`
 - `DbArticle`: `canonical_url`, `title_fingerprint`, `embedding_claimed_at`, `clustering_claimed_at`
+- `DbPipelineMaintenanceAudit` (Phase 12 maintenance tool, migration 047):
+  - `action: DbMaintenanceAction` — one of `purge_unembedded_articles`, `purge_orphan_stories`, `purge_expired_articles`.
+  - `dry_run: boolean` — true when the row was written by a dry-run call. Real runs always have `dry_run = false`.
+  - `options: Record<string, unknown>` — snapshot of the input options, e.g., `{ olderThanDays: 7 }`.
+  - `deleted_count: number | null` — number of rows the purge would remove (dry-run) or did remove (real). Null until finalized.
+  - `sample_ids: string[] | null` — up to 20 of the affected ids for operator review.
+  - `error: string | null` — populated when the purge threw mid-flight; `completed_at` is still written.
+  - `triggered_by: string | null` — FK to `auth.users.id`; null when the audit row was backfilled.
+  - `triggered_at: string`, `completed_at: string | null` — row lifecycle timestamps.
+  Input type: `DbPipelineMaintenanceAuditInsert`. TS purge helpers: `PurgeOptions`, `PurgeResult` from `@/lib/admin/pipeline-maintenance`.
 - `DbSource` (Phase 11 source-health control plane, migration 046):
   - `cooldown_until: string | null` — ISO timestamp; while `> now()` the source is skipped by `isSourceEligible`. Advanced by `increment_source_failure` on an exponential ramp (2^min(consecutive,8) minutes, capped at 240).
   - `auto_disabled_at: string | null` — ISO timestamp set when `consecutive_failures >= 10 AND total_articles_ingested < 20`. While non-null the source is skipped entirely by the eligibility filter.
