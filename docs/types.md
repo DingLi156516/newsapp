@@ -87,6 +87,34 @@ Claim timestamp semantics:
 - `PublicationDecision`: `{ reviewStatus, publicationStatus, confidenceScore, reviewReasons }`
 - `LegacyStoryState`: backfill result mapping legacy review rows into explicit assembly/publication states
 
+## Claim Utility Types (`@/lib/pipeline/claim-utils`)
+
+- `OwnershipMoveOutcome` (Phase 10): discriminated union returned by
+  `runOwnerScopedUpdate`. Variants: `'applied'` (write landed),
+  `'ownership_moved'` (row exists but claim belongs to another owner —
+  benign), `'row_missing'` (row deleted — benign), `'policy_drift'`
+  (claim still ours but write matched zero rows — LOUD), `'error'`
+  (the update itself failed). Callers branch on `outcome.kind` and
+  emit `ownership_moved` info events on benign cases / throw on drift.
+- `runOwnerScopedUpdate(client, args)` (Phase 10): helper that wraps
+  the count+verify pattern from the Phase 7b cleanup fallback.
+  Arguments: `{ table: 'articles' | 'stories', id, owner, ownerColumn,
+  payload }`. Returns `Promise<OwnershipMoveOutcome>`. NEVER throws.
+  Used by every Phase 10 stage write site in `lib/ai/embeddings.ts`,
+  `lib/ai/clustering.ts`, and `lib/ai/story-assembler.ts`.
+
+## Cluster Write Types (`@/lib/pipeline/cluster-writes`)
+
+- `CreateStoryOutcome` (Phase 10): discriminated union returned by
+  `createStoryWithArticles`. Variants: `'created'` (story row + article
+  assignments persisted; carries `storyId`), `'ownership_moved'`
+  (RPC raised SQLSTATE P0010 because ownership moved on one or more
+  articles — benign skip with `detail` string), `'error'` (any other
+  RPC failure with `message` string, including SQLSTATE P0001 from
+  the migration's null-validation guards). Callers handle
+  `'ownership_moved'` identically to `runOwnerScopedUpdate`'s
+  `'ownership_moved'` outcome.
+
 ## Pipeline Stage Event Types (`@/lib/pipeline/stage-events`)
 
 - `StageKind`: `'ingest' | 'embed' | 'cluster' | 'assemble' | 'recluster'`

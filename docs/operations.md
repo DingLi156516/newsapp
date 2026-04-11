@@ -419,6 +419,47 @@ DELETE FROM pipeline_stage_events WHERE created_at < now() - interval '30 days';
 
 This is safe to run while the pipeline is live; the emit path is append-only.
 
+### Stale-worker race diagnosis (Phase 10)
+
+A stale-worker race happens when a pipeline worker exceeds its claim
+TTL (30 min for embed/cluster, 60 min for assemble) and another worker
+re-claims the same row. Phase 10 makes these races visible in the
+Events panel.
+
+1. Open `/admin/pipeline` → Events panel.
+2. Filter `level=info` and search for `ownership_moved` in the panel.
+   One or two per hour is normal (claim TTL churn). Dozens per minute
+   indicate either a runaway worker or an under-sized batch budget.
+3. For each `ownership_moved` event, click through the payload — it
+   includes `{ phase, previousOwner }`. The `phase` field tells you
+   whether the race happened on the success path (`success`,
+   `singleton_release`, `singleton_promotion`, `new_cluster`,
+   `assignment`) or the failure path (`failure`).
+4. If you see ANY `[<stage>/policy_drift]` errors in `pipeline_runs.steps`
+   for the same run, the write layer is broken: run
+
+   ```sql
+   SELECT COUNT(*), clustering_claim_owner
+   FROM articles
+   WHERE clustering_claimed_at IS NOT NULL
+   GROUP BY clustering_claim_owner;
+   ```
+
+   and look for unexpected owner UUIDs. Policy drift is a LOUD failure
+   because silently dropping a stranded claim masks the real schema or
+   RLS issue. Grep cron logs for `\[(embed|assemble|cluster)/policy_drift\]`
+   to find the originating stage.
+
+5. The `create_story_with_articles` RPC raises SQLSTATE P0010 on owner
+   mismatch (Phase 10 uses a dedicated SQLSTATE so it doesn't collide
+   with the migration's plain P0001 null-validation guards). The JS
+   wrapper catches it and returns `{ kind: 'ownership_moved' }`. If
+   you see `owner-scoped assignment matched N of M articles
+   (ownership moved or row missing)` errors with code P0010 in raw
+   RPC logs, that's the ownership-moved path firing — benign, no
+   action needed. P0001 errors from this RPC are caller bugs (null
+   article ids or null owner) and should be investigated.
+
 ## API Reference
 
 ### Public Endpoints

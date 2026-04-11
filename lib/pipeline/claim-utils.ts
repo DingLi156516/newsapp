@@ -203,3 +203,109 @@ export async function releaseAssemblyClaim(
     p_owner: owner,
   })
 }
+
+/**
+ * Outcome of an owner-scoped stage-state write. See Phase 7b template at
+ * lib/ai/clustering.ts:1366 for the original inlined version; this helper
+ * extracts the same shape so every Phase 10 call site uses one pattern.
+ */
+export type OwnershipMoveOutcome =
+  | { kind: 'applied' }           // update matched one row — claim is ours, write landed
+  | { kind: 'ownership_moved' }   // row exists but claim belongs to another owner — benign, skip follow-up
+  | { kind: 'row_missing' }       // row deleted — benign, skip follow-up
+  | { kind: 'policy_drift'; detail: string }  // claim still ours but zero-match — LOUD failure
+  | { kind: 'error'; message: string }        // update itself failed
+
+interface OwnerScopedUpdateArgs {
+  readonly table: 'articles' | 'stories'
+  readonly id: string
+  readonly owner: ClaimOwner
+  readonly ownerColumn:
+    | 'clustering_claim_owner'
+    | 'embedding_claim_owner'
+    | 'assembly_claim_owner'
+  readonly payload: Record<string, unknown>
+}
+
+/**
+ * Apply an owner-scoped stage-state update and verify exactly one of:
+ *  - the write landed (applied)
+ *  - the row moved to another claim (ownership_moved — benign)
+ *  - the row was deleted (row_missing — benign)
+ *  - the claim is still ours but the write matched zero rows (policy_drift — LOUD)
+ *
+ * Pipeline stages run under the Supabase service role, so the verify
+ * read below cannot be filtered by RLS — `data: null` unambiguously
+ * means the row does not exist.
+ */
+export async function runOwnerScopedUpdate(
+  client: SupabaseClient<Database>,
+  args: OwnerScopedUpdateArgs
+): Promise<OwnershipMoveOutcome> {
+  let error: { message: string } | null = null
+  let count: number | null | undefined = undefined
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = await (client.from(args.table) as any)
+      .update(args.payload, { count: 'exact' })
+      .eq('id', args.id)
+      .eq(args.ownerColumn, args.owner)
+    error = res.error
+    count = res.count
+  } catch (thrown) {
+    return {
+      kind: 'error',
+      message: thrown instanceof Error ? thrown.message : String(thrown),
+    }
+  }
+
+  if (error) {
+    return { kind: 'error', message: error.message }
+  }
+
+  if (typeof count === 'number' && count >= 1) {
+    return { kind: 'applied' }
+  }
+
+  // count===0 (or count not returned): verify ownership before declaring success.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const verifyQuery = (client.from(args.table) as any)
+      .select(args.ownerColumn)
+      .eq('id', args.id)
+    const verify = typeof verifyQuery.maybeSingle === 'function'
+      ? verifyQuery.maybeSingle()
+      : typeof verifyQuery.single === 'function'
+        ? verifyQuery.single()
+        : verifyQuery
+    const { data, error: verifyError } = await verify
+
+    if (verifyError) {
+      return {
+        kind: 'policy_drift',
+        detail: `zero-match update + verify read failed: ${verifyError.message}`,
+      }
+    }
+
+    if (!data) {
+      return { kind: 'row_missing' }
+    }
+
+    const currentOwner = (data as Record<string, string | null>)[args.ownerColumn]
+    if (currentOwner === null || currentOwner !== args.owner) {
+      return { kind: 'ownership_moved' }
+    }
+
+    return {
+      kind: 'policy_drift',
+      detail: 'zero-match update but claim still held by this owner',
+    }
+  } catch (verifyErr) {
+    const message =
+      verifyErr instanceof Error ? verifyErr.message : String(verifyErr)
+    return {
+      kind: 'policy_drift',
+      detail: `verify read threw: ${message}`,
+    }
+  }
+}

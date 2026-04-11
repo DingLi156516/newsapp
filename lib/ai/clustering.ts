@@ -18,6 +18,7 @@ import {
   claimClusteringBatch,
   generateClaimOwner,
   releaseClusteringClaims,
+  runOwnerScopedUpdate,
   type ClaimOwner,
 } from '@/lib/pipeline/claim-utils'
 import { fetchAssemblyVersions, requeueStoryForReassembly } from '@/lib/pipeline/reassembly'
@@ -268,7 +269,7 @@ async function handleClusteringFailure(
       : outcome.nextAttemptAt.toISOString()
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: rpcError } = await (client as any).rpc(
+    const { data: applied, error: rpcError } = await (client as any).rpc(
       'apply_clustering_failure',
       {
         p_article_id: articleId,
@@ -299,6 +300,25 @@ async function handleClusteringFailure(
       )
     }
 
+    // Phase 10 Codex Round 1 Fix 2: migration 043's apply_clustering_failure
+    // RPC returns BOOLEAN — `false` means its owner-scoped UPDATE
+    // matched zero rows because another worker has reclaimed the
+    // article under us. In that case NO retry state was written and
+    // NO DLQ row was inserted — the new owner is now responsible for
+    // both. Emitting `dlq_pushed` here would be a lie (there is no
+    // DLQ row), so we emit the canonical `ownership_moved` info event
+    // instead and skip the rest of the per-article bookkeeping.
+    if (applied === false) {
+      await safeEmit(emitter, {
+        stage: 'cluster',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: articleId,
+        payload: { phase: 'failure', previousOwner: owner },
+      })
+      continue
+    }
+
     // RPC succeeded — if this article was exhausted, a DLQ row was
     // inserted inside the same transaction (see migration 043).
     if (outcome.exhausted) {
@@ -317,45 +337,90 @@ async function handleClusteringFailure(
   }
 }
 
+/**
+ * Apply a bulk clustering-state update using owner-scoped per-row writes.
+ *
+ * Splits the result into three buckets so callers can route each bucket
+ * correctly:
+ *   - applied:        update landed, claim cleared, caller should count as done
+ *   - ownershipMoved: owner predicate matched zero rows (benign; another
+ *                     worker now owns the article — skip follow-up)
+ *   - failed:         real error from the UPDATE itself — caller should
+ *                     route through handleClusteringFailure
+ *
+ * `policy_drift` is treated as a LOUD failure: we collect every drift
+ * detail and throw a single aggregated error at the very end so that
+ * benign + applied branches on the rest of the batch still run. This
+ * mirrors the Task 3 embeddings pattern: never abort early on drift
+ * because that would strand all the still-pending rows.
+ */
 async function bulkUpdateArticles(
   client: SupabaseClient<Database>,
   articleIds: readonly string[],
-  payload: Record<string, unknown>
-): Promise<{ failedIds: string[]; message?: string }> {
+  payload: Record<string, unknown>,
+  owner: ClaimOwner,
+  emitter: StageEventEmitter
+): Promise<{
+  applied: string[]
+  ownershipMoved: string[]
+  failed: Array<{ id: string; message: string }>
+}> {
   if (articleIds.length === 0) {
-    return { failedIds: [] }
+    return { applied: [], ownershipMoved: [], failed: [] }
   }
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const query = (client.from('articles') as any).update(payload)
-    if (typeof query.in === 'function') {
-      const { error } = await query.in('id', articleIds)
-      if (!error) {
-        return { failedIds: [] }
-      }
-      return { failedIds: [...articleIds], message: error.message }
-    }
-  } catch (error) {
-    return {
-      failedIds: [...articleIds],
-      message: error instanceof Error ? error.message : String(error),
+  // Phase 1: owner-scoped updates in parallel.
+  const results = await Promise.all(
+    articleIds.map(async (id) => {
+      const outcome = await runOwnerScopedUpdate(client, {
+        table: 'articles',
+        id,
+        owner,
+        ownerColumn: 'clustering_claim_owner',
+        payload,
+      })
+      return { id, outcome }
+    })
+  )
+
+  // Phase 2: triage outcomes; collect policy_drift errors for LOUD throw.
+  const applied: string[] = []
+  const ownershipMoved: string[] = []
+  const failed: Array<{ id: string; message: string }> = []
+  const driftErrors: string[] = []
+
+  for (const { id, outcome } of results) {
+    switch (outcome.kind) {
+      case 'applied':
+        applied.push(id)
+        break
+      case 'ownership_moved':
+      case 'row_missing':
+        ownershipMoved.push(id)
+        await safeEmit(emitter, {
+          stage: 'cluster',
+          level: 'info',
+          eventType: 'ownership_moved',
+          itemId: id,
+          payload: { phase: 'assignment', previousOwner: owner },
+        })
+        break
+      case 'error':
+        failed.push({ id, message: outcome.message })
+        break
+      case 'policy_drift':
+        driftErrors.push(
+          `[cluster/policy_drift] owner-scoped write stranded claim ${id}: ${outcome.detail}`
+        )
+        break
     }
   }
 
-  const failedIds: string[] = []
-  let firstMessage: string | undefined
-
-  for (const articleId of articleIds) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (client.from('articles') as any).update(payload).eq('id', articleId)
-    if (error) {
-      failedIds.push(articleId)
-      firstMessage ??= error.message
-    }
+  if (driftErrors.length > 0) {
+    throw new Error(driftErrors.join('; '))
   }
 
-  return { failedIds, message: firstMessage }
+  return { applied, ownershipMoved, failed }
 }
 
 /**
@@ -834,40 +899,57 @@ async function persistPass1Assignments(
 
   for (const [storyId, articleIds] of pass1Assignments) {
     const batchStartedAt = Date.now()
-    const { failedIds, message } = await bulkUpdateArticles(client, articleIds, {
-      story_id: storyId,
-      clustering_claimed_at: null,
-      clustering_claim_owner: null,
-      clustering_status: 'clustered',
-    })
+    const { applied, ownershipMoved, failed } = await bulkUpdateArticles(
+      client,
+      articleIds,
+      {
+        story_id: storyId,
+        clustering_claimed_at: null,
+        clustering_claim_owner: null,
+        clustering_status: 'clustered',
+      },
+      owner,
+      emitter
+    )
     dbTimeMs += Date.now() - batchStartedAt
 
-    if (failedIds.length > 0) {
-      const failedSet = new Set(failedIds)
-      const failedForRetry: string[] = []
-      for (const aid of articleIds) {
-        if (failedSet.has(aid)) {
-          errors.push(`Failed to assign article ${aid}: ${message ?? 'unknown error'}`)
-          failedForRetry.push(aid)
-          unhandledArticleIds.delete(aid)
-        } else {
-          assignedArticles++
-          unhandledArticleIds.delete(aid)
-        }
-      }
-      await handleClusteringFailure(
-        client,
-        failedForRetry,
-        `Failed to assign to story ${storyId}: ${message ?? 'unknown error'}`,
-        owner,
-        emitter
-      )
-    } else {
-      assignedArticles += articleIds.length
-      articleIds.forEach((id) => unhandledArticleIds.delete(id))
+    // Applied: count as assigned and drop from unhandled.
+    assignedArticles += applied.length
+    for (const id of applied) {
+      unhandledArticleIds.delete(id)
     }
 
-    if (articleIds.length > failedIds.length) {
+    // Ownership moved / row missing: benign. Another owner will drive
+    // the article. We drop from unhandled so the cleanup phase doesn't
+    // burn retry budget on claims we no longer own.
+    for (const id of ownershipMoved) {
+      unhandledArticleIds.delete(id)
+    }
+
+    // Real failures: surface via errors[] and route through the
+    // atomic failure RPC. Per-article handleClusteringFailure
+    // preserves per-article DLQ diagnostics — with the fan-out in
+    // bulkUpdateArticles each failure can carry a distinct message,
+    // so collapsing them to `failed[0].message` would lose
+    // granularity in the DLQ row.
+    if (failed.length > 0) {
+      for (const { id, message } of failed) {
+        errors.push(`Failed to assign article ${id}: ${message}`)
+        unhandledArticleIds.delete(id)
+        await handleClusteringFailure(
+          client,
+          [id],
+          `Failed to assign to story ${storyId}: ${message}`,
+          owner,
+          emitter
+        )
+      }
+    }
+
+    // Only queue reassembly + recompute if SOMETHING actually landed
+    // in this story. An all-ownership_moved batch means nothing in
+    // this worker's run actually touched the story membership.
+    if (applied.length > 0) {
       storiesNeedingReassembly.add(storyId)
       dbTimeMs += await recomputeStoryCentroid(client, storyId, storyMap, errors)
     }
@@ -913,62 +995,140 @@ async function persistNewClusters(
       if (newAttempts >= MAX_CLUSTERING_ATTEMPTS) {
         const centroid = cluster.embeddings[0]
         const createStartedAt = Date.now()
-        try {
-          const newStoryId = await createStoryWithArticles(
-            client,
-            {
-              headline: 'Pending headline generation',
-              story_kind: 'standard',
-              topic: 'politics',
-              source_count: 0,
-              image_url: cluster.imageUrl,
-              cluster_centroid: centroid,
-              assembly_status: 'pending',
-              publication_status: 'draft',
-              review_status: 'pending',
-              review_reasons: [],
-              first_published: article.published_at,
+        const createOutcome = await createStoryWithArticles(
+          client,
+          {
+            headline: 'Pending headline generation',
+            story_kind: 'standard',
+            topic: 'politics',
+            source_count: 0,
+            image_url: cluster.imageUrl,
+            cluster_centroid: centroid,
+            assembly_status: 'pending',
+            publication_status: 'draft',
+            review_status: 'pending',
+            review_reasons: [],
+            first_published: article.published_at,
+          },
+          [article.id],
+          owner
+        )
+        dbTimeMs += Date.now() - createStartedAt
+
+        if (createOutcome.kind === 'ownership_moved') {
+          // Benign — the claim was reassigned between our fetch and
+          // our promotion attempt. Another worker now owns the
+          // article. Do not count as promoted, do not burn retry
+          // budget, do not surface as an error.
+          await safeEmit(emitter, {
+            stage: 'cluster',
+            level: 'info',
+            eventType: 'ownership_moved',
+            itemId: article.id,
+            payload: {
+              phase: 'singleton_promotion',
+              previousOwner: owner,
+              detail: createOutcome.detail,
             },
-            [article.id]
-          )
-          dbTimeMs += Date.now() - createStartedAt
-
-          // Even though create_story_with_articles set story_id + cleared the
-          // claim fields, we still need to bump clustering_attempts for the
-          // retry budget. Issue a follow-up UPDATE for that single column.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (client.from('articles') as any)
-            .update({ clustering_attempts: newAttempts })
-            .eq('id', article.id)
-
-          promotedSingletons++
-          assignedArticles++
-          newStories++
-          storyMap.set(newStoryId, { centroid, articleIds: [article.id] })
+          })
           unhandledArticleIds.delete(article.id)
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err)
-          errors.push(`Failed to promote singleton ${article.id}: ${message}`)
+          continue
+        }
+
+        if (createOutcome.kind === 'error') {
+          errors.push(
+            `Failed to promote singleton ${article.id}: ${createOutcome.message}`
+          )
           await handleClusteringFailure(
             client,
             [article.id],
-            `Singleton promotion failed: ${message}`,
+            `Singleton promotion failed: ${createOutcome.message}`,
             owner,
             emitter
           )
           unhandledArticleIds.delete(article.id)
+          continue
         }
-      } else {
+
+        // createOutcome.kind === 'created'
+        const newStoryId = createOutcome.storyId
+
+        // Bookkeeping: bump clustering_attempts for the retry budget.
+        // The claim is already cleared by create_story_with_articles,
+        // so this write does NOT need owner-scoping — the article is
+        // now assigned to the new story, clustering_claim_owner is
+        // null, and no concurrent worker can race us on a non-claim
+        // column.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (client.from('articles') as any)
-          .update({
+          .update({ clustering_attempts: newAttempts })
+          .eq('id', article.id)
+
+        promotedSingletons++
+        assignedArticles++
+        newStories++
+        storyMap.set(newStoryId, { centroid, articleIds: [article.id] })
+        unhandledArticleIds.delete(article.id)
+      } else {
+        // Singleton release: clear the claim and bump attempts so the
+        // article can be retried on a later pass. Owner-scoped so a
+        // stale worker cannot stomp a newer claim.
+        const releaseOutcome = await runOwnerScopedUpdate(client, {
+          table: 'articles',
+          id: article.id,
+          owner,
+          ownerColumn: 'clustering_claim_owner',
+          payload: {
             clustering_claimed_at: null,
             clustering_claim_owner: null,
             clustering_attempts: newAttempts,
+          },
+        })
+
+        if (
+          releaseOutcome.kind === 'ownership_moved' ||
+          releaseOutcome.kind === 'row_missing'
+        ) {
+          // Benign — the claim moved (or the row was deleted). Do
+          // not count as unmatched singleton: another worker now
+          // owns the article and will drive it.
+          await safeEmit(emitter, {
+            stage: 'cluster',
+            level: 'info',
+            eventType: 'ownership_moved',
+            itemId: article.id,
+            payload: { phase: 'singleton_release', previousOwner: owner },
           })
-          .eq('id', article.id)
-        unmatchedSingletons++
-        unhandledArticleIds.delete(article.id)
+          unhandledArticleIds.delete(article.id)
+        } else if (releaseOutcome.kind === 'policy_drift') {
+          // LOUD schema-level invariant violation: the claim is
+          // still held by this owner but the UPDATE matched zero
+          // rows. This prefix is reserved for drift so ops can
+          // grep for it; do NOT tag plain DB errors with it.
+          throw new Error(
+            `[cluster/policy_drift] singleton release stranded claim ${article.id}: ${releaseOutcome.detail}`
+          )
+        } else if (releaseOutcome.kind === 'error') {
+          // Plain DB error — route through the standard failure
+          // handler (retry budget + potential DLQ). Do NOT count
+          // as unmatchedSingletons; the outer `continue` below
+          // skips the applied branch.
+          errors.push(
+            `Failed to release singleton claim ${article.id}: ${releaseOutcome.message}`
+          )
+          await handleClusteringFailure(
+            client,
+            [article.id],
+            `Singleton release failed: ${releaseOutcome.message}`,
+            owner,
+            emitter
+          )
+          unhandledArticleIds.delete(article.id)
+        } else {
+          // applied — normal path.
+          unmatchedSingletons++
+          unhandledArticleIds.delete(article.id)
+        }
       }
       continue
     }
@@ -989,38 +1149,47 @@ async function persistNewClusters(
 
     if (duplicateStoryId) {
       const dupAssignStartedAt = Date.now()
-      const { failedIds, message } = await bulkUpdateArticles(client, cluster.articleIds, {
-        story_id: duplicateStoryId,
-        clustering_claimed_at: null,
-        clustering_claim_owner: null,
-        clustering_status: 'clustered',
-      })
+      const { applied, ownershipMoved, failed } = await bulkUpdateArticles(
+        client,
+        cluster.articleIds,
+        {
+          story_id: duplicateStoryId,
+          clustering_claimed_at: null,
+          clustering_claim_owner: null,
+          clustering_status: 'clustered',
+        },
+        owner,
+        emitter
+      )
       dbTimeMs += Date.now() - dupAssignStartedAt
 
-      if (failedIds.length > 0) {
-        for (const articleId of failedIds) {
-          errors.push(`Failed to assign article ${articleId} to existing story: ${message ?? 'unknown error'}`)
-          unhandledArticleIds.delete(articleId)
+      assignedArticles += applied.length
+      for (const id of applied) unhandledArticleIds.delete(id)
+      for (const id of ownershipMoved) unhandledArticleIds.delete(id)
+
+      // Per-article handleClusteringFailure so each failure carries
+      // its own message into the DLQ row (see parallel fix in
+      // persistPass1Assignments).
+      if (failed.length > 0) {
+        for (const { id, message } of failed) {
+          errors.push(
+            `Failed to assign article ${id} to existing story: ${message}`
+          )
+          unhandledArticleIds.delete(id)
+          await handleClusteringFailure(
+            client,
+            [id],
+            `Failed to assign to duplicate story ${duplicateStoryId}: ${message}`,
+            owner,
+            emitter
+          )
         }
-        await handleClusteringFailure(
-          client,
-          failedIds,
-          `Failed to assign to duplicate story ${duplicateStoryId}: ${message ?? 'unknown error'}`,
-          owner,
-          emitter
-        )
-        assignedArticles += cluster.articleIds.length - failedIds.length
-        cluster.articleIds.filter((id) => !failedIds.includes(id)).forEach((id) => unhandledArticleIds.delete(id))
-      } else {
-        assignedArticles += cluster.articleIds.length
-        cluster.articleIds.forEach((id) => unhandledArticleIds.delete(id))
       }
 
-      if (cluster.articleIds.length > failedIds.length) {
+      if (applied.length > 0) {
         const existing = storyMap.get(duplicateStoryId)
         if (existing) {
-          const successfulIds = cluster.articleIds.filter((id) => !failedIds.includes(id))
-          existing.articleIds.push(...successfulIds)
+          existing.articleIds.push(...applied)
         }
         storiesNeedingReassembly.add(duplicateStoryId)
       }
@@ -1035,43 +1204,76 @@ async function persistNewClusters(
       .sort()[0] ?? now.toISOString()
 
     const createStartedAt = Date.now()
-    let newStoryId: string
-    try {
-      newStoryId = await createStoryWithArticles(
-        client,
-        {
-          headline: 'Pending headline generation',
-          story_kind: 'standard',
-          topic: 'politics',
-          source_count: 0,
-          image_url: cluster.imageUrl,
-          cluster_centroid: centroid,
-          assembly_status: 'pending',
-          publication_status: 'draft',
-          review_status: 'pending',
-          review_reasons: [],
-          first_published: firstPublished,
+    const createOutcome = await createStoryWithArticles(
+      client,
+      {
+        headline: 'Pending headline generation',
+        story_kind: 'standard',
+        topic: 'politics',
+        source_count: 0,
+        image_url: cluster.imageUrl,
+        cluster_centroid: centroid,
+        assembly_status: 'pending',
+        publication_status: 'draft',
+        review_status: 'pending',
+        review_reasons: [],
+        first_published: firstPublished,
+      },
+      cluster.articleIds,
+      owner
+    )
+    dbTimeMs += Date.now() - createStartedAt
+
+    if (createOutcome.kind === 'ownership_moved') {
+      // Benign — the claim moved for one or more articles in the
+      // cluster. Migration 045 raises P0010 when the owner-scoped
+      // UPDATE inside the RPC matches fewer rows than requested, so
+      // this whole cluster is effectively handed off to whichever
+      // worker now holds those claims. Use the first article id as a
+      // stable `itemId` (consumers of `pipeline_stage_events` expect
+      // one per row) and include the full `articleIds` array in the
+      // payload so operators can see the complete cluster.
+      await safeEmit(emitter, {
+        stage: 'cluster',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: cluster.articleIds[0],
+        payload: {
+          phase: 'new_cluster',
+          previousOwner: owner,
+          articleCount: cluster.articleIds.length,
+          articleIds: cluster.articleIds,
+          detail: createOutcome.detail,
         },
-        cluster.articleIds
-      )
-      dbTimeMs += Date.now() - createStartedAt
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      errors.push(`Failed to create story: ${message}`)
-      await handleClusteringFailure(
-        client,
-        cluster.articleIds,
-        `Create-story failed: ${message}`,
-        owner,
-        emitter
-      )
-      cluster.articleIds.forEach((id) => unhandledArticleIds.delete(id))
+      })
+      for (const id of cluster.articleIds) {
+        unhandledArticleIds.delete(id)
+      }
       continue
     }
 
+    if (createOutcome.kind === 'error') {
+      errors.push(`Failed to create story: ${createOutcome.message}`)
+      await handleClusteringFailure(
+        client,
+        cluster.articleIds,
+        `Create-story failed: ${createOutcome.message}`,
+        owner,
+        emitter
+      )
+      for (const id of cluster.articleIds) {
+        unhandledArticleIds.delete(id)
+      }
+      continue
+    }
+
+    // createOutcome.kind === 'created'
+    const newStoryId = createOutcome.storyId
     newStories++
     assignedArticles += cluster.articleIds.length
-    cluster.articleIds.forEach((id) => unhandledArticleIds.delete(id))
+    for (const id of cluster.articleIds) {
+      unhandledArticleIds.delete(id)
+    }
 
     storyMap.set(newStoryId, {
       centroid,

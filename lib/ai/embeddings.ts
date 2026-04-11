@@ -16,7 +16,9 @@ import {
   claimEmbeddingBatch,
   generateClaimOwner,
   releaseEmbeddingClaims,
+  runOwnerScopedUpdate,
   type ClaimOwner,
+  type OwnershipMoveOutcome,
 } from '@/lib/pipeline/claim-utils'
 import { computeRetryOutcome } from '@/lib/pipeline/retry-policy'
 import { pushToDeadLetter } from '@/lib/pipeline/dead-letter'
@@ -142,29 +144,72 @@ async function handleEmbeddingFailure(
   client: SupabaseClient<Database>,
   failedArticles: readonly UnembeddedArticle[],
   errorMessage: string,
+  owner: ClaimOwner,
   emitter: StageEventEmitter
 ): Promise<void> {
   if (failedArticles.length === 0) return
 
   const FAR_FUTURE = '2099-01-01T00:00:00Z'
 
-  for (const article of failedArticles) {
-    const previous = article.embedding_retry_count ?? 0
-    const outcome = computeRetryOutcome('embed', previous)
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (client.from('articles') as any)
-      .update({
-        embedding_retry_count: outcome.nextRetryCount,
-        embedding_next_attempt_at: outcome.exhausted
-          ? FAR_FUTURE
-          : outcome.nextAttemptAt.toISOString(),
-        embedding_last_error: errorMessage,
-        embedding_claimed_at: null,
-        embedding_claim_owner: null,
+  // Phase 1: attempt every owner-scoped write in parallel.
+  //
+  // We do NOT throw on policy_drift mid-loop because failure handling
+  // is the code path that clears the claim and bumps retry metadata —
+  // aborting early would strand every article after the drift point
+  // until the claim TTL expires, with no retry_count progression. So
+  // we collect outcomes first, apply all benign + applied branches,
+  // and surface any policy_drift / error LOUDLY at the end.
+  const results = await Promise.all(
+    failedArticles.map(async (article) => {
+      const previous = article.embedding_retry_count ?? 0
+      const outcome = computeRetryOutcome('embed', previous)
+      const writeOutcome = await runOwnerScopedUpdate(client, {
+        table: 'articles',
+        id: article.id,
+        owner,
+        ownerColumn: 'embedding_claim_owner',
+        payload: {
+          embedding_retry_count: outcome.nextRetryCount,
+          embedding_next_attempt_at: outcome.exhausted
+            ? FAR_FUTURE
+            : outcome.nextAttemptAt.toISOString(),
+          embedding_last_error: errorMessage,
+          embedding_claimed_at: null,
+          embedding_claim_owner: null,
+        },
       })
-      .eq('id', article.id)
+      return { article, outcome, writeOutcome }
+    })
+  )
 
+  // Phase 2: handle benign + applied branches; collect drift errors.
+  const driftErrors: string[] = []
+  for (const { article, outcome, writeOutcome } of results) {
+    if (
+      writeOutcome.kind === 'ownership_moved' ||
+      writeOutcome.kind === 'row_missing'
+    ) {
+      await safeEmit(emitter, {
+        stage: 'embed',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: article.id,
+        payload: { phase: 'failure', previousOwner: owner },
+      })
+      continue
+    }
+
+    if (writeOutcome.kind === 'policy_drift' || writeOutcome.kind === 'error') {
+      driftErrors.push(
+        `[embed/policy_drift] owner-scoped failure write stranded claim ${article.id}: ` +
+          (writeOutcome.kind === 'policy_drift'
+            ? writeOutcome.detail
+            : writeOutcome.message)
+      )
+      continue
+    }
+
+    // writeOutcome.kind === 'applied'
     if (outcome.exhausted) {
       await pushToDeadLetter(client, {
         itemKind: 'article_embed',
@@ -185,68 +230,86 @@ async function handleEmbeddingFailure(
       })
     }
   }
+
+  // Phase 3: surface drift LOUDLY after all work has been attempted.
+  if (driftErrors.length > 0) {
+    throw new Error(driftErrors.join('; '))
+  }
 }
 
 async function bulkWriteEmbeddings(
   client: SupabaseClient<Database>,
   batch: readonly UnembeddedArticle[],
   embeddings: readonly { readonly embedding: readonly number[] }[],
+  owner: ClaimOwner,
   emitter: StageEventEmitter
 ): Promise<{ processed: number; errors: string[] }> {
-  const rows = batch.map((article, index) => ({
-    id: article.id,
-    embedding: embeddings[index]?.embedding as number[],
-    is_embedded: true,
-    embedding_claimed_at: null,
-    embedding_claim_owner: null,
-  }))
-
   const errors: string[] = []
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const table = client.from('articles') as any
-    if (typeof table.upsert === 'function') {
-      const { error } = await table.upsert(rows, { onConflict: 'id' })
-      if (!error) {
-        return { processed: rows.length, errors }
-      }
-      errors.push(`Batch embedding write failed: ${error.message}`)
-      await safeEmit(emitter, {
-        stage: 'embed',
-        level: 'error',
-        eventType: 'embedding_write_failed',
-        payload: { error: error.message, batchSize: rows.length },
-      })
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    errors.push(`Batch embedding write failed: ${message}`)
-    await safeEmit(emitter, {
-      stage: 'embed',
-      level: 'error',
-      eventType: 'embedding_write_failed',
-      payload: { error: message, batchSize: rows.length },
-    })
-  }
-
   let processed = 0
 
-  for (const row of rows) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (client.from('articles') as any)
-      .update({
-        embedding: row.embedding,
-        is_embedded: row.is_embedded,
-        embedding_claimed_at: row.embedding_claimed_at,
-        embedding_claim_owner: row.embedding_claim_owner,
+  // Owner-scoped per-row updates in parallel. We cannot use batch
+  // upsert because PostgREST upsert has no WHERE clause and would
+  // bypass the owner predicate, letting a stale worker overwrite a
+  // newer owner's embedding.
+  const outcomes = await Promise.all(
+    batch.map(async (article, index) => {
+      const embedding = embeddings[index]?.embedding
+      if (!embedding) {
+        // Defensive: a batch/response length mismatch would otherwise
+        // silently land `is_embedded: true` with an undefined embedding.
+        return {
+          article,
+          outcome: {
+            kind: 'error' as const,
+            message: `missing embedding for ${article.id} — batch/response length mismatch`,
+          } satisfies OwnershipMoveOutcome,
+        }
+      }
+      const outcome = await runOwnerScopedUpdate(client, {
+        table: 'articles',
+        id: article.id,
+        owner,
+        ownerColumn: 'embedding_claim_owner',
+        payload: {
+          embedding,
+          is_embedded: true,
+          embedding_claimed_at: null,
+          embedding_claim_owner: null,
+        },
       })
-      .eq('id', row.id)
+      return { article, outcome }
+    })
+  )
 
-    if (error) {
-      errors.push(`Update failed for ${row.id}: ${error.message}`)
-    } else {
-      processed += 1
+  for (const { article, outcome } of outcomes) {
+    switch (outcome.kind) {
+      case 'applied':
+        processed += 1
+        break
+      case 'ownership_moved':
+      case 'row_missing':
+        await safeEmit(emitter, {
+          stage: 'embed',
+          level: 'info',
+          eventType: 'ownership_moved',
+          itemId: article.id,
+          payload: { phase: 'success', previousOwner: owner },
+        })
+        break
+      case 'error':
+        errors.push(`Update failed for ${article.id}: ${outcome.message}`)
+        await safeEmit(emitter, {
+          stage: 'embed',
+          level: 'error',
+          eventType: 'embedding_write_failed',
+          itemId: article.id,
+          payload: { error: outcome.message },
+        })
+        break
+      case 'policy_drift':
+        throw new Error(
+          `[embed/policy_drift] owner-scoped write stranded claim ${article.id}: ${outcome.detail}`
+        )
     }
   }
 
@@ -320,7 +383,13 @@ export async function embedUnembeddedArticles(
 
     if (cachedArticles.length > 0) {
       const writeStartedAt = Date.now()
-      const writeResult = await bulkWriteEmbeddings(client, cachedArticles, cachedEmbeddings, emitter)
+      const writeResult = await bulkWriteEmbeddings(
+        client,
+        cachedArticles,
+        cachedEmbeddings,
+        owner,
+        emitter
+      )
       dbTimeMs += Date.now() - writeStartedAt
       totalProcessed += writeResult.processed
       cacheHits += writeResult.processed
@@ -335,7 +404,13 @@ export async function embedUnembeddedArticles(
         modelTimeMs += Date.now() - modelStartedAt
 
         const writeStartedAt = Date.now()
-        const writeResult = await bulkWriteEmbeddings(client, uncachedArticles, embeddings, emitter)
+        const writeResult = await bulkWriteEmbeddings(
+          client,
+          uncachedArticles,
+          embeddings,
+          owner,
+          emitter
+        )
         dbTimeMs += Date.now() - writeStartedAt
         totalProcessed += writeResult.processed
         errors.push(...writeResult.errors)
@@ -346,7 +421,7 @@ export async function embedUnembeddedArticles(
         // handler also clears the claim so another owner can retry after
         // the backoff window expires.
         const failureStartedAt = Date.now()
-        await handleEmbeddingFailure(client, uncachedArticles, message, emitter)
+        await handleEmbeddingFailure(client, uncachedArticles, message, owner, emitter)
         dbTimeMs += Date.now() - failureStartedAt
       }
     }

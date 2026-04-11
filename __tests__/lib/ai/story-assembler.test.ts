@@ -2,7 +2,7 @@
  * Tests for lib/ai/story-assembler.ts — assembleSingleStory and assembleStories.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/ai/story-classifier', () => ({
   classifyStory: vi.fn(),
@@ -74,9 +74,19 @@ function createMockClient(overrides: {
   updateError?: unknown | null
   fetchMetadataError?: unknown | null
 } = {}) {
-  const updateFn = vi.fn().mockReturnValue({
-    eq: vi.fn().mockResolvedValue({ error: overrides.updateError ?? null }),
-  })
+  // Thenable update chain: supports BOTH
+  //   .update(payload).eq('id', storyId) → admin/backfill path
+  //   .update(payload, { count: 'exact' }).eq('id', storyId).eq('assembly_claim_owner', owner) → cron path
+  const updateResolved = {
+    error: overrides.updateError ?? null,
+    count: overrides.updateError ? null : 1,
+  }
+  const ownerEq = vi.fn().mockResolvedValue(updateResolved)
+  const idEq = vi.fn().mockImplementation(() =>
+    Object.assign(Promise.resolve(updateResolved), { eq: ownerEq })
+  )
+  const updateFn = vi.fn().mockReturnValue({ eq: idEq })
+  const insertFn = vi.fn().mockResolvedValue({ error: null })
 
   const storiesData = (overrides.stories?.data ?? []) as MockStoryRow[]
   const storiesError = overrides.stories?.error ?? null
@@ -156,15 +166,175 @@ function createMockClient(overrides: {
             })
             return { in: inFn }
           }
+          // Path C: runOwnerScopedUpdate verify-read on zero-match (never
+          // triggered in happy path — count:1 short-circuits).
+          if (columns === 'assembly_claim_owner') {
+            return {
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: null,
+                  error: null,
+                }),
+              }),
+            }
+          }
+          // Path D: failure path reads the retry count.
+          if (columns === 'assembly_retry_count') {
+            return {
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { assembly_retry_count: 0 },
+                  error: null,
+                }),
+              }),
+            }
+          }
           return {}
         }),
         update: updateFn,
       }
     }
+    if (table === 'pipeline_dead_letter') {
+      return { insert: insertFn }
+    }
     return {}
   })
 
-  return { from: fromFn, rpc, _updateFn: updateFn, _rpc: rpc }
+  return { from: fromFn, rpc, _updateFn: updateFn, _rpc: rpc, _insert: insertFn }
+}
+
+// --- Phase 10: mock client where the owner-scoped story update matches
+//     zero rows and the verify-read shows a different assembly_claim_owner.
+//     Used for stale-worker race tests. ---
+function createMockClientWithOwnershipMovedStories(opts: {
+  stories: MockStoryRow[]
+  articles: unknown[]
+  sources: unknown[]
+  takeoverOwner: string
+  assemblyRetryCount?: number
+}) {
+  // Update chain: .update(payload, { count: 'exact' }).eq('id').eq('assembly_claim_owner', owner)
+  //   returns { error: null, count: 0 } on every call (zero-match)
+  const zeroMatch = { error: null, count: 0 }
+  const ownerEq = vi.fn().mockResolvedValue(zeroMatch)
+  const idEq = vi.fn().mockImplementation(() =>
+    Object.assign(Promise.resolve(zeroMatch), { eq: ownerEq })
+  )
+  const updateFn = vi.fn().mockReturnValue({ eq: idEq })
+
+  const insertFn = vi.fn().mockResolvedValue({ error: null })
+
+  const retryCount = opts.assemblyRetryCount ?? 0
+
+  const rpc = vi.fn((name: string, args: { p_owner?: string; p_limit?: number }) => {
+    if (name === 'claim_stories_for_assembly') {
+      const limit = args.p_limit ?? opts.stories.length
+      return Promise.resolve({
+        data: opts.stories.slice(0, limit).map((s) => s.id),
+        error: null,
+      })
+    }
+    if (name === 'release_assembly_claim' || name === 'bump_assembly_version') {
+      return Promise.resolve({ data: true, error: null })
+    }
+    return Promise.resolve({ data: null, error: null })
+  })
+
+  const fromFn = vi.fn().mockImplementation((table: string) => {
+    if (table === 'articles') {
+      return {
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            order: vi.fn().mockReturnValue({
+              order: vi.fn().mockReturnValue({
+                returns: vi.fn().mockResolvedValue({
+                  data: opts.articles,
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }
+    }
+    if (table === 'sources') {
+      return {
+        select: vi.fn().mockReturnValue({
+          in: vi.fn().mockReturnValue({
+            returns: vi.fn().mockResolvedValue({
+              data: opts.sources,
+              error: null,
+            }),
+          }),
+        }),
+      }
+    }
+    if (table === 'stories') {
+      return {
+        select: vi.fn().mockImplementation((columns: string) => {
+          // metadata fetch for claimed IDs
+          if (columns === 'id, first_published') {
+            return {
+              in: vi.fn((_col: string, ids: string[]) => {
+                const bySet = new Set(ids)
+                const rows = opts.stories
+                  .filter((s) => bySet.has(s.id))
+                  .map((s) => ({ id: s.id, first_published: s.first_published }))
+                return Promise.resolve({ data: rows, error: null })
+              }),
+            }
+          }
+          // first_published fallback read inside assembleSingleStory
+          if (columns === 'first_published') {
+            return {
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { first_published: '2026-03-22T10:00:00Z' },
+                  error: null,
+                }),
+              }),
+            }
+          }
+          // runOwnerScopedUpdate verify-read: stale claim belongs to takeoverOwner
+          if (columns === 'assembly_claim_owner') {
+            return {
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: { assembly_claim_owner: opts.takeoverOwner },
+                  error: null,
+                }),
+              }),
+            }
+          }
+          // failure path reads current retry count
+          if (columns === 'assembly_retry_count') {
+            return {
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({
+                  data: { assembly_retry_count: retryCount },
+                  error: null,
+                }),
+              }),
+            }
+          }
+          return {}
+        }),
+        update: updateFn,
+      }
+    }
+    if (table === 'pipeline_dead_letter') {
+      return { insert: insertFn }
+    }
+    return {}
+  })
+
+  return {
+    from: fromFn,
+    rpc,
+    _updateFn: updateFn,
+    _rpc: rpc,
+    _insert: insertFn,
+  }
 }
 
 describe('assembleSingleStory', () => {
@@ -622,5 +792,131 @@ describe('assembleStories', () => {
     const result = await resultPromise
     expect(result.storiesProcessed).toBe(2)
     expect(result.autoPublished).toBe(2)
+  })
+
+  it('does NOT bump assembly_version or schedule tag extraction when owner-scoped success update is zero-match', async () => {
+    mockClassifyStory.mockResolvedValue(classificationResult('Generated Headline', 'politics', 'us'))
+    mockSummary.mockResolvedValue({
+      aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
+      sentiment: null,
+      keyQuotes: null,
+      keyClaims: null,
+    })
+    mockSpectrum.mockReturnValue([])
+    mockBlindspot.mockReturnValue(false)
+    mockExtractEntities.mockResolvedValue([])
+    mockUpsertStoryTags.mockResolvedValue(undefined)
+
+    const client = createMockClientWithOwnershipMovedStories({
+      stories: [
+        { id: 'story-1', assembly_claimed_at: null, first_published: '2026-03-22T10:00:00Z' },
+      ],
+      articles: [
+        { id: 'a1', title: 'One', description: 'Desc', source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
+        { id: 'a2', title: 'Two', description: 'Desc', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
+      ],
+      sources: [
+        { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
+        { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
+      ],
+      takeoverOwner: 'other-owner',
+    })
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+    const result = await assembleStories(client as never, 1, undefined, 'stale-owner', emitter)
+
+    // Ownership-moved stories are NOT counted as processed.
+    expect(result.storiesProcessed).toBe(0)
+    expect(result.autoPublished).toBe(0)
+    expect(result.sentToReview).toBe(0)
+    // Phase 10: benign race should produce an empty errors array —
+    // it's invisible to ops.
+    expect(result.errors).toEqual([])
+
+    // Tag extraction must NOT have been scheduled — the write never landed.
+    expect(mockUpsertStoryTags).not.toHaveBeenCalled()
+
+    // bump_assembly_version RPC must NOT have been called on an ownership move.
+    expect(client._rpc).not.toHaveBeenCalledWith(
+      'bump_assembly_version',
+      expect.anything()
+    )
+
+    // Info event for the benign race.
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'assemble',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: 'story-1',
+        payload: expect.objectContaining({
+          phase: 'success',
+          previousOwner: 'stale-owner',
+        }),
+      })
+    )
+  })
+
+  it('does NOT push DLQ when the failure update is zero-match (ownership moved during assembly failure)', async () => {
+    mockClassifyStory.mockRejectedValue(new Error('Gemini outage'))
+    mockSummary.mockResolvedValue({
+      aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
+      sentiment: null,
+      keyQuotes: null,
+      keyClaims: null,
+    })
+    mockSpectrum.mockReturnValue([])
+    mockBlindspot.mockReturnValue(false)
+
+    const client = createMockClientWithOwnershipMovedStories({
+      stories: [
+        { id: 'story-1', assembly_claimed_at: null, first_published: '2026-03-22T10:00:00Z' },
+      ],
+      articles: [
+        { id: 'a1', title: 'One', description: 'Desc', source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
+        { id: 'a2', title: 'Two', description: 'Desc', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
+      ],
+      sources: [
+        { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
+        { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
+      ],
+      takeoverOwner: 'other-owner',
+      assemblyRetryCount: 5, // would normally exhaust + DLQ
+    })
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+    const result = await assembleStories(client as never, 1, undefined, 'stale-owner', emitter)
+
+    // Phase 10: benign race should produce an empty errors array and
+    // zero progress counters — it's invisible to ops. Matches the
+    // embeddings.ts pattern where failure-path ownership_moved is a
+    // pure benign continue, not a surfaced error.
+    expect(result.errors).toEqual([])
+    expect(result.storiesProcessed).toBe(0)
+
+    // DLQ insert must NOT have happened for this story.
+    expect(client._insert).not.toHaveBeenCalledWith(
+      expect.objectContaining({ item_kind: 'story_assemble' })
+    )
+
+    // bump_assembly_version RPC must NOT have been called on an ownership move.
+    expect(client._rpc).not.toHaveBeenCalledWith(
+      'bump_assembly_version',
+      expect.anything()
+    )
+
+    // Info event for the benign race on the failure phase.
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'assemble',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: 'story-1',
+        payload: expect.objectContaining({
+          phase: 'failure',
+          previousOwner: 'stale-owner',
+        }),
+      })
+    )
   })
 })

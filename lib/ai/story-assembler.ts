@@ -26,6 +26,7 @@ import {
   claimAssemblyBatch,
   generateClaimOwner,
   releaseAssemblyClaim,
+  runOwnerScopedUpdate,
   type ClaimOwner,
 } from '@/lib/pipeline/claim-utils'
 import { bumpAssemblyVersion } from '@/lib/pipeline/reassembly'
@@ -98,7 +99,15 @@ interface PendingStory {
 }
 
 interface SingleStoryAssemblyResult {
-  readonly publicationStatus: 'published' | 'needs_review' | 'draft' | 'rejected'
+  readonly publicationStatus:
+    | 'published'
+    | 'needs_review'
+    | 'draft'
+    | 'rejected'
+    // Phase 10: sentinel emitted when the owner-scoped write matched zero
+    // rows because another worker stole the claim. The caller skips
+    // version bump, tag scheduling, and progress accounting.
+    | 'ownership_moved'
   readonly dbTimeMs?: number
   readonly modelTimeMs?: number
   readonly cheapModelTasks?: number
@@ -190,7 +199,8 @@ export async function assembleSingleStory(
   client: SupabaseClient<Database>,
   storyId: string,
   firstPublished?: string,
-  emitter: StageEventEmitter = noopStageEmitter
+  emitter: StageEventEmitter = noopStageEmitter,
+  owner?: ClaimOwner
 ): Promise<SingleStoryAssemblyResult> {
   let dbTimeMs = 0
   let modelTimeMs = 0
@@ -325,45 +335,95 @@ export async function assembleSingleStory(
   })
   const now = new Date().toISOString()
 
-  const updateStartedAt = Date.now()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: updateError } = await (client.from('stories') as any)
-    .update({
-      headline: normalizedHeadline.headline,
-      story_kind: 'standard',
-      topic: normalizedTopic.topic,
-      region: normalizedRegion.region,
-      source_count: sourceIds.length,
-      is_blindspot: blindspot,
-      image_url: imageUrl,
-      factuality: dominantValue<FactualityLevel>(factualities, 'mixed'),
-      ownership: dominantValue<OwnershipType>(ownerships, 'other'),
-      spectrum_segments: spectrumSegments,
-      ai_summary: aiSummary,
-      story_velocity: storyVelocity,
-      impact_score: impactScore,
-      source_diversity: sourceDiversity,
-      controversy_score: controversyScore,
-      sentiment,
-      key_quotes: keyQuotes,
-      key_claims: keyClaims,
-      assembly_status: 'completed',
-      publication_status: publicationDecision.publicationStatus,
-      review_status: publicationDecision.reviewStatus,
-      review_reasons: publicationDecision.reviewReasons,
-      confidence_score: publicationDecision.confidenceScore,
-      processing_error: null,
-      assembled_at: now,
-      published_at: publicationDecision.publicationStatus === 'published' ? now : null,
-      assembly_claimed_at: null,
-      assembly_claim_owner: null,
-      last_updated: now,
-    })
-    .eq('id', storyId)
-  dbTimeMs += Date.now() - updateStartedAt
+  const successPayload = {
+    headline: normalizedHeadline.headline,
+    story_kind: 'standard',
+    topic: normalizedTopic.topic,
+    region: normalizedRegion.region,
+    source_count: sourceIds.length,
+    is_blindspot: blindspot,
+    image_url: imageUrl,
+    factuality: dominantValue<FactualityLevel>(factualities, 'mixed'),
+    ownership: dominantValue<OwnershipType>(ownerships, 'other'),
+    spectrum_segments: spectrumSegments,
+    ai_summary: aiSummary,
+    story_velocity: storyVelocity,
+    impact_score: impactScore,
+    source_diversity: sourceDiversity,
+    controversy_score: controversyScore,
+    sentiment,
+    key_quotes: keyQuotes,
+    key_claims: keyClaims,
+    assembly_status: 'completed' as const,
+    publication_status: publicationDecision.publicationStatus,
+    review_status: publicationDecision.reviewStatus,
+    review_reasons: publicationDecision.reviewReasons,
+    confidence_score: publicationDecision.confidenceScore,
+    processing_error: null,
+    assembled_at: now,
+    published_at: publicationDecision.publicationStatus === 'published' ? now : null,
+    assembly_claimed_at: null,
+    assembly_claim_owner: null,
+    last_updated: now,
+  }
 
-  if (updateError) {
-    throw new Error(`Failed to update story ${storyId}: ${updateError.message}`)
+  const updateStartedAt = Date.now()
+
+  if (owner !== undefined) {
+    // Cron path: owner-scoped + verified write. If ownership moved between
+    // claim and write, we skip the version bump and tag scheduling entirely
+    // — the new owner will do that work after its own successful write.
+    const writeOutcome = await runOwnerScopedUpdate(client, {
+      table: 'stories',
+      id: storyId,
+      owner,
+      ownerColumn: 'assembly_claim_owner',
+      payload: successPayload,
+    })
+    dbTimeMs += Date.now() - updateStartedAt
+
+    if (
+      writeOutcome.kind === 'ownership_moved' ||
+      writeOutcome.kind === 'row_missing'
+    ) {
+      await safeEmit(emitter, {
+        stage: 'assemble',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: storyId,
+        payload: { phase: 'success', previousOwner: owner },
+      })
+      return {
+        publicationStatus: 'ownership_moved',
+        dbTimeMs,
+        modelTimeMs,
+        cheapModelTasks: 0,
+        cheapModelFallbacks: 0,
+        summaryFallback: false,
+        tagPromise: Promise.resolve(),
+      }
+    }
+
+    if (writeOutcome.kind === 'policy_drift' || writeOutcome.kind === 'error') {
+      throw new Error(
+        `[assemble/policy_drift] owner-scoped success write stranded claim ${storyId}: ` +
+          (writeOutcome.kind === 'policy_drift'
+            ? writeOutcome.detail
+            : writeOutcome.message)
+      )
+    }
+    // writeOutcome.kind === 'applied' — fall through to version bump + tags.
+  } else {
+    // Admin/backfill path: unchanged behavior.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: updateError } = await (client.from('stories') as any)
+      .update(successPayload)
+      .eq('id', storyId)
+    dbTimeMs += Date.now() - updateStartedAt
+
+    if (updateError) {
+      throw new Error(`Failed to update story ${storyId}: ${updateError.message}`)
+    }
   }
 
   // Bump assembly_version so any concurrent requeue caller with a stale
@@ -469,7 +529,13 @@ export async function assembleStories(
     concurrency,
     async (story) => {
       try {
-        const result = await assembleSingleStory(client, story.id, story.first_published, emitter)
+        const result = await assembleSingleStory(
+          client,
+          story.id,
+          story.first_published,
+          emitter,
+          owner
+        )
         return { storyId: story.id, result }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -483,41 +549,106 @@ export async function assembleStories(
           .eq('id', story.id)
           .single()
         const previousCount = (current?.assembly_retry_count as number | undefined) ?? 0
-        const outcome = computeRetryOutcome('assemble', previousCount)
+        const retryDecision = computeRetryOutcome('assemble', previousCount)
 
         // Transient (budget-remaining) failures stay in 'pending' so the
         // next pass picks them up after the backoff window — consistent
         // with embedding and clustering. Terminal (budget-exhausted)
         // failures go to 'failed' AND the DLQ for operator attention.
         const FAR_FUTURE = '2099-01-01T00:00:00Z'
-        const nextAssemblyStatus = outcome.exhausted ? 'failed' : 'pending'
-        const nextPublicationStatus = outcome.exhausted ? 'needs_review' : 'draft'
+        const nextAssemblyStatus = retryDecision.exhausted ? 'failed' : 'pending'
+        const nextPublicationStatus = retryDecision.exhausted
+          ? 'needs_review'
+          : 'draft'
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (client.from('stories') as any)
-          .update({
-            assembly_status: nextAssemblyStatus,
-            publication_status: nextPublicationStatus,
-            review_status: 'pending',
-            review_reasons: outcome.exhausted ? ['assembly_failed'] : [],
-            processing_error: message,
-            assembly_claimed_at: null,
-            assembly_claim_owner: null,
-            assembly_retry_count: outcome.nextRetryCount,
-            assembly_next_attempt_at: outcome.exhausted
-              ? FAR_FUTURE
-              : outcome.nextAttemptAt.toISOString(),
-            assembly_last_error: message,
-            last_updated: new Date().toISOString(),
+        const failurePayload = {
+          assembly_status: nextAssemblyStatus,
+          publication_status: nextPublicationStatus,
+          review_status: 'pending',
+          review_reasons: retryDecision.exhausted ? ['assembly_failed'] : [],
+          processing_error: message,
+          assembly_claimed_at: null,
+          assembly_claim_owner: null,
+          assembly_retry_count: retryDecision.nextRetryCount,
+          assembly_next_attempt_at: retryDecision.exhausted
+            ? FAR_FUTURE
+            : retryDecision.nextAttemptAt.toISOString(),
+          assembly_last_error: message,
+          last_updated: new Date().toISOString(),
+        }
+
+        if (owner !== undefined) {
+          // Cron path: owner-scoped + verified write. If the claim moved,
+          // we skip version bump + DLQ — the new owner will report its
+          // own terminal state.
+          const writeOutcome = await runOwnerScopedUpdate(client, {
+            table: 'stories',
+            id: story.id,
+            owner,
+            ownerColumn: 'assembly_claim_owner',
+            payload: failurePayload,
           })
-          .eq('id', story.id)
+
+          if (
+            writeOutcome.kind === 'ownership_moved' ||
+            writeOutcome.kind === 'row_missing'
+          ) {
+            await safeEmit(emitter, {
+              stage: 'assemble',
+              level: 'info',
+              eventType: 'ownership_moved',
+              itemId: story.id,
+              payload: { phase: 'failure', previousOwner: owner },
+            })
+            // Benign race — return a sentinel result so the aggregator's
+            // ownership_moved check skips all counters (including errors[]).
+            // Matches the embeddings.ts pattern where ownership_moved on
+            // the failure path is a pure benign continue, not a surfaced
+            // error. The original assembly error is intentionally swallowed
+            // here: the new owner will report its own terminal state when
+            // it processes the story, so reporting it from the stale
+            // worker's perspective is duplicate noise.
+            return {
+              storyId: story.id,
+              result: {
+                publicationStatus: 'ownership_moved' as const,
+                dbTimeMs: Date.now() - failureStartedAt,
+                modelTimeMs: 0,
+                cheapModelTasks: 0,
+                cheapModelFallbacks: 0,
+                summaryFallback: false,
+                tagPromise: Promise.resolve(),
+              },
+            }
+          }
+
+          if (
+            writeOutcome.kind === 'policy_drift' ||
+            writeOutcome.kind === 'error'
+          ) {
+            throw new Error(
+              `[assemble/policy_drift] owner-scoped failure write stranded claim ${story.id}: ` +
+                (writeOutcome.kind === 'policy_drift'
+                  ? writeOutcome.detail
+                  : writeOutcome.message)
+            )
+          }
+          // writeOutcome.kind === 'applied' — fall through to bump + DLQ.
+        } else {
+          // Admin/backfill path: unchanged behavior.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (client.from('stories') as any)
+            .update(failurePayload)
+            .eq('id', story.id)
+        }
+
         await bumpAssemblyVersion(client, story.id)
 
-        if (outcome.exhausted) {
+        if (retryDecision.exhausted) {
           await pushToDeadLetter(client, {
             itemKind: 'story_assemble',
             itemId: story.id,
-            retryCount: outcome.nextRetryCount,
+            retryCount: retryDecision.nextRetryCount,
             lastError: message,
           })
           await safeEmit(emitter, {
@@ -527,7 +658,7 @@ export async function assembleStories(
             itemId: story.id,
             payload: {
               storyId: story.id,
-              retryCount: outcome.nextRetryCount,
+              retryCount: retryDecision.nextRetryCount,
               error: message,
             },
           })
@@ -548,6 +679,14 @@ export async function assembleStories(
     }
 
     if (!batchResult.result) {
+      continue
+    }
+
+    // Phase 10: benign race — the claim moved to another owner between
+    // the claim RPC and the stage-state write. Do not count this as
+    // progress, do not schedule tags, do not bump counters.
+    if (batchResult.result.publicationStatus === 'ownership_moved') {
+      dbTimeMs += batchResult.result.dbTimeMs ?? 0
       continue
     }
 

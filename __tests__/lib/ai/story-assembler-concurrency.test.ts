@@ -54,9 +54,15 @@ function deferred<T>() {
 }
 
 function createMockClient() {
-  const updateFn = vi.fn().mockReturnValue({
-    eq: vi.fn().mockResolvedValue({ error: null }),
-  })
+  // Thenable update chain: supports BOTH
+  //   .update(payload).eq('id', storyId) → admin/backfill path
+  //   .update(payload, { count: 'exact' }).eq('id').eq('assembly_claim_owner', owner) → cron path
+  const updateResolved = { error: null, count: 1 }
+  const ownerEq = vi.fn().mockResolvedValue(updateResolved)
+  const idEq = vi.fn().mockImplementation(() =>
+    Object.assign(Promise.resolve(updateResolved), { eq: ownerEq })
+  )
+  const updateFn = vi.fn().mockReturnValue({ eq: idEq })
 
   const claimedStoriesData = [
     { id: 'story-1', first_published: '2026-03-22T10:00:00Z' },

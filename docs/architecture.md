@@ -477,6 +477,36 @@ Stage functions accept an optional trailing `emitter?: StageEventEmitter` parame
 
 **Retention.** `pipeline_stage_events` grows unbounded. No automated retention job exists yet — operators can manually run `DELETE FROM pipeline_stage_events WHERE created_at < now() - interval '30 days'` if the table balloons. This is noted in `docs/operations.md`.
 
+**Owner-scoped state transitions (Phase 10).** Every stage write that
+clears a `*_claim_owner` column is routed through `runOwnerScopedUpdate`
+(`lib/pipeline/claim-utils.ts`) which applies `.eq(ownerColumn, owner)`,
+requests `{ count: 'exact' }`, and on `count === 0` does a verify-read
+to distinguish benign **ownership moved** (another worker re-claimed
+the item after a TTL expiry) from **policy drift** (claim still ours
+but the write matched zero rows — a schema-level problem). Benign
+cases emit an `ownership_moved` info event and skip follow-up work
+(DLQ push, version bump, tag extraction). Policy drift throws a
+`[<stage>/policy_drift]`-prefixed error so operators see the issue in
+`pipeline_runs.steps`. The helper is the canonical template — the
+Phase 7b clustering cleanup fallback (`lib/ai/clustering.ts:1486`) is
+the inlined pattern it extracts.
+
+The `create_story_with_articles` RPC (migration 045) enforces the same
+predicate inside its transactional UPDATE via
+`AND clustering_claim_owner = p_owner`, so the singleton-promotion and
+new-cluster creation paths are owner-safe end-to-end. Partial ownership
+mismatch raises SQLSTATE **P0010** (a dedicated code reserved for owner
+mismatch, distinct from the migration's plain P0001 null-validation
+guards), which the JS wrapper translates to `{ kind: 'ownership_moved' }`
+in the `CreateStoryOutcome` discriminated union — callers handle this
+as a benign skip without retries. The wrapper also runtime-validates
+`owner` is a non-empty string before calling the RPC, so caller bugs
+fail loud as `{ kind: 'error' }` instead of being silently swallowed.
+
+Pipeline runs under the Supabase service role, so verify-reads are not
+filtered by RLS — `data: null` from a verify-read unambiguously means
+the row does not exist.
+
 ---
 
 ## End-to-End Example

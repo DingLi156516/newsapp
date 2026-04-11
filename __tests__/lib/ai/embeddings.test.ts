@@ -28,12 +28,19 @@ function createMockClient(
   cacheRows: unknown[] = [],
   cacheError: unknown = null
 ) {
-  // --- update().eq() path (used by bulkWriteEmbeddings non-upsert fallback) ---
-  const updateEq = vi.fn().mockResolvedValue({ error: updateError })
-  const update = vi.fn().mockReturnValue({ eq: updateEq })
+  // --- update(payload, { count: 'exact' }).eq('id').eq('embedding_claim_owner') path
+  //     used by runOwnerScopedUpdate for both success and failure writes. ---
+  const updateResolved = { error: updateError, count: updateError ? null : 1 }
+  const ownerEq = vi.fn().mockResolvedValue(updateResolved)
+  const idEq = vi.fn().mockReturnValue({ eq: ownerEq })
+  const update = vi.fn().mockReturnValue({ eq: idEq })
 
-  // --- upsert (preferred write path) ---
-  const upsert = vi.fn().mockResolvedValue({ error: updateError })
+  // --- verify-read chain invoked by runOwnerScopedUpdate when count===0.
+  //     On the happy path count is already 1, so this is defensive only. ---
+  const verifyMaybeSingle = vi
+    .fn()
+    .mockResolvedValue({ data: null, error: null })
+  const verifyEq = vi.fn().mockReturnValue({ maybeSingle: verifyMaybeSingle })
 
   // --- client.rpc — handles claim + release RPCs ---
   const rpc = vi.fn((name: string, args: { p_owner?: string; p_limit?: number }) => {
@@ -85,6 +92,9 @@ function createMockClient(
     if (fields === 'id, title, description, title_fingerprint') {
       return { in: fetchByIdsIn }
     }
+    if (fields === 'embedding_claim_owner') {
+      return { eq: verifyEq }
+    }
     return { in: fetchByIdsIn }
   })
 
@@ -95,16 +105,97 @@ function createMockClient(
     from: vi.fn(() => ({
       select,
       update,
-      upsert,
       insert,
     })),
     rpc,
     _update: update,
-    _upsert: upsert,
     _insert: insert,
     _cacheIn: cacheIn,
     _rpc: rpc,
     _fetchByIdsIn: fetchByIdsIn,
+  }
+}
+
+// --- Phase 10: mock client where owner-scoped update matches zero rows
+//     and the verify-read shows a different claim owner. Used for
+//     stale-worker race tests. ---
+function createMockClientWithOwnershipMoved(
+  articles: MockArticleRow[],
+  takeoverOwner: string
+) {
+  // Update chain: .update(payload, { count: 'exact' }).eq('id').eq('embedding_claim_owner', owner)
+  //   returns { error: null, count: 0 } on every call
+  const ownerEq = vi.fn().mockResolvedValue({ error: null, count: 0 })
+  const idEq = vi.fn().mockReturnValue({ eq: ownerEq })
+  const update = vi.fn().mockReturnValue({ eq: idEq })
+
+  // Verify-read chain: .select('embedding_claim_owner').eq('id').maybeSingle()
+  //   returns the takeover owner, telling the helper "ownership moved"
+  const verifyMaybeSingle = vi.fn().mockResolvedValue({
+    data: { embedding_claim_owner: takeoverOwner },
+    error: null,
+  })
+  const verifyEq = vi.fn().mockReturnValue({ maybeSingle: verifyMaybeSingle })
+
+  // Claimed article fetch still needs to work for embedUnembeddedArticles.
+  const fetchByIdsIn = vi.fn((_col: string, ids: string[]) => {
+    const bySet = new Set(ids)
+    const rows = (articles ?? [])
+      .filter((a) => bySet.has(a.id))
+      .map((a) => ({
+        id: a.id,
+        title: a.title,
+        description: a.description,
+        title_fingerprint: a.title_fingerprint,
+        embedding_retry_count: a.embedding_retry_count ?? 0,
+      }))
+    return Promise.resolve({ data: rows, error: null })
+  })
+
+  // Cache lookup returns empty.
+  const cacheNot = vi.fn().mockResolvedValue({ data: [], error: null })
+  const cacheEq2 = vi.fn().mockReturnValue({ not: cacheNot })
+  const cacheIn = vi.fn().mockReturnValue({ eq: cacheEq2 })
+
+  const select = vi.fn((fields: string) => {
+    if (fields === 'embedding_claim_owner') {
+      return { eq: verifyEq }
+    }
+    if (fields === 'title_fingerprint, title, description, embedding') {
+      return { in: cacheIn }
+    }
+    if (
+      fields === 'id, title, description, title_fingerprint, embedding_retry_count'
+    ) {
+      return { in: fetchByIdsIn }
+    }
+    return { in: fetchByIdsIn }
+  })
+
+  const rpc = vi.fn(
+    (name: string, args: { p_owner?: string; p_limit?: number }) => {
+      if (name === 'claim_articles_for_embedding') {
+        const limit = args.p_limit ?? articles.length
+        return Promise.resolve({
+          data: articles.slice(0, limit).map((a) => a.id),
+          error: null,
+        })
+      }
+      if (name === 'release_embedding_claim') {
+        return Promise.resolve({ data: true, error: null })
+      }
+      return Promise.resolve({ data: null, error: null })
+    }
+  )
+
+  const insert = vi.fn().mockResolvedValue({ error: null })
+
+  return {
+    from: vi.fn(() => ({ select, update, insert })),
+    rpc,
+    _update: update,
+    _insert: insert,
+    _rpc: rpc,
   }
 }
 
@@ -140,17 +231,25 @@ describe('embedUnembeddedArticles', () => {
     expect(result.claimedArticles).toBe(2)
     expect(result.cacheHits).toBe(0)
     expect(result.errors).toEqual([])
-    // Writes are batched via upsert with the completion payload.
-    expect(client._upsert).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          embedding: [0.1, 0.2],
-          is_embedded: true,
-          embedding_claimed_at: null,
-          embedding_claim_owner: null,
-        }),
-      ]),
-      { onConflict: 'id' }
+    // Writes are owner-scoped per-row updates (no batch upsert — see
+    // Phase 10 claim-safety audit).
+    expect(client._update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embedding: [0.1, 0.2],
+        is_embedded: true,
+        embedding_claimed_at: null,
+        embedding_claim_owner: null,
+      }),
+      { count: 'exact' }
+    )
+    expect(client._update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        embedding: [0.3, 0.4],
+        is_embedded: true,
+        embedding_claimed_at: null,
+        embedding_claim_owner: null,
+      }),
+      { count: 'exact' }
     )
   })
 
@@ -242,7 +341,8 @@ describe('embedUnembeddedArticles', () => {
         embedding_last_error: 'provider unavailable',
         embedding_claimed_at: null,
         embedding_claim_owner: null,
-      })
+      }),
+      { count: 'exact' }
     )
   })
 
@@ -445,6 +545,70 @@ describe('embedUnembeddedArticles', () => {
           retryCount: 6,
           error: 'provider unavailable',
         }),
+      })
+    )
+  })
+
+  it('does NOT push DLQ when the failure update matches zero rows due to ownership move', async () => {
+    mockGenerateEmbeddingBatch.mockRejectedValue(new Error('provider unavailable'))
+
+    const articles: MockArticleRow[] = [
+      {
+        id: 'a1',
+        title: 'Title',
+        description: 'Desc',
+        title_fingerprint: null,
+        embedding_claimed_at: null,
+        embedding_retry_count: 5, // at budget — would normally exhaust + DLQ
+      },
+    ]
+    const client = createMockClientWithOwnershipMoved(articles, 'other-owner')
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+    await embedUnembeddedArticles(client as never, 1, 'stale-owner', emitter)
+
+    // DLQ push must NOT happen for an article no longer owned by us.
+    expect(client._insert).not.toHaveBeenCalledWith(
+      expect.objectContaining({ item_kind: 'article_embed' })
+    )
+    // Ownership-moved diagnostic emitted at info level.
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'embed',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: 'a1',
+      })
+    )
+  })
+
+  it('does NOT count a write as processed when ownership moved between claim and write', async () => {
+    mockGenerateEmbeddingBatch.mockResolvedValue([{ embedding: [0.1, 0.2] }] as never)
+
+    const articles: MockArticleRow[] = [
+      {
+        id: 'a1',
+        title: 'T',
+        description: 'D',
+        title_fingerprint: null,
+        embedding_claimed_at: null,
+      },
+    ]
+    const client = createMockClientWithOwnershipMoved(articles, 'other-owner')
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+    const result = await embedUnembeddedArticles(
+      client as never,
+      1,
+      'stale-owner',
+      emitter
+    )
+
+    expect(result.totalProcessed).toBe(0)
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'embed',
+        eventType: 'ownership_moved',
       })
     )
   })

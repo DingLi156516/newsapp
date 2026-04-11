@@ -545,6 +545,90 @@ describe('clusterArticles', () => {
     expect(client._dlqInserts).toEqual([])
   })
 
+  it('emits ownership_moved (not dlq_pushed) when apply_clustering_failure returns false at retry exhaustion', async () => {
+    // Phase 10 Codex Round 1 Fix 2: handleClusteringFailure must
+    // branch on the BOOLEAN return from apply_clustering_failure
+    // (migration 043). When the RPC returns false the owner-scoped
+    // UPDATE matched zero rows — the article's claim has been taken
+    // over by a different worker between the failure and this
+    // handler — so NO retry state was written and NO DLQ row was
+    // inserted. Emitting `dlq_pushed` here would be a lie; the
+    // handler must emit the canonical `ownership_moved` info event
+    // instead.
+    //
+    // The regression guard here is: article hits the failure path
+    // at the retry-count budget (5 for cluster) so the path WOULD
+    // normally be exhausted → DLQ, BUT the article is in
+    // staleOwnerArticleIds so the mock RPC returns false and
+    // nothing actually lands in the DLQ. The test asserts:
+    //   - _dlqInserts is empty for this article
+    //   - emitter received ownership_moved with phase: 'failure'
+    //   - emitter did NOT receive dlq_pushed for this article
+    const ownerSentinel = 'stale-worker-uuid'
+    const client = createMockClient(
+      [
+        {
+          id: 'exhausted-stale',
+          title: 'Would exhaust retry if the claim were still ours',
+          source_id: 's1',
+          embedding: [1, 0],
+          published_at: '2026-03-15T00:00:00Z',
+          created_at: '2026-03-15T00:00:00Z',
+          story_id: null,
+          image_url: null,
+          clustering_claimed_at: null,
+          clustering_attempts: 5,
+          // Seed retry count AT the cluster budget (5). The failure
+          // handler's computeRetryOutcome will bump this to 6 which
+          // is > 5 → exhausted=true → WOULD write a DLQ row if the
+          // RPC returned true. Staleness overrides this.
+          clustering_retry_count: 5,
+        },
+      ],
+      [],
+      {
+        failSingletonUpdate: true,
+        staleOwnerArticleIds: ['exhausted-stale'],
+      },
+    )
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+    await clusterArticles(client as never, 1000, ownerSentinel, emitter)
+
+    // No DLQ row actually landed (RPC returned false).
+    expect(client._dlqInserts.find((d) => d.item_id === 'exhausted-stale'))
+      .toBeUndefined()
+    // No retry state landed either (mock does not push to
+    // _appliedFailureCalls on the stale path).
+    expect(
+      client._appliedFailureCalls.find((c) => c.articleId === 'exhausted-stale')
+    ).toBeUndefined()
+
+    // Emitter received ownership_moved with phase: 'failure'.
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'cluster',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: 'exhausted-stale',
+        payload: expect.objectContaining({
+          phase: 'failure',
+          previousOwner: ownerSentinel,
+        }),
+      })
+    )
+
+    // Emitter did NOT receive dlq_pushed for this article.
+    const dlqEmits = emitter.mock.calls.filter(
+      ([evt]) =>
+        (evt as { eventType?: string; itemId?: string }).eventType ===
+          'dlq_pushed' &&
+        (evt as { eventType?: string; itemId?: string }).itemId ===
+          'exhausted-stale'
+    )
+    expect(dlqEmits).toEqual([])
+  })
+
   it('writes retry metadata (not a naive claim release) on per-cluster failure', async () => {
     // Phase 7b.7: the singleton promotion failure path delegates to
     // the atomic apply_clustering_failure RPC (migration 043) which
@@ -1512,5 +1596,255 @@ describe('clusterArticles', () => {
         }),
       })
     )
+  })
+
+  /* ------------------------------------------------------------------ */
+  /*  Phase 10 Task 5: owner-scoped write stale-worker races             */
+  /* ------------------------------------------------------------------ */
+  //
+  // These three tests verify that when a stale worker's clustering
+  // claim has been reassigned under it, every owner-scoped write site
+  // in clustering.ts routes the zero-match outcome as BENIGN
+  // ("ownership_moved" info event) rather than surfacing it as an
+  // error, promoting a singleton on a claim we no longer own, or
+  // burning retry budget via handleClusteringFailure.
+
+  it('persistPass1Assignments: stale worker skips articles whose ownership moved (Task 5A)', async () => {
+    // Scenario: worker A's TTL expired, worker B reclaimed the article
+    // under it, and worker A now tries to assign the article to the
+    // story matched by Pass 1. The owner-scoped bulk update matches
+    // zero rows; the verify read returns the takeover owner. The
+    // whole thing must be treated as benign — no error strings, no
+    // counted assignment, and an `ownership_moved` info event on the
+    // emitter with stage: 'cluster' and phase: 'assignment'.
+    const ownerSentinel = 'stale-worker-uuid'
+    const article = {
+      id: 'pass1-stale',
+      title: 'Will match an existing story',
+      source_id: 's1',
+      embedding: [1, 0],
+      published_at: '2026-03-15T00:00:00Z',
+      created_at: '2026-03-15T00:00:00Z',
+      story_id: null,
+      image_url: null,
+      clustering_claimed_at: null,
+      clustering_attempts: 0,
+    }
+    const existingStory = {
+      id: 'existing-story-stale',
+      cluster_centroid: [1, 0],
+      last_updated: new Date().toISOString(),
+    }
+
+    const client = createMockClient(
+      [article],
+      [existingStory],
+      {
+        // Pass 1 match via pgvector RPC.
+        rpcResults: [{ story_id: 'existing-story-stale', similarity: 0.99 }],
+        // Owner-scoped bulk UPDATE matches zero rows…
+        staleOwnerArticleIds: ['pass1-stale'],
+        // …and the verify read reports a different owner → ownership_moved.
+        verifyReadOwner: { 'pass1-stale': 'other-worker-uuid' },
+      },
+    )
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+    const result = await clusterArticles(
+      client as never,
+      1000,
+      ownerSentinel,
+      emitter,
+    )
+
+    // Ownership move is benign: no assignment counted, no error pushed.
+    expect(result.assignedArticles).toBe(0)
+    expect(
+      result.errors.filter((e) => e.includes('pass1-stale'))
+    ).toEqual([])
+
+    // Emitter saw exactly the ownership_moved event for Pass 1.
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'cluster',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: 'pass1-stale',
+        payload: expect.objectContaining({
+          phase: 'assignment',
+          previousOwner: ownerSentinel,
+        }),
+      })
+    )
+
+    // No retry metadata was written via the atomic failure RPC —
+    // benign ownership moves must NOT burn retry budget.
+    expect(
+      client._appliedFailureCalls.find((c) => c.articleId === 'pass1-stale')
+    ).toBeUndefined()
+  })
+
+  it('singleton release: stale worker handles zero-match silently (Task 5B)', async () => {
+    // Scenario: a singleton article under 3 clustering attempts hits
+    // the release path. The owner-scoped release update matches zero
+    // rows because another worker reclaimed the row; the verify read
+    // confirms a different owner. The release must be benign: no
+    // throw, no error pushed, no unmatchedSingletons increment, and
+    // an `ownership_moved` info event with phase: 'singleton_release'.
+    const ownerSentinel = 'stale-worker-uuid'
+    const article = {
+      id: 'release-stale',
+      title: 'Lonely article reclaimed under us',
+      source_id: 's1',
+      embedding: [1, 0],
+      published_at: '2026-03-15T00:00:00Z',
+      created_at: '2026-03-15T00:00:00Z',
+      story_id: null,
+      image_url: null,
+      clustering_claimed_at: null,
+      clustering_attempts: 0,
+    }
+
+    const client = createMockClient(
+      [article],
+      [],
+      {
+        staleOwnerArticleIds: ['release-stale'],
+        verifyReadOwner: { 'release-stale': 'other-worker-uuid' },
+      },
+    )
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+    const result = await clusterArticles(
+      client as never,
+      1000,
+      ownerSentinel,
+      emitter,
+    )
+
+    // Benign: no throw, no unmatched singleton counted, no error.
+    expect(result.unmatchedSingletons).toBe(0)
+    expect(result.errors).toEqual([])
+
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'cluster',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: 'release-stale',
+        payload: expect.objectContaining({
+          phase: 'singleton_release',
+          previousOwner: ownerSentinel,
+        }),
+      })
+    )
+
+    // No retry burn.
+    expect(
+      client._appliedFailureCalls.find((c) => c.articleId === 'release-stale')
+    ).toBeUndefined()
+  })
+
+  it('createStoryWithArticles returns ownership_moved (P0010): caller treats as benign (Task 5C)', async () => {
+    // Scenario: migration 045's owner-scoped create_story_with_articles
+    // RPC raises SQLSTATE P0010 because the owner-scoped UPDATE
+    // inside the function matched fewer rows than requested. This
+    // happens when another worker reclaimed one or more of our
+    // articles between the fetch and the transactional write. The
+    // wrapper converts this to { kind: 'ownership_moved' }. The
+    // clustering caller must emit an info event and NOT count the
+    // cluster as a new story, NOT promote, NOT push an error.
+    //
+    // Phase 10 Codex Round 1 Fix 1: this test uses P0010 (the
+    // dedicated owner-mismatch SQLSTATE) rather than P0001. The
+    // validation guards in migration 045 stay on P0001 so real
+    // caller bugs surface loudly; the wrapper in cluster-writes.ts
+    // only maps P0010 → ownership_moved.
+    const ownerSentinel = 'stale-worker-uuid'
+    const article = {
+      id: 'singleton-ownership-moved',
+      title: 'About to be promoted but claim moved',
+      source_id: 's1',
+      embedding: [1, 0],
+      published_at: '2026-03-15T00:00:00Z',
+      created_at: '2026-03-15T00:00:00Z',
+      story_id: null,
+      image_url: null,
+      clustering_claimed_at: null,
+      clustering_attempts: 2, // next attempt tips into promotion
+    }
+
+    const client = createMockClient([article], [], {})
+
+    // Override the RPC so create_story_with_articles returns the
+    // P0010 error that migration 045 raises on owner mismatch.
+    client.rpc = vi
+      .fn()
+      .mockImplementation((fn: string, params: Record<string, unknown>) => {
+        if (fn === 'claim_articles_for_clustering') {
+          return Promise.resolve({
+            data: [article.id],
+            error: null,
+          })
+        }
+        if (fn === 'match_story_centroid') {
+          return Promise.resolve({ data: [], error: null })
+        }
+        if (fn === 'create_story_with_articles') {
+          return Promise.resolve({
+            data: null,
+            error: {
+              code: 'P0010',
+              message:
+                'create_story_with_articles: owner-scoped UPDATE matched 0 of 1 articles',
+            },
+          })
+        }
+        if (fn === 'release_clustering_claim') {
+          return Promise.resolve({ data: true, error: null })
+        }
+        if (fn === 'apply_clustering_failure') {
+          return Promise.resolve({ data: true, error: null })
+        }
+        // Return the _rpcCalls tracker reference via the closure by
+        // re-invoking nothing; unknown RPCs default to empty success.
+        void params
+        return Promise.resolve({ data: null, error: null })
+      }) as typeof client.rpc
+
+    const emitter = vi.fn().mockResolvedValue(undefined)
+    const result = await clusterArticles(
+      client as never,
+      1000,
+      ownerSentinel,
+      emitter,
+    )
+
+    // Benign: no promotion, no new story, no assigned article, no
+    // error pushed for the ownership-moved path.
+    expect(result.promotedSingletons).toBe(0)
+    expect(result.newStories).toBe(0)
+    expect(result.assignedArticles).toBe(0)
+    expect(
+      result.errors.filter((e) => e.includes('singleton-ownership-moved'))
+    ).toEqual([])
+
+    expect(emitter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stage: 'cluster',
+        level: 'info',
+        eventType: 'ownership_moved',
+        itemId: 'singleton-ownership-moved',
+        payload: expect.objectContaining({
+          phase: 'singleton_promotion',
+          previousOwner: ownerSentinel,
+        }),
+      })
+    )
+
+    // No retry burn via the atomic failure RPC.
+    const applyCalls = (client.rpc as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c: unknown[]) => c[0] === 'apply_clustering_failure')
+    expect(applyCalls).toEqual([])
   })
 })
