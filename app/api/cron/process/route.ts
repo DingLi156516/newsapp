@@ -15,6 +15,7 @@ import { PipelineLogger } from '@/lib/pipeline/logger'
 import { countPipelineBacklog } from '@/lib/pipeline/backlog'
 import { runProcessPipeline } from '@/lib/pipeline/process-runner'
 import { generateClaimOwner } from '@/lib/pipeline/claim-utils'
+import { fetchRecentStageDurations, STAGE_BUDGETS } from '@/lib/pipeline/batch-tuner'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -51,6 +52,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       assemble: (maxStories) => assembleStories(client, maxStories, undefined, claimOwner, emitter),
       logStep: <T,>(step: string, fn: () => Promise<T>) =>
         logger.logStep(step, () => fn() as unknown as Promise<Record<string, unknown>>) as Promise<T>,
+      // Phase 13A — live batch tuning. Reads recent stage durations from
+      // `pipeline_runs.steps` for each of the three stages. Errors are
+      // swallowed inside runProcessPipeline (best-effort observability).
+      getStageDurations: async () => {
+        const [embed, cluster, assemble] = await Promise.all([
+          fetchRecentStageDurations(client, STAGE_BUDGETS.embed.stepPrefix),
+          fetchRecentStageDurations(client, STAGE_BUDGETS.cluster.stepPrefix),
+          fetchRecentStageDurations(client, STAGE_BUDGETS.assemble.stepPrefix),
+        ])
+        return { embed, cluster, assemble }
+      },
+      emitStageEvent: emitter,
     }, { timeBudgetMs: 280_000 })
     await logger.complete(summary as unknown as Record<string, unknown>)
 

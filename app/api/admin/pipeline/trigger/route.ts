@@ -18,6 +18,7 @@ import { countPipelineBacklog } from '@/lib/pipeline/backlog'
 import { runProcessPipeline } from '@/lib/pipeline/process-runner'
 import { toPerMinute } from '@/lib/pipeline/telemetry-utils'
 import { generateClaimOwner } from '@/lib/pipeline/claim-utils'
+import { fetchRecentStageDurations, STAGE_BUDGETS } from '@/lib/pipeline/batch-tuner'
 
 const triggerSchema = z.object({
   type: z.enum(['ingest', 'process', 'full']),
@@ -106,6 +107,16 @@ export async function POST(request: NextRequest) {
         assemble: (maxStories) => assembleStories(serviceClient, maxStories, undefined, claimOwner, emitter),
         logStep: <T,>(step: string, fn: () => Promise<T>) =>
           logger.logStep(step, () => fn() as unknown as Promise<Record<string, unknown>>) as Promise<T>,
+        // Phase 13A — live batch tuning (same semantics as the cron route).
+        getStageDurations: async () => {
+          const [embed, cluster, assemble] = await Promise.all([
+            fetchRecentStageDurations(serviceClient, STAGE_BUDGETS.embed.stepPrefix),
+            fetchRecentStageDurations(serviceClient, STAGE_BUDGETS.cluster.stepPrefix),
+            fetchRecentStageDurations(serviceClient, STAGE_BUDGETS.assemble.stepPrefix),
+          ])
+          return { embed, cluster, assemble }
+        },
+        emitStageEvent: emitter,
       })
       const summary = ingestSummary ? { ingest: ingestSummary, ...processSummary } : processSummary
       await logger.complete(summary as unknown as Record<string, unknown>)

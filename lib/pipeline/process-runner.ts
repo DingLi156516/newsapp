@@ -3,9 +3,33 @@ import type { ClusterResult } from '@/lib/ai/clustering'
 import type { AssemblyResult } from '@/lib/ai/story-assembler'
 import type { EmbeddingResult } from '@/lib/ai/embeddings'
 import { toPerMinute } from '@/lib/pipeline/telemetry-utils'
+import {
+  recommendBatchSize,
+  STAGE_BUDGETS,
+  type StageKind as TunerStageKind,
+  type StageRecommendation,
+} from '@/lib/pipeline/batch-tuner'
+import type { StageEventEmitter, StageEventInput } from '@/lib/pipeline/stage-events'
+import { safeEmit } from '@/lib/pipeline/stage-events'
 
 interface StepLogger {
   <T>(step: string, fn: () => Promise<T>): Promise<T>
+}
+
+/**
+ * Optional per-stage recent-duration provider, used by the Phase 13A
+ * batch tuner integration. The process runner calls this once at
+ * startup to seed the tuner for each stage; if omitted (legacy callers)
+ * each stage uses its static ceiling directly.
+ *
+ * Kept as an optional dependency so `process-runner.ts` stays pure and
+ * does not reach into the Supabase client itself — the concrete
+ * implementation lives in the cron route handlers.
+ */
+export interface StageDurationHistory {
+  readonly embed: number[]
+  readonly cluster: number[]
+  readonly assemble: number[]
 }
 
 export interface ProcessPipelineDependencies {
@@ -15,6 +39,19 @@ export interface ProcessPipelineDependencies {
   readonly assemble: (maxStories: number) => Promise<AssemblyResult>
   readonly logStep?: StepLogger
   readonly now?: () => number
+  /**
+   * Best-effort recent-duration fetcher for the Phase 13A batch tuner.
+   * Called once at the start of the run; if it throws or is omitted the
+   * tuner is skipped and each stage falls back to its static ceiling.
+   */
+  readonly getStageDurations?: () => Promise<StageDurationHistory>
+  /**
+   * Optional structured stage-event emitter, used to record
+   * `batch_tuner_recommendation` info events so operators can see the
+   * tuner's decisions in the /admin/pipeline Events panel without
+   * polluting `pipeline_runs.steps`.
+   */
+  readonly emitStageEvent?: StageEventEmitter
 }
 
 export interface ProcessPipelineOptions {
@@ -201,6 +238,110 @@ export async function runProcessPipeline(
     return fn()
   }
 
+  // -------------------------------------------------------------------------
+  // Phase 13A — adaptive batch sizing (tuner integration)
+  //
+  // Default each stage's effective batch to its static ceiling. When the
+  // caller supplies `getStageDurations`, ask the tuner for a recommendation
+  // per stage and use `min(recommendation, ceiling)` as the effective
+  // per-pass batch size. The ceiling from `resolved` always wins.
+  //
+  // Failure-tolerant: if the provider throws or the emitter rejects, the
+  // run continues with the static ceiling. Observability must never stall
+  // a pipeline run.
+  // -------------------------------------------------------------------------
+  let effectiveEmbedBatch = resolved.embedBatchSize
+  let effectiveClusterBatch = resolved.clusterBatchSize
+  let effectiveAssembleBatch = resolved.assembleBatchSize
+
+  if (deps.getStageDurations) {
+    try {
+      const history = await deps.getStageDurations()
+      const stagesToTune: ReadonlyArray<{
+        kind: TunerStageKind
+        ceiling: number
+        apply: (v: number) => void
+      }> = [
+        {
+          kind: 'embed',
+          ceiling: resolved.embedBatchSize,
+          apply: (v) => {
+            effectiveEmbedBatch = v
+          },
+        },
+        {
+          kind: 'cluster',
+          ceiling: resolved.clusterBatchSize,
+          apply: (v) => {
+            effectiveClusterBatch = v
+          },
+        },
+        {
+          kind: 'assemble',
+          ceiling: resolved.assembleBatchSize,
+          apply: (v) => {
+            effectiveAssembleBatch = v
+          },
+        },
+      ]
+
+      for (const stage of stagesToTune) {
+        const durations = history[stage.kind] ?? []
+        let recommendation: StageRecommendation
+        try {
+          recommendation = recommendBatchSize(
+            stage.kind,
+            durations,
+            stage.ceiling,
+            STAGE_BUDGETS[stage.kind]
+          )
+        } catch (err) {
+          // Never fail the run on a tuner bug — keep static ceiling.
+          console.warn(
+            `[process-runner] batch-tuner threw for ${stage.kind}: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          )
+          continue
+        }
+
+        // Hard-cap at the caller's ceiling. The tuner's own ceiling lives
+        // in STAGE_BUDGETS and is typically larger than what the caller
+        // passes in, so we must re-clamp here.
+        const effective = Math.min(recommendation.recommendedBatch, stage.ceiling)
+        stage.apply(effective)
+
+        if (deps.emitStageEvent) {
+          const event: StageEventInput = {
+            stage: stage.kind,
+            level: 'info',
+            eventType: 'batch_tuner_recommendation',
+            payload: {
+              stage: stage.kind,
+              ema: recommendation.emaMs,
+              reason: recommendation.reason,
+              recommendedBatch: effective,
+              ceiling: stage.ceiling,
+              historyCount: durations.length,
+            },
+          }
+          // Fire and forget — safeEmit never throws even if the underlying
+          // emitter rejects. We intentionally do not await in parallel
+          // because stage events are very small and best-effort.
+          await safeEmit(deps.emitStageEvent, event)
+        }
+      }
+    } catch (err) {
+      // Provider failure (e.g. Supabase outage): log once and continue
+      // with the static ceilings already set above.
+      console.warn(
+        `[process-runner] getStageDurations failed, using static ceilings: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      )
+    }
+  }
+
   const backlogBefore = await deps.countBacklog()
 
   const embeddings: MutableEmbeddingSummary = {
@@ -267,7 +408,7 @@ export async function runProcessPipeline(
       now,
       embeddings,
       `embed_pass_${embeddings.passes}`,
-      () => deps.embed(Math.min(resolved.embedBatchSize, resolved.embedTarget - embeddings.totalProcessed))
+      () => deps.embed(Math.min(effectiveEmbedBatch, resolved.embedTarget - embeddings.totalProcessed))
     )
     embeddings.totalProcessed += result.totalProcessed
     embeddings.claimedArticles += result.claimedArticles
@@ -293,7 +434,7 @@ export async function runProcessPipeline(
       now,
       clustering,
       `cluster_pass_${clustering.passes}`,
-      () => deps.cluster(Math.min(resolved.clusterBatchSize, resolved.clusterTarget - clustering.assignedArticles))
+      () => deps.cluster(Math.min(effectiveClusterBatch, resolved.clusterTarget - clustering.assignedArticles))
     )
     clustering.newStories += result.newStories
     clustering.updatedStories += result.updatedStories
@@ -329,7 +470,7 @@ export async function runProcessPipeline(
       now,
       assembly,
       `assemble_pass_${assembly.passes}`,
-      () => deps.assemble(Math.min(resolved.assembleBatchSize, resolved.assembleTarget - assembly.storiesProcessed))
+      () => deps.assemble(Math.min(effectiveAssembleBatch, resolved.assembleTarget - assembly.storiesProcessed))
     )
     assembly.storiesProcessed += result.storiesProcessed
     assembly.claimedStories += result.claimedStories
