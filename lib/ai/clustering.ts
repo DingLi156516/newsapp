@@ -62,8 +62,8 @@ interface EmbeddedArticleRow {
   image_url: string | null
   clustering_attempts: number
   // Joined from sources(factuality). May be null if the source row is
-  // missing or the source has no rating yet; weighted-centroid code
-  // treats null as "use equal weight" per combinedWeight fallback logic.
+  // missing or the source has no rating yet; when null, the article
+  // receives weight 1 (equal weight), not a combinedWeight call.
   sources: { factuality: FactualityLevel | null } | null
 }
 
@@ -948,9 +948,9 @@ export async function recomputeStoryCentroid(
     // Pull factuality + published_at alongside embedding so the
     // recomputed centroid is biased by the same factuality × time-decay
     // weight formula used by the pass-2 validation centroid. Rows where
-    // factuality is missing (join miss, legacy data) fall back to
-    // equal-weight via `combinedWeight(..., publishedAt, now)` with the
-    // mixed default — see the helper in centroid-weights.ts.
+    // factuality is null (join miss, legacy data) receive weight 1
+    // (equal weight) — the combinedWeight helper is only called when
+    // factuality is a valid FactualityLevel string.
     const { data: allArticles, error: selectError } = await client
       .from('articles')
       .select('embedding, published_at, sources(factuality)')
