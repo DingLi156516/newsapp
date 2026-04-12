@@ -61,6 +61,49 @@ describe('computeCentroid', () => {
     expect(result[1]).toBeCloseTo(1 / 3)
     expect(result[2]).toBeCloseTo(1 / 3)
   })
+
+  it('pulls centroid toward heavier-weighted vector', () => {
+    // weights [3, 1]: (3·[1,0] + 1·[0,1]) / (3+1) = [0.75, 0.25]
+    const vectors = [
+      [1, 0],
+      [0, 1],
+    ]
+    const weights = [3, 1]
+    const result = computeCentroid(vectors, weights)
+    expect(result[0]).toBeCloseTo(0.75)
+    expect(result[1]).toBeCloseTo(0.25)
+  })
+
+  it('produces identical results to the equal-weight path when weights=undefined', () => {
+    // Regression: back-compat for callers that never pass weights.
+    const vectors = [
+      [2, 4, 6],
+      [4, 6, 8],
+      [6, 8, 10],
+    ]
+    const equalWeight = computeCentroid(vectors)
+    const explicitOnes = computeCentroid(vectors, [1, 1, 1])
+    expect(equalWeight).toEqual([4, 6, 8])
+    for (let i = 0; i < equalWeight.length; i++) {
+      expect(explicitOnes[i]).toBeCloseTo(equalWeight[i])
+    }
+  })
+
+  it('handles fractional weights', () => {
+    // (0.5·[2,0] + 1.5·[0,2]) / (0.5 + 1.5) = ([1,0] + [0,3]) / 2 = [0.5, 1.5]
+    const vectors = [
+      [2, 0],
+      [0, 2],
+    ]
+    const weights = [0.5, 1.5]
+    const result = computeCentroid(vectors, weights)
+    expect(result[0]).toBeCloseTo(0.5)
+    expect(result[1]).toBeCloseTo(1.5)
+  })
+
+  it('returns empty array when weights are provided for empty input', () => {
+    expect(computeCentroid([], [])).toEqual([])
+  })
 })
 
 /* ------------------------------------------------------------------ */
@@ -157,6 +200,54 @@ describe('clusterUnmatchedArticles', () => {
 
   it('returns empty array for empty input', () => {
     expect(clusterUnmatchedArticles([], 0.72)).toEqual([])
+  })
+
+  it('populates ClusterCandidate.weights using factuality × time-decay when articles carry metadata', () => {
+    // Three articles in one tight cluster (all similar). One very-high
+    // factuality published now, two very-low factuality published 24h ago.
+    // Expected per-article weights via combinedWeight:
+    //   very-high × now        = 1.5 × 1.0   = 1.5
+    //   very-low × 24h ago     = 0.5 × 0.5   = 0.25
+    //   very-low × 24h ago     = 0.5 × 0.5   = 0.25
+    const now = new Date('2026-04-11T12:00:00Z')
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+    const current = now.toISOString()
+
+    const articles: ClusterableArticle[] = [
+      { id: 'hi', embedding: [1, 0], image_url: null, factuality: 'very-high', published_at: current },
+      { id: 'lo1', embedding: [0.99, 0.14], image_url: null, factuality: 'very-low', published_at: yesterday },
+      { id: 'lo2', embedding: [0.98, 0.20], image_url: null, factuality: 'very-low', published_at: yesterday },
+    ]
+
+    const clusters = clusterUnmatchedArticles(articles, 0.72, now)
+    expect(clusters).toHaveLength(1)
+    const cluster = clusters[0]
+    expect(cluster.articleIds.sort()).toEqual(['hi', 'lo1', 'lo2'])
+    expect(cluster.weights).toBeDefined()
+    expect(cluster.weights).toHaveLength(3)
+
+    // Build {id → weight} map so we compare by id, not by cluster-member order.
+    const weightById = new Map<string, number>()
+    cluster.articleIds.forEach((id, idx) => {
+      weightById.set(id, cluster.weights![idx])
+    })
+
+    expect(weightById.get('hi')).toBeCloseTo(1.5, 5)
+    expect(weightById.get('lo1')).toBeCloseTo(0.25, 5)
+    expect(weightById.get('lo2')).toBeCloseTo(0.25, 5)
+  })
+
+  it('leaves ClusterCandidate.weights undefined when articles carry no factuality metadata (back-compat)', () => {
+    // No factuality/published_at — clusterUnmatchedArticles should behave
+    // exactly as before: no weights attached to the candidate.
+    const articles = [
+      makeArticle('a', [1, 0]),
+      makeArticle('b', [0.99, 0.14]),
+    ]
+
+    const clusters = clusterUnmatchedArticles(articles, 0.72)
+    expect(clusters).toHaveLength(1)
+    expect(clusters[0].weights).toBeUndefined()
   })
 })
 

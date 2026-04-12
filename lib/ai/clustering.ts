@@ -14,6 +14,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
+import type { FactualityLevel } from '@/lib/types'
+import { combinedWeight } from '@/lib/ai/centroid-weights'
 import {
   claimClusteringBatch,
   generateClaimOwner,
@@ -59,6 +61,10 @@ interface EmbeddedArticleRow {
   story_id: string | null
   image_url: string | null
   clustering_attempts: number
+  // Joined from sources(factuality). May be null if the source row is
+  // missing or the source has no rating yet; weighted-centroid code
+  // treats null as "use equal weight" per combinedWeight fallback logic.
+  sources: { factuality: FactualityLevel | null } | null
 }
 
 interface EmbeddedArticle {
@@ -71,6 +77,13 @@ interface EmbeddedArticle {
   story_id: string | null
   image_url: string | null
   clustering_attempts: number
+  // Flattened from the sources(factuality) join in
+  // `fetchClaimedClusterRows`. Optional so older test fixtures that
+  // construct `EmbeddedArticle` literals without a sources join still
+  // typecheck; production rows always populate this via the mapper.
+  // A missing value here is equivalent to `null` for centroid weighting
+  // (treated as "use equal weight").
+  factuality?: FactualityLevel | null
 }
 
 interface StoryWithCentroidRow {
@@ -93,6 +106,13 @@ interface StoryTracker {
 interface ClusterCandidate {
   articleIds: string[]
   embeddings: number[][]
+  /**
+   * Per-article weights aligned to `embeddings`. Present when the cluster
+   * was built from articles carrying factuality + published_at metadata.
+   * `undefined` means equal-weight (back-compat for callers without
+   * metadata, e.g. tests and legacy code paths).
+   */
+  weights?: number[]
   imageUrl: string | null
 }
 
@@ -100,6 +120,14 @@ export interface ClusterableArticle {
   readonly id: string
   readonly embedding: number[]
   readonly image_url: string | null
+  /**
+   * Optional source factuality. When present together with `published_at`,
+   * `clusterUnmatchedArticles` computes per-article centroid weights so
+   * high-factuality and recent articles pull the centroid more strongly.
+   * Omitting these keeps the original equal-weight behavior.
+   */
+  readonly factuality?: FactualityLevel | null
+  readonly published_at?: string
 }
 
 export interface ClusterResult {
@@ -138,20 +166,68 @@ function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
   return dot / denom
 }
 
-function computeCentroid(vectors: readonly (readonly number[])[]): number[] {
+/**
+ * Element-wise centroid of a set of vectors.
+ *
+ * When `weights` is omitted (or all weights are equal), every vector
+ * contributes equally — matching the original equal-weight behavior so
+ * existing callers are preserved unchanged.
+ *
+ * When `weights` is provided, the centroid becomes a weighted average:
+ *   centroid[i] = Σ (w_k · v_k[i]) / Σ w_k
+ *
+ * Used by the clustering pipeline with weights = factuality × time-decay
+ * so high-factuality and recent articles pull the centroid toward their
+ * embedding more than low-factuality or stale ones. See
+ * `lib/ai/centroid-weights.ts` for the weight formula and constants.
+ *
+ * Weights must be non-negative and the same length as `vectors`. If the
+ * total weight sum is zero (e.g. caller passed all-zero weights for a
+ * degenerate input), the function falls back to the equal-weight path so
+ * it never divides by zero.
+ */
+function computeCentroid(
+  vectors: readonly (readonly number[])[],
+  weights?: readonly number[],
+): number[] {
   if (vectors.length === 0) return []
 
   const dim = vectors[0].length
   const centroid = new Array<number>(dim).fill(0)
 
-  for (const vec of vectors) {
+  if (weights === undefined) {
+    for (const vec of vectors) {
+      for (let i = 0; i < dim; i++) {
+        centroid[i] += vec[i]
+      }
+    }
+
     for (let i = 0; i < dim; i++) {
-      centroid[i] += vec[i]
+      centroid[i] /= vectors.length
+    }
+
+    return centroid
+  }
+
+  let totalWeight = 0
+  for (let k = 0; k < vectors.length; k++) {
+    const w = weights[k] ?? 0
+    totalWeight += w
+    const vec = vectors[k]
+    for (let i = 0; i < dim; i++) {
+      centroid[i] += w * vec[i]
     }
   }
 
+  if (totalWeight === 0) {
+    // Degenerate weights (e.g. all zero) — fall back to equal weighting so
+    // we never produce NaN. Callers should avoid this but defense-in-depth
+    // matters for a pipeline helper.
+    return computeCentroid(vectors)
+  }
+
   for (let i = 0; i < dim; i++) {
-    centroid[i] /= vectors.length
+    centroid[i] /= totalWeight
   }
 
   return centroid
@@ -503,7 +579,12 @@ async function fetchClaimedClusterRows(
   const fetchStartedAt = Date.now()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const query = (client.from('articles') as any)
-    .select('id, title, source_id, embedding, published_at, created_at, story_id, image_url, clustering_attempts')
+    // `sources(factuality)` is a PostgREST foreign-table embed on the
+    // existing articles.source_id FK. The extra column is tiny and the
+    // join is indexed, so cost is negligible for the 200-row batch we
+    // pull each pass. Consumed by `clusterUnmatchedArticles` to weight
+    // the centroid by source factuality × publication time.
+    .select('id, title, source_id, embedding, published_at, created_at, story_id, image_url, clustering_attempts, sources(factuality)')
 
   const withFilter = typeof query.in === 'function' ? query.in('id', claimedIds) : query
   const { data: fetchedData, error: fetchError } = await withFilter
@@ -523,6 +604,10 @@ async function fetchClaimedClusterRows(
     .map((row: EmbeddedArticleRow) => ({
       ...row,
       embedding: parseVector(row.embedding),
+      // Flatten sources(factuality) into a top-level column so the
+      // downstream ClusterableArticle shape resolves without extra
+      // plumbing through `interleaveBySource`/`matchAgainstExistingStories`.
+      factuality: row.sources?.factuality ?? null,
     }))
 
   // Round-robin interleave by source_id for downstream diversity.
@@ -674,10 +759,20 @@ async function matchAgainstExistingStories(
  * 3. Union-find: merge pairs from highest to lowest similarity
  * 4. Centroid validation: eject members below threshold (prevents chaining)
  * 5. Return ClusterCandidate[] — deterministic regardless of input order
+ *
+ * When at least one article in the input carries `factuality` metadata, the
+ * validation centroid is weighted via `combinedWeight(factuality, published_at,
+ * now)` so high-factuality and recent articles pull the centroid toward their
+ * embedding. The resulting `ClusterCandidate.weights` is also populated so
+ * downstream centroid recomputations (e.g. duplicate detection) can reuse the
+ * same weighting. When no article carries factuality, behavior is identical
+ * to the pre-weighted implementation: `weights` stays undefined and
+ * `computeCentroid` takes the equal-weight path.
  */
 function clusterUnmatchedArticles(
   articles: readonly ClusterableArticle[],
-  threshold: number
+  threshold: number,
+  now: Date = new Date()
 ): ClusterCandidate[] {
   // Cap the O(n²) window. Union-find is O(α(n)) but the pair-generation
   // step is strictly quadratic; above ~1000 items the time dominates a 60s
@@ -688,6 +783,22 @@ function clusterUnmatchedArticles(
     : articles
   const excess = articles.length > UNMATCHED_CLUSTER_CAP
     ? articles.slice(UNMATCHED_CLUSTER_CAP)
+    : []
+
+  // Weighted centroid mode is opt-in per batch: if at least one article
+  // carries factuality metadata we compute weights for every article in
+  // `bounded` and propagate them through the ClusterCandidate. Otherwise
+  // we leave weights undefined so the equal-weight path runs unchanged.
+  const hasFactualityMetadata = bounded.some((a) => a.factuality != null)
+  const weightFor = (article: ClusterableArticle): number => {
+    if (article.factuality == null) return 1
+    const publishedAt = article.published_at
+      ? new Date(article.published_at)
+      : now
+    return combinedWeight(article.factuality, publishedAt, now)
+  }
+  const perArticleWeights: number[] = hasFactualityMetadata
+    ? bounded.map(weightFor)
     : []
 
   const n = bounded.length
@@ -769,7 +880,10 @@ function clusterUnmatchedArticles(
     }
 
     const embeddings = members.map((i) => bounded[i].embedding)
-    const centroid = computeCentroid(embeddings)
+    const memberWeights = hasFactualityMetadata
+      ? members.map((i) => perArticleWeights[i])
+      : undefined
+    const centroid = computeCentroid(embeddings, memberWeights)
 
     const valid: number[] = []
     const ejected: number[] = []
@@ -787,6 +901,9 @@ function clusterUnmatchedArticles(
       clusters.push({
         articleIds: valid.map((i) => bounded[i].id),
         embeddings: valid.map((i) => bounded[i].embedding),
+        weights: hasFactualityMetadata
+          ? valid.map((i) => perArticleWeights[i])
+          : undefined,
         imageUrl: valid.map((i) => bounded[i].image_url).find((u) => u !== null) ?? null,
       })
     }
@@ -828,12 +945,24 @@ export async function recomputeStoryCentroid(
   const startedAt = Date.now()
 
   try {
+    // Pull factuality + published_at alongside embedding so the
+    // recomputed centroid is biased by the same factuality × time-decay
+    // weight formula used by the pass-2 validation centroid. Rows where
+    // factuality is missing (join miss, legacy data) fall back to
+    // equal-weight via `combinedWeight(..., publishedAt, now)` with the
+    // mixed default — see the helper in centroid-weights.ts.
     const { data: allArticles, error: selectError } = await client
       .from('articles')
-      .select('embedding')
+      .select('embedding, published_at, sources(factuality)')
       .eq('story_id', storyId)
       .not('embedding', 'is', null)
-      .returns<{ embedding: string | number[] }[]>()
+      .returns<
+        {
+          embedding: string | number[]
+          published_at: string | null
+          sources: { factuality: FactualityLevel | null } | null
+        }[]
+      >()
 
     if (selectError) {
       errors.push(
@@ -846,8 +975,18 @@ export async function recomputeStoryCentroid(
       return Date.now() - startedAt
     }
 
+    const now = new Date()
+    const hasAnyFactuality = allArticles.some((a) => a.sources?.factuality != null)
     const embeddings = allArticles.map((a) => parseVector(a.embedding))
-    const newCentroid = computeCentroid(embeddings)
+    const weights = hasAnyFactuality
+      ? allArticles.map((a) => {
+          const factuality = a.sources?.factuality
+          if (factuality == null) return 1
+          const publishedAt = a.published_at ? new Date(a.published_at) : now
+          return combinedWeight(factuality, publishedAt, now)
+        })
+      : undefined
+    const newCentroid = computeCentroid(embeddings, weights)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error: updateError, count } = await (client.from('stories') as any)
       .update({ cluster_centroid: newCentroid }, { count: 'exact' })
@@ -1134,7 +1273,12 @@ async function persistNewClusters(
     }
 
     /* --- Multi-article cluster handling --- */
-    const centroid = computeCentroid(cluster.embeddings)
+    // Reuse the weights attached by `clusterUnmatchedArticles` so the
+    // duplicate-detection centroid is biased by the same factuality ×
+    // time-decay formula as the validation centroid. When no weights
+    // were attached (back-compat / metadata-less callers), this is the
+    // equal-weight path.
+    const centroid = computeCentroid(cluster.embeddings, cluster.weights)
 
     // Check for duplicate story in storyMap
     let duplicateStoryId: string | null = null
