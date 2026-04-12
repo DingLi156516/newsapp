@@ -9,13 +9,14 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Save, X, ExternalLink, Rss, RefreshCw, AlertTriangle } from 'lucide-react'
 import { useUpdateSource } from '@/lib/hooks/use-admin-sources'
-import { BIAS_LABELS, FACTUALITY_LABELS, OWNERSHIP_LABELS, REGION_LABELS } from '@/lib/types'
-import type { BiasCategory, FactualityLevel, OwnershipType, Region } from '@/lib/types'
+import { BIAS_LABELS, FACTUALITY_LABELS, OWNERSHIP_LABELS, REGION_LABELS, OWNER_TYPE_LABELS } from '@/lib/types'
+import type { BiasCategory, FactualityLevel, OwnershipType, Region, MediaOwner } from '@/lib/types'
 import type { DbSource, SourceType } from '@/lib/supabase/types'
 
 interface Props {
   readonly source: DbSource | null
   readonly onUpdated: (updated: DbSource) => void
+  readonly owners?: readonly MediaOwner[]
 }
 
 const BIASES: BiasCategory[] = ['far-left', 'left', 'lean-left', 'center', 'lean-right', 'right', 'far-right']
@@ -34,6 +35,7 @@ interface FormState {
   region: Region
   is_active: boolean
   bias_override: boolean
+  owner_id: string | null
 }
 
 function sourceToForm(source: DbSource): FormState {
@@ -48,10 +50,13 @@ function sourceToForm(source: DbSource): FormState {
     region: source.region,
     is_active: source.is_active,
     bias_override: source.bias_override,
+    owner_id: source.owner_id,
   }
 }
 
-export function AdminSourceDetail({ source, onUpdated }: Props) {
+const STALENESS_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000
+
+export function AdminSourceDetail({ source, onUpdated, owners = [] }: Props) {
   const [isEditing, setIsEditing] = useState(false)
   const [form, setForm] = useState<FormState | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -97,6 +102,7 @@ export function AdminSourceDetail({ source, onUpdated }: Props) {
     if (form.region !== source.region) changes.region = form.region
     if (form.is_active !== source.is_active) changes.is_active = form.is_active
     if (form.bias_override !== source.bias_override) changes.bias_override = form.bias_override
+    if (form.owner_id !== source.owner_id) changes.owner_id = form.owner_id
 
     if ((changes.bias !== undefined || changes.factuality !== undefined) && changes.bias_override === undefined) {
       changes.bias_override = form.bias_override
@@ -259,6 +265,57 @@ export function AdminSourceDetail({ source, onUpdated }: Props) {
           {!isEditing && source.bias_override && (
             <p className="text-[10px] text-amber-400/70">Manual override active — sync skips effective ratings</p>
           )}
+        </div>
+
+        {/* Media Owner */}
+        <div className="bg-white/5 rounded-lg p-3 space-y-2">
+          <h3 className="text-xs font-semibold text-white/60 uppercase tracking-wide">Media Owner</h3>
+          {isEditing ? (
+            <FormField label="Media Owner">
+              <select
+                aria-label="Media Owner"
+                value={form?.owner_id ?? ''}
+                onChange={(e) => updateField('owner_id', e.target.value || null)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-white/20"
+              >
+                <option value="">No owner</option>
+                {owners.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name} ({OWNER_TYPE_LABELS[o.ownerType]})
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          ) : (() => {
+            const currentOwner = source.owner_id
+              ? owners.find((o) => o.id === source.owner_id)
+              : null
+            if (!currentOwner) {
+              return <p className="text-sm text-white/30">No owner assigned</p>
+            }
+            const isStale = Date.now() - new Date(currentOwner.ownerVerifiedAt).getTime() > STALENESS_THRESHOLD_MS
+            return (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-white/80">{currentOwner.name}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/50">
+                    {OWNER_TYPE_LABELS[currentOwner.ownerType]}
+                  </span>
+                  {currentOwner.country && (
+                    <span className="text-[10px] text-white/30">{currentOwner.country}</span>
+                  )}
+                </div>
+                {isStale && (
+                  <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2">
+                    <AlertTriangle size={14} className="text-amber-400 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-amber-300/90">
+                      Ownership data may be stale — last verified {new Date(currentOwner.ownerVerifiedAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
 
         {/* Form fields */}

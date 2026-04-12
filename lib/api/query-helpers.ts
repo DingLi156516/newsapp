@@ -49,6 +49,19 @@ interface SourceRow {
   is_active: boolean
   created_at: string
   updated_at: string
+  owner_id?: string | null
+}
+
+interface OwnerRow {
+  id: string
+  name: string
+  slug: string
+  owner_type: string
+  is_individual: boolean
+  country: string | null
+  wikidata_qid: string | null
+  owner_source: string
+  owner_verified_at: string
 }
 
 interface SourceStoryJoinRow {
@@ -335,7 +348,7 @@ interface ArticleSourceJoin {
 export async function querySourcesForStory(
   client: SupabaseClient<Database>,
   storyId: string
-): Promise<{ sources: SourceRow[]; articleUrlMap: Map<string, string> }> {
+): Promise<{ sources: SourceRow[]; articleUrlMap: Map<string, string>; ownerMap: Map<string, OwnerRow> }> {
   // Get source IDs and article URLs from articles
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: articles, error: articleError } = await (client.from('articles') as any)
@@ -348,7 +361,7 @@ export async function querySourcesForStory(
     throw new Error(`Failed to fetch articles: ${articleError.message}`)
   }
 
-  if (!articles || articles.length === 0) return { sources: [], articleUrlMap: new Map() }
+  if (!articles || articles.length === 0) return { sources: [], articleUrlMap: new Map(), ownerMap: new Map() }
 
   // Build map of source_id → first article URL
   const articleUrlMap = new Map<string, string>()
@@ -362,14 +375,35 @@ export async function querySourcesForStory(
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: sources, error: sourceError } = await (client.from('sources') as any)
-    .select('id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, created_at, updated_at')
+    .select('id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, created_at, updated_at, owner_id')
     .in('id', sourceIds)
 
   if (sourceError) {
     throw new Error(`Failed to fetch sources: ${sourceError.message}`)
   }
 
-  return { sources: sources ?? [], articleUrlMap }
+  const sourceRows = (sources ?? []) as SourceRow[]
+
+  // Batch-fetch owners for non-null owner_ids
+  const ownerMap = new Map<string, OwnerRow>()
+  const ownerIds = [...new Set(sourceRows.map((s) => s.owner_id).filter((id): id is string => id != null))]
+
+  if (ownerIds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: owners, error: ownerError } = await (client.from('media_owners') as any)
+      .select('id, name, slug, owner_type, is_individual, country, wikidata_qid, owner_source, owner_verified_at')
+      .in('id', ownerIds)
+
+    if (ownerError) {
+      console.error(`[querySourcesForStory] Owner fetch failed for story ${storyId}:`, ownerError.message)
+    } else if (owners) {
+      for (const o of owners as OwnerRow[]) {
+        ownerMap.set(o.id, o)
+      }
+    }
+  }
+
+  return { sources: sourceRows, articleUrlMap, ownerMap }
 }
 
 export async function queryRecentStoriesForSource(

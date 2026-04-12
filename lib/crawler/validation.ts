@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod'
-import { validatePublicUrl } from '@/lib/rss/discover'
+import { validatePublicUrl } from '@/lib/rss/url-validation'
 
 function isPublicCrawlerUrl(val: string): boolean {
   try {

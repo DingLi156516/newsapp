@@ -18,9 +18,9 @@
  */
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronDown, ExternalLink } from 'lucide-react'
+import { ChevronDown, ExternalLink, Building2, User } from 'lucide-react'
 import type { NewsSource } from '@/lib/types'
 import { OWNERSHIP_LABELS } from '@/lib/types'
 import { BiasTag } from '@/components/atoms/BiasTag'
@@ -49,6 +49,26 @@ export function SourceList({
   const visibleSources = showAll ? sources : sources.slice(0, maxVisible)
   // How many sources are hidden behind the "Show more" button.
   const hiddenCount = sources.length - maxVisible
+
+  // Group sources by owner to show "N from {owner}" indicators
+  const ownerGroups = useMemo(() => {
+    const groups = new Map<string, { name: string; isIndividual: boolean; count: number }>()
+    for (const source of sources) {
+      if (!source.owner) continue
+      const existing = groups.get(source.owner.id)
+      if (existing) {
+        groups.set(source.owner.id, { ...existing, count: existing.count + 1 })
+      } else {
+        groups.set(source.owner.id, {
+          name: source.owner.name,
+          isIndividual: source.owner.isIndividual,
+          count: 1,
+        })
+      }
+    }
+    // Only return groups with 2+ sources
+    return [...groups.values()].filter((g) => g.count >= 2)
+  }, [sources])
 
   return (
     <div className="glass-sm overflow-hidden">
@@ -120,6 +140,21 @@ export function SourceList({
                 </li>
               ))}
             </ul>
+
+            {/* Same-owner indicators */}
+            {ownerGroups.length > 0 && (
+              <div className="px-4 pb-2 space-y-1">
+                {ownerGroups.map((group) => (
+                  <div
+                    key={group.name}
+                    className="flex items-center gap-1.5 text-xs text-white/50 hidden sm:flex"
+                  >
+                    {group.isIndividual ? <User size={12} /> : <Building2 size={12} />}
+                    <span>{group.count} from {group.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* "Show N more sources" button — only visible if there are hidden sources */}
             {hiddenCount > 0 && !showAll && (

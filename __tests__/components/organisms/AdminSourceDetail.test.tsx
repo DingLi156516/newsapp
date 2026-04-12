@@ -40,6 +40,7 @@ function makeSource(overrides: Partial<DbSource> = {}): DbSource {
     bias_sources_synced_at: '2026-04-01T00:00:00Z',
     source_type: 'rss',
     ingestion_config: {},
+    owner_id: null,
     cooldown_until: null,
     auto_disabled_at: null,
     auto_disabled_reason: null,
@@ -140,6 +141,92 @@ describe('AdminSourceDetail', () => {
 
       // Warning should disappear reactively
       expect(screen.queryByText(/no bias providers currently match/i)).not.toBeInTheDocument()
+    })
+  })
+
+  // -----------------------------------------------------------------------
+  // Phase 9B — Media Owner section
+  // -----------------------------------------------------------------------
+
+  describe('media owner section', () => {
+    it('shows owner name when source has owner', () => {
+      const source = makeSource({
+        owner_id: 'owner-1',
+      })
+
+      render(<AdminSourceDetail source={source} onUpdated={vi.fn()} owners={[
+        { id: 'owner-1', name: 'Fox Corporation', slug: 'fox-corporation', ownerType: 'public_company', isIndividual: false, country: 'United States', wikidataQid: null, ownerSource: 'wikidata', ownerVerifiedAt: '2026-04-01T00:00:00Z' },
+      ]} />)
+
+      expect(screen.getByText('Fox Corporation')).toBeInTheDocument()
+      expect(screen.getByText('Public Company')).toBeInTheDocument()
+    })
+
+    it('shows "No owner assigned" when owner_id is null', () => {
+      const source = makeSource({ owner_id: null })
+
+      render(<AdminSourceDetail source={source} onUpdated={vi.fn()} />)
+
+      expect(screen.getByText('No owner assigned')).toBeInTheDocument()
+    })
+
+    it('shows staleness warning when owner_verified_at > 90 days ago', () => {
+      const ninetyOneDaysAgo = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString()
+      const source = makeSource({ owner_id: 'owner-1' })
+
+      render(<AdminSourceDetail source={source} onUpdated={vi.fn()} owners={[
+        { id: 'owner-1', name: 'Fox Corporation', slug: 'fox-corporation', ownerType: 'public_company', isIndividual: false, country: 'United States', wikidataQid: null, ownerSource: 'wikidata', ownerVerifiedAt: ninetyOneDaysAgo },
+      ]} />)
+
+      expect(screen.getByText(/ownership data may be stale/i)).toBeInTheDocument()
+    })
+
+    it('does not show staleness warning when recently verified', () => {
+      const source = makeSource({ owner_id: 'owner-1' })
+
+      render(<AdminSourceDetail source={source} onUpdated={vi.fn()} owners={[
+        { id: 'owner-1', name: 'Fox Corporation', slug: 'fox-corporation', ownerType: 'public_company', isIndividual: false, country: 'United States', wikidataQid: null, ownerSource: 'wikidata', ownerVerifiedAt: new Date().toISOString() },
+      ]} />)
+
+      expect(screen.queryByText(/ownership data may be stale/i)).not.toBeInTheDocument()
+    })
+
+    it('shows owner dropdown in edit mode', () => {
+      const source = makeSource({ owner_id: null })
+
+      render(<AdminSourceDetail source={source} onUpdated={vi.fn()} owners={[
+        { id: 'owner-1', name: 'Fox Corporation', slug: 'fox-corporation', ownerType: 'public_company', isIndividual: false, country: 'United States', wikidataQid: null, ownerSource: 'wikidata', ownerVerifiedAt: '2026-04-01T00:00:00Z' },
+      ]} />)
+
+      fireEvent.click(screen.getByText('Edit'))
+      const ownerSelect = screen.getByRole('combobox', { name: /media owner/i })
+      expect(ownerSelect).toBeInTheDocument()
+      expect(ownerSelect).toHaveValue('')
+    })
+
+    it('includes owner_id in save payload when changed', async () => {
+      const source = makeSource({ owner_id: null })
+      const onUpdated = vi.fn()
+      mockUpdate.mockResolvedValue({ success: true, data: makeSource({ owner_id: 'owner-1' }) })
+
+      render(<AdminSourceDetail source={source} onUpdated={onUpdated} owners={[
+        { id: 'owner-1', name: 'Fox Corporation', slug: 'fox-corporation', ownerType: 'public_company', isIndividual: false, country: 'United States', wikidataQid: null, ownerSource: 'wikidata', ownerVerifiedAt: '2026-04-01T00:00:00Z' },
+      ]} />)
+
+      fireEvent.click(screen.getByText('Edit'))
+
+      // Select owner from dropdown
+      const ownerSelect = screen.getByRole('combobox', { name: /media owner/i })
+      fireEvent.change(ownerSelect, { target: { value: 'owner-1' } })
+
+      fireEvent.click(screen.getByText('Save'))
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith({
+          id: 'src-1',
+          data: expect.objectContaining({ owner_id: 'owner-1' }),
+        })
+      })
     })
   })
 

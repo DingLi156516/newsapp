@@ -54,7 +54,7 @@ export async function PATCH(
     const message = err instanceof Error ? err.message : 'Internal server error'
     const status = message.includes('not found')
       ? 404
-      : message.includes('already exists')
+      : message.includes('already exists') || message.includes('does not exist')
         ? 409
         : message.includes('No fields')
           ? 400

@@ -9,11 +9,13 @@
 import type {
   NewsArticle,
   NewsSource,
+  MediaOwner,
   StoryTag,
   AISummary,
   SpectrumSegment,
   FactualityLevel,
   OwnershipType,
+  OwnerType,
   TagType,
   Topic,
   Region,
@@ -24,7 +26,7 @@ import type {
   KeyClaim,
   HeadlineComparison,
 } from '@/lib/types'
-import type { DbSource } from '@/lib/supabase/types'
+import type { DbSource, DbMediaOwner } from '@/lib/supabase/types'
 import { getSourceSlug } from '@/lib/source-slugs'
 
 interface StoryWithSources {
@@ -168,7 +170,22 @@ function parseSpectrumSegments(raw: unknown): SpectrumSegment[] {
     }))
 }
 
-export function transformSource(row: DbSource, articleUrl?: string): NewsSource {
+export function transformOwner(row: DbMediaOwner & { source_count?: number }): MediaOwner {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    ownerType: row.owner_type as OwnerType,
+    isIndividual: row.is_individual,
+    country: row.country,
+    wikidataQid: row.wikidata_qid,
+    ownerSource: row.owner_source as MediaOwner['ownerSource'],
+    ownerVerifiedAt: row.owner_verified_at,
+    ...(row.source_count !== undefined ? { sourceCount: row.source_count } : {}),
+  }
+}
+
+export function transformSource(row: DbSource, articleUrl?: string, owner?: DbMediaOwner): NewsSource {
   return {
     id: row.id,
     slug: getSourceSlug(row),
@@ -180,6 +197,7 @@ export function transformSource(row: DbSource, articleUrl?: string): NewsSource 
     url: row.url ?? undefined,
     ...(articleUrl ? { articleUrl } : {}),
     totalArticlesIngested: row.total_articles_ingested,
+    ...(owner ? { owner: transformOwner(owner) } : {}),
   }
 }
 
@@ -203,12 +221,26 @@ export function transformTag(row: TagRow): StoryTag {
   }
 }
 
+/** Minimal owner shape needed for transform — matches the SELECT in querySourcesForStory. */
+export interface OwnerTransformInput {
+  readonly id: string
+  readonly name: string
+  readonly slug: string
+  readonly owner_type: string
+  readonly is_individual: boolean
+  readonly country: string | null
+  readonly wikidata_qid: string | null
+  readonly owner_source: string
+  readonly owner_verified_at: string
+}
+
 export function transformStory(
   story: StoryWithSources,
   sources: readonly DbSource[],
   articleUrlMap?: Map<string, string>,
   tags?: readonly TagRow[],
-  headlines?: ReadonlyArray<{ title: string; sourceName: string; sourceBias: string }>
+  headlines?: ReadonlyArray<{ title: string; sourceName: string; sourceBias: string }>,
+  ownerMap?: Map<string, OwnerTransformInput>
 ): NewsArticle {
   return {
     id: story.id,
@@ -219,7 +251,10 @@ export function transformStory(
     imageUrl: story.image_url ?? null,
     factuality: story.factuality as FactualityLevel,
     ownership: story.ownership as OwnershipType,
-    sources: sources.map((s) => transformSource(s, articleUrlMap?.get(s.id))),
+    sources: sources.map((s) => {
+      const owner = s.owner_id && ownerMap ? ownerMap.get(s.owner_id) : undefined
+      return transformSource(s, articleUrlMap?.get(s.id), owner as DbMediaOwner | undefined)
+    }),
     spectrumSegments: parseSpectrumSegments(story.spectrum_segments),
     aiSummary: parseAISummary(story.ai_summary),
     timestamp: story.published_at,

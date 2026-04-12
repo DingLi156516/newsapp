@@ -24,7 +24,7 @@ export async function queryAdminSources(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query = (client.from('sources') as any)
     .select(
-      'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested, created_at, updated_at, bias_mbfc, bias_allsides, bias_adfm, factuality_mbfc, factuality_allsides, bias_override, bias_sources_synced_at, source_type, ingestion_config',
+      'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, last_fetch_at, last_fetch_status, last_fetch_error, consecutive_failures, total_articles_ingested, created_at, updated_at, bias_mbfc, bias_allsides, bias_adfm, factuality_mbfc, factuality_allsides, bias_override, bias_sources_synced_at, source_type, ingestion_config, owner_id',
       { count: 'exact' }
     )
 
@@ -119,6 +119,7 @@ export async function updateSource(
   if (input.bias_override !== undefined) updateData.bias_override = input.bias_override
   if (input.source_type !== undefined) updateData.source_type = input.source_type
   if (input.ingestion_config !== undefined) updateData.ingestion_config = input.ingestion_config
+  if (input.owner_id !== undefined) updateData.owner_id = input.owner_id
 
   // Auto-set bias_override when admin manually changes bias or factuality,
   // but only if the caller didn't explicitly provide bias_override
@@ -140,6 +141,9 @@ export async function updateSource(
   if (error) {
     if (error.code === '23505') {
       throw new Error(`A source with that slug already exists`)
+    }
+    if (error.code === '23503') {
+      throw new Error('Referenced owner does not exist')
     }
     throw new Error(`Failed to update source: ${error.message}`)
   }

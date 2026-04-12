@@ -48,6 +48,52 @@ export type OwnershipType =
   | 'non-profit'
   | 'other'
 
+/**
+ * Structural ownership type for the media_owners entity (migration 048).
+ * Distinct from OwnershipType which is a broad funding/influence category.
+ */
+export type OwnerType =
+  | 'public_company'
+  | 'private_company'
+  | 'cooperative'
+  | 'public_broadcaster'
+  | 'trust'
+  | 'individual'
+  | 'state_adjacent'
+  | 'nonprofit'
+
+/** All owner types as an array, for iteration and validation. */
+export const ALL_OWNER_TYPES: OwnerType[] = [
+  'public_company', 'private_company', 'cooperative', 'public_broadcaster',
+  'trust', 'individual', 'state_adjacent', 'nonprofit',
+]
+
+/** Human-readable labels for OwnerType, displayed in owner badges. */
+export const OWNER_TYPE_LABELS: Record<OwnerType, string> = {
+  'public_company': 'Public Company',
+  'private_company': 'Private Company',
+  'cooperative': 'Cooperative',
+  'public_broadcaster': 'Public Broadcaster',
+  'trust': 'Trust',
+  'individual': 'Individual',
+  'state_adjacent': 'State-Adjacent',
+  'nonprofit': 'Nonprofit',
+}
+
+/** A specific media owner entity (e.g., "Fox Corporation"). */
+export interface MediaOwner {
+  readonly id: string
+  readonly name: string
+  readonly slug: string
+  readonly ownerType: OwnerType
+  readonly isIndividual: boolean
+  readonly country: string | null
+  readonly wikidataQid: string | null
+  readonly ownerSource: 'wikidata' | 'manual'
+  readonly ownerVerifiedAt: string
+  readonly sourceCount?: number
+}
+
 /** Top-level category for classifying an article's subject matter. */
 export type Topic =
   | 'politics'
@@ -185,6 +231,7 @@ export interface NewsSource {
   url?: string        // Root domain without protocol, e.g. "bbc.com"
   articleUrl?: string  // Direct URL to the specific article on this source
   totalArticlesIngested?: number
+  owner?: MediaOwner   // Specific media owner entity (Phase 9B)
 }
 
 export interface SourceProfileSource extends NewsSource {
@@ -486,4 +533,4 @@ export const REGION_LABELS: Record<Region, string> = {
 /** All region values as an array, for iteration and validation. */
 export const ALL_REGIONS: Region[] = ['us', 'international', 'uk', 'canada', 'europe']
 
-export type { DbSource, DbArticle, DbStory, DbAdminUser, DbTag, DbStoryTag } from '@/lib/supabase/types'
+export type { DbSource, DbArticle, DbStory, DbAdminUser, DbTag, DbStoryTag, DbMediaOwner } from '@/lib/supabase/types'

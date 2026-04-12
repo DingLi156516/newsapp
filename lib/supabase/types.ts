@@ -13,6 +13,7 @@ import type {
   BiasCategory,
   FactualityLevel,
   OwnershipType,
+  OwnerType,
   Region,
   Topic,
   SpectrumSegment,
@@ -60,6 +61,8 @@ export interface DbSource {
   bias_sources_synced_at: string | null
   source_type: SourceType
   ingestion_config: Record<string, unknown>
+  // Media ownership (migration 048):
+  owner_id: string | null
   // Source-health control plane (migration 046):
   cooldown_until: string | null
   auto_disabled_at: string | null
@@ -85,6 +88,7 @@ export interface DbSourceInsert {
   bias_sources_synced_at?: string | null
   source_type?: SourceType
   ingestion_config?: Record<string, unknown>
+  owner_id?: string | null
   cooldown_until?: string | null
   auto_disabled_at?: string | null
   auto_disabled_reason?: string | null
@@ -440,6 +444,38 @@ export interface DbStoryTagInsert {
 }
 
 // ---------------------------------------------------------------------------
+// media_owners table (migration 048)
+// ---------------------------------------------------------------------------
+
+export type DbOwnerSource = 'wikidata' | 'manual'
+
+export interface DbMediaOwner {
+  id: string
+  name: string
+  slug: string
+  owner_type: OwnerType
+  is_individual: boolean
+  country: string | null
+  wikidata_qid: string | null
+  parent_owner_id: string | null
+  owner_source: DbOwnerSource
+  owner_verified_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface DbMediaOwnerInsert {
+  name: string
+  slug: string
+  owner_type: OwnerType
+  is_individual?: boolean
+  country?: string | null
+  wikidata_qid?: string | null
+  parent_owner_id?: string | null
+  owner_source?: DbOwnerSource
+}
+
+// ---------------------------------------------------------------------------
 // Database type map (used with Supabase client generic)
 // ---------------------------------------------------------------------------
 
@@ -457,6 +493,13 @@ export interface Database {
             isOneToOne: false
             referencedRelation: 'articles'
             referencedColumns: ['source_id']
+          },
+          {
+            foreignKeyName: 'sources_owner_id_fkey'
+            columns: ['owner_id']
+            isOneToOne: false
+            referencedRelation: 'media_owners'
+            referencedColumns: ['id']
           },
         ]
       }
@@ -573,6 +616,12 @@ export interface Database {
             referencedColumns: ['tag_id']
           },
         ]
+      }
+      media_owners: {
+        Row: DbMediaOwner
+        Insert: DbMediaOwnerInsert
+        Update: Partial<DbMediaOwnerInsert>
+        Relationships: []
       }
       story_tags: {
         Row: DbStoryTag

@@ -15,6 +15,7 @@ import { AdminSourceDetail } from '@/components/organisms/AdminSourceDetail'
 import { AdminSourceCreate } from '@/components/organisms/AdminSourceCreate'
 import { AdminSourceImport } from '@/components/organisms/AdminSourceImport'
 import { useSyncRatings } from '@/lib/hooks/use-admin-sources'
+import { useOwners } from '@/lib/hooks/use-owners'
 
 type RightPanel = 'detail' | 'create' | 'import'
 
@@ -24,6 +25,7 @@ export function SourceAdminManager() {
   const [syncMessage, setSyncMessage] = useState<string | null>(null)
   const { mutate } = useSWRConfig()
   const { syncRatings, isSyncing } = useSyncRatings()
+  const { owners } = useOwners()
 
   const revalidateAll = useCallback(() => {
     mutate((key: unknown) => typeof key === 'string' && key.startsWith('/api/admin/sources'))
@@ -129,6 +131,7 @@ export function SourceAdminManager() {
             <AdminSourceDetail
               source={selectedSource}
               onUpdated={handleUpdated}
+              owners={owners}
             />
           )}
         </div>

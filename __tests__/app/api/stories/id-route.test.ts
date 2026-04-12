@@ -72,7 +72,8 @@ describe('GET /api/stories/[id]', () => {
 
   it('returns 200 with transformed story on success', async () => {
     const mockStory = { id: VALID_UUID, title: 'Test Story' }
-    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map() }
+    const mockOwnerMap = new Map()
+    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap }
     const mockHeadlines = [{ title: 'Headline', sourceName: 'CNN', sourceBias: 'lean-left' }]
     const mockTags = [{ slug: 'iran', label: 'Iran', tag_type: 'location', story_count: 5 }]
     const mockTransformed = { id: VALID_UUID, title: 'Test Story', sources: [] }
@@ -95,12 +96,14 @@ describe('GET /api/stories/[id]', () => {
       mockSources.articleUrlMap,
       mockTags,
       mockHeadlines,
+      mockOwnerMap,
     )
   })
 
   it('returns 200 with empty headlines when headline fetch throws', async () => {
     const mockStory = { id: VALID_UUID, title: 'Test Story' }
-    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map() }
+    const mockOwnerMap = new Map()
+    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap }
     const mockTags = [{ slug: 'iran', label: 'Iran', tag_type: 'location', story_count: 5 }]
     const mockTransformed = { id: VALID_UUID, title: 'Test Story', sources: [] }
 
@@ -124,6 +127,7 @@ describe('GET /api/stories/[id]', () => {
       mockSources.articleUrlMap,
       mockTags,
       [],
+      mockOwnerMap,
     )
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('Headline fetch failed'),
@@ -135,7 +139,8 @@ describe('GET /api/stories/[id]', () => {
 
   it('returns 200 with empty tags when tag fetch throws', async () => {
     const mockStory = { id: VALID_UUID, title: 'Test Story' }
-    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map() }
+    const mockOwnerMap = new Map()
+    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap }
     const mockHeadlines = [{ title: 'Headline', sourceName: 'CNN', sourceBias: 'lean-left' }]
     const mockTransformed = { id: VALID_UUID, title: 'Test Story', sources: [] }
 
@@ -159,6 +164,7 @@ describe('GET /api/stories/[id]', () => {
       mockSources.articleUrlMap,
       [],
       mockHeadlines,
+      mockOwnerMap,
     )
 
     vi.restoreAllMocks()

@@ -41,6 +41,7 @@ describe('Database type interfaces', () => {
       bias_sources_synced_at: null,
       source_type: 'rss',
       ingestion_config: {},
+      owner_id: null,
       cooldown_until: null,
       auto_disabled_at: null,
       auto_disabled_reason: null,

@@ -122,4 +122,74 @@ describe('SourceList', () => {
     render(<SourceList sources={sources} defaultExpanded />)
     expect(screen.getByLabelText('Read article on Reuters')).toBeInTheDocument()
   })
+
+  describe('same-owner indicator', () => {
+    it('shows "N from {owner}" when multiple sources share the same owner', () => {
+      const owner = {
+        id: 'owner-1',
+        name: 'Fox Corporation',
+        slug: 'fox-corporation',
+        ownerType: 'public_company' as const,
+        isIndividual: false,
+        country: 'United States',
+        wikidataQid: 'Q186068',
+        ownerSource: 'wikidata' as const,
+        ownerVerifiedAt: '2026-04-01T00:00:00Z',
+      }
+      const sources: NewsSource[] = [
+        {
+          id: 'src-0', name: 'Fox News', bias: 'right', factuality: 'mixed',
+          ownership: 'corporate', region: 'us', url: 'foxnews.com', owner,
+        },
+        {
+          id: 'src-1', name: 'Fox Business', bias: 'lean-right', factuality: 'high',
+          ownership: 'corporate', region: 'us', url: 'foxbusiness.com', owner,
+        },
+      ]
+      render(<SourceList sources={sources} defaultExpanded />)
+      expect(screen.getByText(/2 from Fox Corporation/)).toBeInTheDocument()
+    })
+
+    it('does not show indicator when sources have different owners', () => {
+      const sources: NewsSource[] = [
+        {
+          id: 'src-0', name: 'Fox News', bias: 'right', factuality: 'mixed',
+          ownership: 'corporate', region: 'us',
+          owner: {
+            id: 'owner-1', name: 'Fox Corporation', slug: 'fox-corporation',
+            ownerType: 'public_company', isIndividual: false, country: 'US',
+            wikidataQid: null, ownerSource: 'wikidata', ownerVerifiedAt: '2026-04-01T00:00:00Z',
+          },
+        },
+        {
+          id: 'src-1', name: 'CNN', bias: 'left', factuality: 'mixed',
+          ownership: 'corporate', region: 'us',
+          owner: {
+            id: 'owner-2', name: 'Warner Bros. Discovery', slug: 'warner-bros-discovery',
+            ownerType: 'public_company', isIndividual: false, country: 'US',
+            wikidataQid: null, ownerSource: 'wikidata', ownerVerifiedAt: '2026-04-01T00:00:00Z',
+          },
+        },
+      ]
+      render(<SourceList sources={sources} defaultExpanded />)
+      expect(screen.queryByText(/from Fox Corporation/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/from Warner Bros/)).not.toBeInTheDocument()
+    })
+
+    it('renders normally when sources have no owner', () => {
+      const sources: NewsSource[] = [
+        {
+          id: 'src-0', name: 'Source A', bias: 'center', factuality: 'high',
+          ownership: 'independent', region: 'us',
+        },
+        {
+          id: 'src-1', name: 'Source B', bias: 'center', factuality: 'high',
+          ownership: 'independent', region: 'us',
+        },
+      ]
+      render(<SourceList sources={sources} defaultExpanded />)
+      expect(screen.getByText('Source A')).toBeInTheDocument()
+      expect(screen.getByText('Source B')).toBeInTheDocument()
+    })
+  })
 })

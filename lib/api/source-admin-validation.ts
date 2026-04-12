@@ -6,7 +6,7 @@
  */
 
 import { z } from 'zod'
-import { validatePublicUrl } from '@/lib/rss/discover'
+import { validatePublicUrl } from '@/lib/rss/url-validation'
 import { crawlerConfigSchema } from '@/lib/crawler/validation'
 import { newsApiConfigSchema } from '@/lib/news-api/validation'
 
@@ -99,6 +99,7 @@ export const updateSourceSchema = z.object({
   bias_override: z.boolean().optional(),
   source_type: z.enum(SOURCE_TYPES).optional(),
   ingestion_config: z.record(z.string(), z.unknown()).optional(),
+  owner_id: z.string().uuid('Invalid owner ID').optional().nullable(),
 }).refine((d) => isPublicUrl(d.url), { ...publicUrlCheck, path: ['url'] })
   .refine((d) => isPublicUrl(d.rss_url), { ...publicUrlCheck, path: ['rss_url'] })
   .refine(
