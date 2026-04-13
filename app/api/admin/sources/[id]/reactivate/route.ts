@@ -59,8 +59,8 @@ export async function POST(
     // filter expressions separated by commas; `gt.${reactivatedAt}` uses
     // the route's own "now" so the write is deterministic regardless of
     // clock drift between Postgres and Node.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: updated, error: updateError } = await (supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .from('sources') as any)
       .update({
         cooldown_until: null,
@@ -92,8 +92,8 @@ export async function POST(
     // between the UPDATE and this SELECT would show as noop — but the
     // only consequence is the admin sees "already healthy" and can
     // retry; no data is lost.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: existing, error: lookupError } = await (supabase
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .from('sources') as any)
       .select('id')
       .eq('id', parsedId.data)

@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION match_story_centroid(
   cutoff_time timestamptz DEFAULT now() - interval '168 hours'
 ) RETURNS TABLE (story_id uuid, similarity float)
 LANGUAGE sql STABLE
-SET hnsw.ef_search = 80
+-- SET hnsw.ef_search = 80  -- removed: Supabase hosted does not allow setting this GUC at function level
 AS $$
   SELECT s.id, 1 - (s.cluster_centroid <=> query_embedding) AS similarity
   FROM stories s
