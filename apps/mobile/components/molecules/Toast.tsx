@@ -3,8 +3,8 @@
  * Variants: success (green), info (blue), warning (amber), error (red).
  * Optional undo action for destructive operations.
  *
- * Uses SEMANTIC tokens from design.ts — all colors, spacing, and radii
- * come from the design system for theme compatibility.
+ * Reads semantic + surface colors and blur tint from `useTheme()` so the
+ * toast follows the active theme.
  */
 
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native'
@@ -15,14 +15,13 @@ import { hapticLight } from '@/lib/haptics'
 import { useEffect } from 'react'
 import type { ToastData, ToastVariant } from '@/lib/hooks/use-toast'
 import {
-  SEMANTIC,
-  GLASS,
   BORDER_RADIUS,
   SPACING,
   FONT,
   ANIMATION,
   TOUCH_TARGET,
 } from '@/lib/shared/design'
+import { useTheme } from '@/lib/shared/theme'
 
 const ICON_MAP: Record<ToastVariant, typeof CheckCircle> = {
   success: CheckCircle,
@@ -37,8 +36,9 @@ interface ToastProps {
 }
 
 export function Toast({ toast, onDismiss }: ToastProps) {
+  const theme = useTheme()
   const variant = toast.variant
-  const semantic = SEMANTIC[variant]
+  const semantic = theme.semantic[variant]
   const Icon = ICON_MAP[variant]
 
   useEffect(() => {
@@ -93,7 +93,7 @@ export function Toast({ toast, onDismiss }: ToastProps) {
           flex: 1,
           fontFamily: FONT.body.family,
           fontSize: FONT.body.size,
-          color: 'rgba(255, 255, 255, 0.9)',
+          color: theme.text.primary,
         }}
       >
         {toast.message}
@@ -161,7 +161,7 @@ export function Toast({ toast, onDismiss }: ToastProps) {
     paddingHorizontal: SPACING.lg,
     borderRadius: BORDER_RADIUS.lg,
     borderWidth: 0.5,
-    borderColor: GLASS.border,
+    borderColor: theme.surface.border,
     overflow: 'hidden' as const,
   }
 
@@ -177,14 +177,14 @@ export function Toast({ toast, onDismiss }: ToastProps) {
     >
       {/* Glass background layer */}
       {Platform.OS === 'ios' ? (
-        <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+        <BlurView intensity={20} tint={theme.blurTint} style={StyleSheet.absoluteFill} />
       ) : null}
 
       {/* Variant gradient overlay */}
       <View
         style={{
           ...StyleSheet.absoluteFillObject,
-          backgroundColor: GLASS.bg,
+          backgroundColor: theme.surface.glass,
         }}
       />
       <View

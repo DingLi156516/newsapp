@@ -1,7 +1,17 @@
 /**
- * Shared design tokens for mobile UI — spacing, colors, typography.
- * All components should reference these instead of hardcoding values.
+ * Shared design tokens for mobile UI.
+ *
+ * Theme-invariant tokens live here: spacing, typography, badges, border radii,
+ * animation curves, touch targets. Theme-aware color tokens (surface, text,
+ * semantic) have moved to `@/lib/shared/theme`; use `useTheme()` in components.
+ *
+ * `GLASS`, `SEMANTIC`, and `TEXT_OPACITY` remain as deprecated re-exports
+ * sourced from the dark theme so non-migrated components continue to render
+ * identically. Migrate to `useTheme()` when you touch one of these for other
+ * reasons — see `apps/mobile/lib/shared/theme/README.md`.
  */
+
+import { darkTheme } from './theme/dark'
 
 export const SPACING = {
   xs: 4,
@@ -12,6 +22,12 @@ export const SPACING = {
   xxl: 24,
 } as const
 
+/**
+ * Numeric opacity levels for `rgba(255,255,255, X)` composition.
+ *
+ * @deprecated Prefer `useTheme().text.*` for full color strings. Kept as
+ *   numeric opacities for call sites that still interpolate them manually.
+ */
 export const TEXT_OPACITY = {
   primary: 1,
   secondary: 0.6,
@@ -19,46 +35,27 @@ export const TEXT_OPACITY = {
   muted: 0.35,
 } as const
 
+/**
+ * Glass surface colors.
+ *
+ * @deprecated Use `useTheme().surface.*` instead. Re-exported from `darkTheme`
+ *   for back-compat during the theme migration.
+ */
 export const GLASS = {
-  bg: 'rgba(26, 26, 26, 0.4)',
-  bgSm: 'rgba(26, 26, 26, 0.5)',
-  bgPill: 'rgba(26, 26, 26, 0.6)',
-  border: 'rgba(255, 255, 255, 0.08)',
-  borderPill: 'rgba(255, 255, 255, 0.1)',
+  bg: darkTheme.surface.glass,
+  bgSm: darkTheme.surface.glassSm,
+  bgPill: darkTheme.surface.glassPill,
+  border: darkTheme.surface.border,
+  borderPill: darkTheme.surface.borderPill,
 } as const
 
-export const SEMANTIC = {
-  success: {
-    color: '#22c55e',
-    bg: 'rgba(34, 197, 94, 0.12)',
-    border: 'rgba(34, 197, 94, 0.25)',
-  },
-  info: {
-    color: '#3b82f6',
-    bg: 'rgba(59, 130, 246, 0.12)',
-    border: 'rgba(59, 130, 246, 0.25)',
-  },
-  warning: {
-    color: '#f59e0b',
-    bg: 'rgba(245, 158, 11, 0.12)',
-    border: 'rgba(245, 158, 11, 0.25)',
-  },
-  error: {
-    color: '#ef4444',
-    bg: 'rgba(239, 68, 68, 0.12)',
-    border: 'rgba(239, 68, 68, 0.25)',
-  },
-  primary: {
-    color: '#8b5cf6',
-    bg: 'rgba(139, 92, 246, 0.12)',
-    border: 'rgba(139, 92, 246, 0.25)',
-  },
-  muted: {
-    color: 'rgba(255, 255, 255, 0.35)',
-    bg: 'rgba(255, 255, 255, 0.06)',
-    border: 'rgba(255, 255, 255, 0.1)',
-  },
-} as const
+/**
+ * Semantic status colors.
+ *
+ * @deprecated Use `useTheme().semantic.*` instead. Re-exported from `darkTheme`
+ *   for back-compat during the theme migration.
+ */
+export const SEMANTIC = darkTheme.semantic
 
 export type SemanticRole = keyof typeof SEMANTIC
 

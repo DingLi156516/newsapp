@@ -19,6 +19,7 @@ import { hapticLight } from '@/lib/haptics'
 import { ChevronDown } from 'lucide-react-native'
 import { GlassView } from '@/components/ui/GlassView'
 import { ANIMATION, SPACING, FONT } from '@/lib/shared/design'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly title: string
@@ -28,6 +29,7 @@ interface Props {
 }
 
 export function CollapsibleSection({ title, subtitle, defaultExpanded = false, children }: Props) {
+  const theme = useTheme()
   const [expanded, setExpanded] = useState(defaultExpanded)
   const rotation = useSharedValue(defaultExpanded ? 180 : 0)
 
@@ -60,7 +62,7 @@ export function CollapsibleSection({ title, subtitle, defaultExpanded = false, c
           <Text style={{
             fontFamily: 'Inter-SemiBold',
             fontSize: FONT.body.size,
-            color: 'rgba(255, 255, 255, 0.9)',
+            color: theme.text.primary,
             textTransform: 'uppercase',
             letterSpacing: 0.5,
           }}>
@@ -70,7 +72,7 @@ export function CollapsibleSection({ title, subtitle, defaultExpanded = false, c
             <Text style={{
               fontFamily: FONT.caption.family,
               fontSize: FONT.caption.size,
-              color: 'rgba(255, 255, 255, 0.4)',
+              color: theme.text.tertiary,
               marginTop: 2,
             }}>
               {subtitle}
@@ -78,7 +80,7 @@ export function CollapsibleSection({ title, subtitle, defaultExpanded = false, c
           )}
         </View>
         <Animated.View style={chevronStyle}>
-          <ChevronDown size={18} color="rgba(255, 255, 255, 0.5)" />
+          <ChevronDown size={18} color={theme.text.secondary} />
         </Animated.View>
       </Pressable>
 
@@ -88,7 +90,7 @@ export function CollapsibleSection({ title, subtitle, defaultExpanded = false, c
           exiting={FadeOut.duration(150)}
           style={{
             borderTopWidth: 0.5,
-            borderTopColor: 'rgba(255, 255, 255, 0.06)',
+            borderTopColor: theme.surface.border,
           }}
         >
           {children}

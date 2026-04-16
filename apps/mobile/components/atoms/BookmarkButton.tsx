@@ -9,6 +9,7 @@ import Animated, {
 import { Bookmark } from 'lucide-react-native'
 import { hapticLight, hapticMedium } from '@/lib/haptics'
 import { TOUCH_TARGET } from '@/lib/shared/design'
+import { useTheme } from '@/lib/shared/theme'
 
 interface BookmarkButtonProps {
   readonly isSaved: boolean
@@ -17,6 +18,10 @@ interface BookmarkButtonProps {
 }
 
 export function BookmarkButton({ isSaved, onPress, size = 20 }: BookmarkButtonProps) {
+  const theme = useTheme()
+  // Capture for worklet (cannot access React context inside useAnimatedStyle)
+  const ringColor = theme.text.tertiary
+
   const scale = useSharedValue(1)
   const ringScale = useSharedValue(0.5)
   const ringOpacity = useSharedValue(0)
@@ -31,7 +36,7 @@ export function BookmarkButton({ isSaved, onPress, size = 20 }: BookmarkButtonPr
     height: size * 2,
     borderRadius: size,
     borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
+    borderColor: ringColor,
     opacity: ringOpacity.value,
     transform: [{ scale: ringScale.value }],
   }))
@@ -72,8 +77,8 @@ export function BookmarkButton({ isSaved, onPress, size = 20 }: BookmarkButtonPr
       <Animated.View style={animatedStyle}>
         <Bookmark
           size={size}
-          color={isSaved ? '#FFFFFF' : 'rgba(255, 255, 255, 0.4)'}
-          fill={isSaved ? '#FFFFFF' : 'transparent'}
+          color={isSaved ? theme.text.primary : theme.text.tertiary}
+          fill={isSaved ? theme.text.primary : 'transparent'}
         />
       </Animated.View>
     </Pressable>

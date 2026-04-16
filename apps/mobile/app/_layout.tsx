@@ -14,6 +14,7 @@ import { SWRProvider } from '@/lib/hooks/swr-provider'
 import { ToastContext, useToastProvider } from '@/lib/hooks/use-toast'
 import { Toast } from '@/components/molecules/Toast'
 import { useOnboarding } from '@/lib/hooks/use-onboarding'
+import { ThemeProvider, useTheme } from '@/lib/shared/theme'
 
 import '@/global.css'
 
@@ -24,6 +25,56 @@ export const unstable_settings = {
 }
 
 SplashScreen.preventAutoHideAsync()
+
+function ThemedAppShell({ toastCtx }: { toastCtx: ReturnType<typeof useToastProvider> }) {
+  const theme = useTheme()
+  return (
+    <>
+      <StatusBar style={theme.statusBarStyle} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: theme.surface.background },
+          animation: 'slide_from_right',
+        }}
+      >
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen
+          name="onboarding"
+          options={{ animation: 'fade' }}
+        />
+        <Stack.Screen
+          name="story/[id]"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="saved"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="settings"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="history"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="guide"
+          options={{ animation: 'slide_from_right' }}
+        />
+        <Stack.Screen
+          name="(auth)"
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
+      </Stack>
+      {toastCtx.toast && <Toast toast={toastCtx.toast} onDismiss={toastCtx.dismissToast} />}
+    </>
+  )
+}
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
@@ -61,54 +112,15 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <BottomSheetModalProvider>
-      <AuthProvider>
-        <SWRProvider>
-          <ToastContext.Provider value={toastCtx}>
-          <StatusBar style="light" />
-          <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: '#0A0A0A' },
-          animation: 'slide_from_right',
-        }}
-      >
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen
-          name="onboarding"
-          options={{ animation: 'fade' }}
-        />
-        <Stack.Screen
-          name="story/[id]"
-          options={{ animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="saved"
-          options={{ animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="settings"
-          options={{ animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="history"
-          options={{ animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="guide"
-          options={{ animation: 'slide_from_right' }}
-        />
-        <Stack.Screen
-          name="(auth)"
-          options={{
-            presentation: 'modal',
-            animation: 'slide_from_bottom',
-          }}
-        />
-          </Stack>
-          {toastCtx.toast && <Toast toast={toastCtx.toast} onDismiss={toastCtx.dismissToast} />}
-          </ToastContext.Provider>
-        </SWRProvider>
-      </AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <SWRProvider>
+              <ToastContext.Provider value={toastCtx}>
+                <ThemedAppShell toastCtx={toastCtx} />
+              </ToastContext.Provider>
+            </SWRProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </BottomSheetModalProvider>
     </GestureHandlerRootView>
   )

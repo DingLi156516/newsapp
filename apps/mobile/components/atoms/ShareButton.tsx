@@ -10,6 +10,7 @@ import Animated, {
 import { Share2 } from 'lucide-react-native'
 import { hapticLight } from '@/lib/haptics'
 import { SITE_URL, TOUCH_TARGET } from '@/lib/shared/design'
+import { useTheme } from '@/lib/shared/theme'
 
 interface ShareButtonProps {
   readonly url: string
@@ -18,6 +19,10 @@ interface ShareButtonProps {
 }
 
 export function ShareButton({ url, title, size = 20 }: ShareButtonProps) {
+  const theme = useTheme()
+  // Capture for worklet (cannot access React context inside useAnimatedStyle)
+  const ringColor = theme.text.tertiary
+
   const scale = useSharedValue(1)
   const ringScale = useSharedValue(0.5)
   const ringOpacity = useSharedValue(0)
@@ -32,7 +37,7 @@ export function ShareButton({ url, title, size = 20 }: ShareButtonProps) {
     height: size * 2,
     borderRadius: size,
     borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
+    borderColor: ringColor,
     opacity: ringOpacity.value,
     transform: [{ scale: ringScale.value }],
   }))
@@ -72,7 +77,7 @@ export function ShareButton({ url, title, size = 20 }: ShareButtonProps) {
     >
       <Animated.View style={ringStyle} />
       <Animated.View style={animatedStyle}>
-        <Share2 size={size} color="rgba(255, 255, 255, 0.4)" />
+        <Share2 size={size} color={theme.text.tertiary} />
       </Animated.View>
     </Pressable>
   )

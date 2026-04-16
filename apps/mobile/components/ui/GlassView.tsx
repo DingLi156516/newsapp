@@ -4,6 +4,9 @@
  * Wraps BlurView with glass styling (background, border, radius).
  * Variants mirror the web app's .glass / .glass-sm / .glass-pill CSS classes.
  * Optional `glow` prop adds an ambient animated gradient on the top edge.
+ *
+ * Surface colors, border, and blur tint are read from `useTheme()` so the
+ * component follows the active theme.
  */
 
 import { useEffect } from 'react'
@@ -17,6 +20,8 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated'
+import { useTheme } from '@/lib/shared/theme'
+import type { Theme } from '@/lib/shared/theme'
 
 type GlassVariant = 'default' | 'sm' | 'pill'
 
@@ -27,30 +32,27 @@ interface GlassViewProps extends ViewProps {
   readonly glow?: string
 }
 
-const VARIANT_CONFIG: Record<GlassVariant, {
-  borderRadius: number
-  backgroundColor: string
-  borderColor: string
-  intensity: number
-}> = {
-  default: {
-    borderRadius: 24,
-    backgroundColor: 'rgba(26, 26, 26, 0.4)',
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    intensity: 20,
-  },
-  sm: {
-    borderRadius: 12,
-    backgroundColor: 'rgba(26, 26, 26, 0.5)',
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    intensity: 16,
-  },
-  pill: {
-    borderRadius: 9999,
-    backgroundColor: 'rgba(26, 26, 26, 0.6)',
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    intensity: 16,
-  },
+interface VariantShape {
+  readonly borderRadius: number
+  readonly intensity: number
+  readonly backgroundKey: 'glass' | 'glassSm' | 'glassPill'
+  readonly borderKey: 'border' | 'borderPill'
+}
+
+const VARIANT_SHAPE: Record<GlassVariant, VariantShape> = {
+  default: { borderRadius: 24, intensity: 20, backgroundKey: 'glass', borderKey: 'border' },
+  sm: { borderRadius: 12, intensity: 16, backgroundKey: 'glassSm', borderKey: 'border' },
+  pill: { borderRadius: 9999, intensity: 16, backgroundKey: 'glassPill', borderKey: 'borderPill' },
+}
+
+function resolveVariantColors(theme: Theme, variant: GlassVariant) {
+  const shape = VARIANT_SHAPE[variant]
+  return {
+    borderRadius: shape.borderRadius,
+    intensity: shape.intensity,
+    backgroundColor: theme.surface[shape.backgroundKey],
+    borderColor: theme.surface[shape.borderKey],
+  }
 }
 
 function AmbientGlow({ color }: { color: string }) {
@@ -86,7 +88,8 @@ export function GlassView({
   children,
   ...props
 }: GlassViewProps) {
-  const config = VARIANT_CONFIG[variant]
+  const theme = useTheme()
+  const config = resolveVariantColors(theme, variant)
   const blurIntensity = intensityOverride ?? config.intensity
 
   // Android BlurView can be unreliable — fall back to semi-transparent bg
@@ -127,7 +130,7 @@ export function GlassView({
     >
       <BlurView
         intensity={blurIntensity}
-        tint="dark"
+        tint={theme.blurTint}
         style={StyleSheet.absoluteFill}
       />
       {glow && <AmbientGlow color={glow} />}

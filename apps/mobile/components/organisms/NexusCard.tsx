@@ -15,7 +15,8 @@ import { BookmarkButton } from '@/components/atoms/BookmarkButton'
 import { ShareButton } from '@/components/atoms/ShareButton'
 import { SpectrumBar } from '@/components/molecules/SpectrumBar'
 import { GlassView } from '@/components/ui/GlassView'
-import { BADGE, GLASS } from '@/lib/shared/design'
+import { BADGE } from '@/lib/shared/design'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly article: NewsArticle
@@ -36,10 +37,20 @@ function formatTimeAgo(timestamp: string): string {
 }
 
 export function NexusCard({ article, onSave, isSaved, onClick, compact = false, isRead = false }: Props) {
+  const theme = useTheme()
   const scale = useSharedValue(1)
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }))
+
+  const pillStyle = {
+    backgroundColor: theme.surface.glassPill,
+    borderWidth: 0.5,
+    borderColor: theme.surface.borderPill,
+    borderRadius: BADGE.borderRadius,
+    paddingHorizontal: BADGE.paddingH,
+    paddingVertical: BADGE.paddingV,
+  } as const
 
   return (
     <Pressable
@@ -71,26 +82,12 @@ export function NexusCard({ article, onSave, isSaved, onClick, compact = false, 
                   <CoverageCount count={article.sourceCount} />
                   {article.isBlindspot && <BlindspotBadge />}
                   {isRead && (
-                    <View style={{
-                      backgroundColor: GLASS.bgPill,
-                      borderWidth: 0.5,
-                      borderColor: GLASS.borderPill,
-                      borderRadius: BADGE.borderRadius,
-                      paddingHorizontal: BADGE.paddingH,
-                      paddingVertical: BADGE.paddingV,
-                    }}>
-                      <Text style={{ fontFamily: 'Inter', fontSize: BADGE.fontSize, color: 'rgba(255, 255, 255, 0.4)' }}>Read</Text>
+                    <View style={pillStyle}>
+                      <Text style={{ fontFamily: 'Inter', fontSize: BADGE.fontSize, color: theme.text.tertiary }}>Read</Text>
                     </View>
                   )}
-                  <View style={{
-                    backgroundColor: GLASS.bgPill,
-                    borderWidth: 0.5,
-                    borderColor: GLASS.borderPill,
-                    borderRadius: BADGE.borderRadius,
-                    paddingHorizontal: BADGE.paddingH,
-                    paddingVertical: BADGE.paddingV,
-                  }}>
-                    <Text style={{ fontFamily: 'Inter', fontSize: BADGE.fontSize, color: 'rgba(255, 255, 255, 0.7)' }}>
+                  <View style={pillStyle}>
+                    <Text style={{ fontFamily: 'Inter', fontSize: BADGE.fontSize, color: theme.text.secondary }}>
                       {TOPIC_LABELS[article.topic]}
                     </Text>
                   </View>
@@ -115,7 +112,7 @@ export function NexusCard({ article, onSave, isSaved, onClick, compact = false, 
                   fontFamily: 'DMSerifDisplay',
                   fontSize: compact ? 14 : 20,
                   lineHeight: compact ? 20 : 28,
-                  color: isRead ? 'rgba(255, 255, 255, 0.5)' : 'white',
+                  color: isRead ? theme.text.tertiary : theme.text.primary,
                 }}
                 numberOfLines={compact ? 2 : 3}
               >
@@ -125,7 +122,7 @@ export function NexusCard({ article, onSave, isSaved, onClick, compact = false, 
               {/* Bottom row: factuality + time */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <FactualityBar level={article.factuality} />
-                <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.6)', marginLeft: 'auto' }}>
+                <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.secondary, marginLeft: 'auto' }}>
                   {formatTimeAgo(article.timestamp)}
                 </Text>
               </View>

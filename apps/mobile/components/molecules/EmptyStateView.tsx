@@ -14,6 +14,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated'
 import { SearchX, Inbox, BookOpen, Zap, Bookmark } from 'lucide-react-native'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly message: string
@@ -26,22 +27,27 @@ interface Props {
 const ICON_MAP = { search: SearchX, inbox: Inbox, book: BookOpen, lightning: Zap, bookmark: Bookmark } as const
 
 export function EmptyStateView({ message, title, icon = 'search', actionLabel, onAction }: Props) {
+  const theme = useTheme()
   const Icon = ICON_MAP[icon]
-  const pulseOpacity = useSharedValue(0.04)
+  const pulseOpacity = useSharedValue(0.5)
 
   useEffect(() => {
     pulseOpacity.value = withRepeat(
-      withTiming(0.08, { duration: 2000 }),
+      withTiming(1, { duration: 2000 }),
       -1,
       true
     )
   }, [pulseOpacity])
 
+  // Capture for worklet (cannot access React context inside useAnimatedStyle)
+  const pulseBackground = theme.surface.border
+
   const circleStyle = useAnimatedStyle(() => ({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: `rgba(255, 255, 255, ${pulseOpacity.value})`,
+    backgroundColor: pulseBackground,
+    opacity: pulseOpacity.value,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     marginBottom: 4,
@@ -50,19 +56,19 @@ export function EmptyStateView({ message, title, icon = 'search', actionLabel, o
   return (
     <View style={{ padding: 48, alignItems: 'center', gap: 12 }}>
       <Animated.View entering={FadeIn.delay(100).springify()} style={circleStyle}>
-        <Icon size={32} color="rgba(255, 255, 255, 0.25)" />
+        <Icon size={32} color={theme.text.muted} />
       </Animated.View>
       {title && (
         <Animated.Text
           entering={FadeInDown.delay(200).duration(400)}
-          style={{ fontFamily: 'DMSerifDisplay', fontSize: 18, color: '#fff', textAlign: 'center' }}
+          style={{ fontFamily: 'DMSerifDisplay', fontSize: 18, color: theme.text.primary, textAlign: 'center' }}
         >
           {title}
         </Animated.Text>
       )}
       <Animated.Text
         entering={FadeInDown.delay(300).duration(400)}
-        style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255, 255, 255, 0.5)', textAlign: 'center', lineHeight: 20, maxWidth: 240 }}
+        style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.secondary, textAlign: 'center', lineHeight: 20, maxWidth: 240 }}
       >
         {message}
       </Animated.Text>
@@ -71,9 +77,9 @@ export function EmptyStateView({ message, title, icon = 'search', actionLabel, o
           <Pressable
             onPress={onAction}
             testID="empty-state-action"
-            style={{ marginTop: 8, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.08)' }}
+            style={{ marginTop: 8, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, backgroundColor: theme.surface.border }}
           >
-            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: '#fff' }}>{actionLabel}</Text>
+            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: theme.text.primary }}>{actionLabel}</Text>
           </Pressable>
         </Animated.View>
       )}

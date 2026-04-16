@@ -10,6 +10,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated'
 import { LinearGradient } from 'expo-linear-gradient'
+import { useTheme } from '@/lib/shared/theme'
 
 interface SkeletonProps extends ViewProps {
   readonly width?: number | string
@@ -20,6 +21,7 @@ interface SkeletonProps extends ViewProps {
 }
 
 export function Skeleton({ width = '100%', height = 16, borderRadius = 8, delay = 0, style, ...props }: SkeletonProps) {
+  const theme = useTheme()
   const [measuredWidth, setMeasuredWidth] = useState(0)
   const translateX = useSharedValue(-measuredWidth || -200)
 
@@ -55,7 +57,7 @@ export function Skeleton({ width = '100%', height = 16, borderRadius = 8, delay 
       onLayout={handleLayout}
       style={[
         {
-          backgroundColor: 'rgba(255, 255, 255, 0.06)',
+          backgroundColor: theme.semantic.muted.bg,
           width: width as number,
           height,
           borderRadius,
@@ -67,7 +69,7 @@ export function Skeleton({ width = '100%', height = 16, borderRadius = 8, delay 
     >
       <Animated.View style={[{ width: '100%', height: '100%' }, shimmerStyle]}>
         <LinearGradient
-          colors={['transparent', 'rgba(255,255,255,0.08)', 'transparent']}
+          colors={['transparent', theme.surface.border, 'transparent']}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
           style={{ width: '100%', height: '100%' }}
