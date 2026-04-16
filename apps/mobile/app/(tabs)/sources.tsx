@@ -1,11 +1,12 @@
 /**
- * Sources screen — Directory of news outlets with collapsible filters,
+ * Sources screen — Directory of news outlets with bottom-sheet filters,
  * sort controls, and rich source cards with spectrum-colored accents.
  */
 
-import { useState, useCallback, useMemo } from 'react'
-import { View, Text, FlatList, Pressable, Linking, ScrollView, Modal } from 'react-native'
+import { useState, useCallback, useMemo, useRef } from 'react'
+import { View, Text, FlatList, Pressable, Linking, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet'
 import { useSources } from '@/lib/hooks/use-sources'
 import { useDebounce } from '@/lib/hooks/use-debounce'
 import type { NewsSource, BiasCategory, FactualityLevel, OwnershipType, Region } from '@/lib/shared/types'
@@ -40,15 +41,17 @@ const FACTUALITY_ORDER: Record<FactualityLevel, number> = {
   'very-high': 0, 'high': 1, 'mixed': 2, 'low': 3, 'very-low': 4,
 }
 
+const SHEET_SNAP_POINTS = ['70%', '95%']
+
 export default function SourcesScreen() {
   const [search, setSearch] = useState('')
   const [biasFilter, setBiasFilter] = useState<BiasCategory | null>(null)
   const [factualityFilter, setFactualityFilter] = useState<FactualityLevel | null>(null)
   const [ownershipFilter, setOwnershipFilter] = useState<OwnershipType | null>(null)
   const [regionFilter, setRegionFilter] = useState<Region | null>(null)
-  const [filtersOpen, setFiltersOpen] = useState(false)
   const [sortMode, setSortMode] = useState<SortMode>('name')
   const debouncedSearch = useDebounce(search, 300)
+  const bottomSheetRef = useRef<BottomSheet>(null)
 
   const { sources, isLoading, isError, mutate } = useSources({
     search: debouncedSearch,
@@ -72,6 +75,22 @@ export default function SourcesScreen() {
     }
   }, [sources, sortMode])
 
+  const openFilters = useCallback(() => {
+    hapticLight()
+    bottomSheetRef.current?.snapToIndex(0)
+  }, [])
+
+  const closeFilters = useCallback(() => {
+    bottomSheetRef.current?.close()
+  }, [])
+
+  const renderBackdrop = useCallback(
+    (props: React.ComponentProps<typeof BottomSheetBackdrop>) => (
+      <BottomSheetBackdrop {...props} opacity={0.4} pressBehavior="close" disappearsOnIndex={-1} appearsOnIndex={0} />
+    ),
+    []
+  )
+
   const renderSource = useCallback(({ item }: { item: NewsSource }) => {
     const color = BIAS_COLOR[item.bias]
     return (
@@ -82,16 +101,12 @@ export default function SourcesScreen() {
       >
         <GlassView variant="sm" style={{ padding: 14, marginHorizontal: 16, marginVertical: 4, borderLeftWidth: 3, borderLeftColor: color }}>
           <View style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
-            {/* Source favicon with bias-colored fallback */}
             <SourceLogo domain={item.url} name={item.name} bias={item.bias} size={42} />
-
-            {/* Info */}
             <View style={{ flex: 1 }}>
               <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: 'white', marginBottom: 3 }}>
                 {item.name}
               </Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
-                {/* Bias pill with spectrum color */}
                 <View style={{ backgroundColor: `${color}33`, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 99 }}>
                   <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 10, color }}>{BIAS_LABELS[item.bias]}</Text>
                 </View>
@@ -107,7 +122,6 @@ export default function SourcesScreen() {
     )
   }, [])
 
-  // Skeleton cards for loading
   const SkeletonCards = useMemo(() => (
     <View style={{ paddingHorizontal: 16, gap: 8 }}>
       {Array.from({ length: 5 }, (_, i) => (
@@ -125,12 +139,12 @@ export default function SourcesScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }} edges={['top']}>
-      {/* Sticky header: title + filter button + search */}
+      {/* Sticky header */}
       <View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, gap: 10 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
           <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: 'white' }}>Sources</Text>
           <Pressable
-            onPress={() => { hapticLight(); setFiltersOpen(true) }}
+            onPress={openFilters}
             hitSlop={TOUCH_TARGET.hitSlop}
             accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
             style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(26,26,26,0.6)', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}
@@ -216,32 +230,38 @@ export default function SourcesScreen() {
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Filter modal */}
-      <Modal visible={filtersOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setFiltersOpen(false)}>
-        <View style={{ flex: 1, backgroundColor: '#0A0A0A', paddingTop: 20, paddingHorizontal: 20 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+      {/* Filter bottom sheet */}
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={-1}
+        snapPoints={SHEET_SNAP_POINTS}
+        enablePanDownToClose
+        backdropComponent={renderBackdrop}
+        backgroundStyle={{ backgroundColor: 'rgba(15, 15, 15, 0.97)' }}
+        handleIndicatorStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.2)', width: 36 }}
+      >
+        <BottomSheetScrollView contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 40 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 22, color: 'white' }}>Filters</Text>
-            <Pressable onPress={() => setFiltersOpen(false)} hitSlop={TOUCH_TARGET.hitSlop}>
+            <Pressable onPress={closeFilters} hitSlop={TOUCH_TARGET.hitSlop}>
               <X size={20} color="rgba(255,255,255,0.5)" />
             </Pressable>
           </View>
 
-          <View style={{ gap: 20, flex: 1 }}>
-            <FilterSection label="BIAS">
-              <FilterPillRow items={ALL_BIASES} labels={BIAS_LABELS} selected={biasFilter} onSelect={(v) => setBiasFilter(biasFilter === v ? null : v)} onSelectAll={() => setBiasFilter(null)} allSelected={biasFilter === null} />
-            </FilterSection>
-            <FilterSection label="FACTUALITY">
-              <FilterPillRow items={ALL_FACTUALITIES} labels={FACTUALITY_LABELS} selected={factualityFilter} onSelect={(v) => setFactualityFilter(factualityFilter === v ? null : v)} onSelectAll={() => setFactualityFilter(null)} allSelected={factualityFilter === null} />
-            </FilterSection>
-            <FilterSection label="OWNERSHIP">
-              <FilterPillRow items={ALL_OWNERSHIPS} labels={OWNERSHIP_LABELS} selected={ownershipFilter} onSelect={(v) => setOwnershipFilter(ownershipFilter === v ? null : v)} onSelectAll={() => setOwnershipFilter(null)} allSelected={ownershipFilter === null} />
-            </FilterSection>
-            <FilterSection label="REGION">
-              <FilterPillRow items={ALL_REGIONS} labels={REGION_LABELS} selected={regionFilter} onSelect={(v) => setRegionFilter(regionFilter === v ? null : v)} onSelectAll={() => setRegionFilter(null)} allSelected={regionFilter === null} />
-            </FilterSection>
-          </View>
+          <FilterSection label="BIAS">
+            <FilterPillRow items={ALL_BIASES} labels={BIAS_LABELS} selected={biasFilter} onSelect={(v) => setBiasFilter(biasFilter === v ? null : v)} onSelectAll={() => setBiasFilter(null)} allSelected={biasFilter === null} />
+          </FilterSection>
+          <FilterSection label="FACTUALITY">
+            <FilterPillRow items={ALL_FACTUALITIES} labels={FACTUALITY_LABELS} selected={factualityFilter} onSelect={(v) => setFactualityFilter(factualityFilter === v ? null : v)} onSelectAll={() => setFactualityFilter(null)} allSelected={factualityFilter === null} />
+          </FilterSection>
+          <FilterSection label="OWNERSHIP">
+            <FilterPillRow items={ALL_OWNERSHIPS} labels={OWNERSHIP_LABELS} selected={ownershipFilter} onSelect={(v) => setOwnershipFilter(ownershipFilter === v ? null : v)} onSelectAll={() => setOwnershipFilter(null)} allSelected={ownershipFilter === null} />
+          </FilterSection>
+          <FilterSection label="REGION">
+            <FilterPillRow items={ALL_REGIONS} labels={REGION_LABELS} selected={regionFilter} onSelect={(v) => setRegionFilter(regionFilter === v ? null : v)} onSelectAll={() => setRegionFilter(null)} allSelected={regionFilter === null} />
+          </FilterSection>
 
-          <View style={{ flexDirection: 'row', gap: 12, paddingBottom: 40, paddingTop: 16 }}>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
             <Pressable
               onPress={() => { setBiasFilter(null); setFactualityFilter(null); setOwnershipFilter(null); setRegionFilter(null) }}
               style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center' }}
@@ -249,14 +269,14 @@ export default function SourcesScreen() {
               <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: 'rgba(255,255,255,0.6)' }}>Clear All</Text>
             </Pressable>
             <Pressable
-              onPress={() => setFiltersOpen(false)}
+              onPress={closeFilters}
               style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#fff', alignItems: 'center' }}
             >
               <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: '#0A0A0A' }}>Done</Text>
             </Pressable>
           </View>
-        </View>
-      </Modal>
+        </BottomSheetScrollView>
+      </BottomSheet>
     </SafeAreaView>
   )
 }

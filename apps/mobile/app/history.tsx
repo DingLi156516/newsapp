@@ -4,6 +4,7 @@
 
 import { useCallback } from 'react'
 import { View, Text, FlatList, Pressable } from 'react-native'
+import Animated, { FadeInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
@@ -13,6 +14,7 @@ import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useToast } from '@/lib/hooks/use-toast'
 import type { NewsArticle } from '@/lib/shared/types'
 import { NexusCard } from '@/components/organisms/NexusCard'
+import { SwipeableCard } from '@/components/molecules/SwipeableCard'
 import { NexusCardSkeletonList } from '@/components/organisms/NexusCardSkeleton'
 import { EmptyStateView } from '@/components/molecules/EmptyStateView'
 
@@ -36,17 +38,27 @@ export default function HistoryScreen() {
     })
   }, [toggle, isBookmarked, showToast])
 
-  const renderItem = useCallback(({ item }: { item: NewsArticle }) => (
-    <View style={{ paddingHorizontal: 16, paddingVertical: 4 }}>
-      <NexusCard
-        article={item}
-        onClick={() => router.push(`/story/${item.id}`)}
-        onSave={toggleWithToast}
+  const renderItem = useCallback(({ item, index }: { item: NewsArticle; index: number }) => (
+    <Animated.View
+      entering={FadeInDown.delay(Math.min(index, 8) * 60).springify().damping(18)}
+      style={{ paddingHorizontal: 16, paddingVertical: 4 }}
+    >
+      <SwipeableCard
+        storyId={item.id}
+        storyTitle={item.headline}
         isSaved={isBookmarked(item.id)}
-        isRead
-        compact
-      />
-    </View>
+        onSave={toggleWithToast}
+      >
+        <NexusCard
+          article={item}
+          onClick={() => router.push(`/story/${item.id}`)}
+          onSave={toggleWithToast}
+          isSaved={isBookmarked(item.id)}
+          isRead
+          compact
+        />
+      </SwipeableCard>
+    </Animated.View>
   ), [router, toggleWithToast, isBookmarked])
 
   return (

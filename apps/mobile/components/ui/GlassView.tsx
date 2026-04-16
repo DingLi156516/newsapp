@@ -3,16 +3,28 @@
  *
  * Wraps BlurView with glass styling (background, border, radius).
  * Variants mirror the web app's .glass / .glass-sm / .glass-pill CSS classes.
+ * Optional `glow` prop adds an ambient animated gradient on the top edge.
  */
 
+import { useEffect } from 'react'
 import { View, type ViewProps, Platform, StyleSheet } from 'react-native'
 import { BlurView } from 'expo-blur'
+import { LinearGradient } from 'expo-linear-gradient'
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated'
 
 type GlassVariant = 'default' | 'sm' | 'pill'
 
 interface GlassViewProps extends ViewProps {
   readonly variant?: GlassVariant
   readonly intensity?: number
+  /** Optional glow color for ambient top-edge gradient (e.g. '#f59e0b' for amber) */
+  readonly glow?: string
 }
 
 const VARIANT_CONFIG: Record<GlassVariant, {
@@ -41,9 +53,35 @@ const VARIANT_CONFIG: Record<GlassVariant, {
   },
 }
 
+function AmbientGlow({ color }: { color: string }) {
+  const translateX = useSharedValue(-20)
+
+  useEffect(() => {
+    translateX.value = withRepeat(
+      withTiming(20, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true
+    )
+  }, [translateX])
+
+  const glowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }))
+
+  return (
+    <Animated.View style={[styles.glowContainer, glowStyle]}>
+      <LinearGradient
+        colors={[`${color}15`, 'transparent']}
+        style={styles.glowGradient}
+      />
+    </Animated.View>
+  )
+}
+
 export function GlassView({
   variant = 'default',
   intensity: intensityOverride,
+  glow,
   style,
   children,
   ...props
@@ -67,6 +105,7 @@ export function GlassView({
         ]}
         {...props}
       >
+        {glow && <AmbientGlow color={glow} />}
         {children}
       </View>
     )
@@ -91,7 +130,23 @@ export function GlassView({
         tint="dark"
         style={StyleSheet.absoluteFill}
       />
+      {glow && <AmbientGlow color={glow} />}
       {children}
     </View>
   )
 }
+
+const styles = StyleSheet.create({
+  glowContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 40,
+    zIndex: 0,
+  },
+  glowGradient: {
+    width: '100%',
+    height: '100%',
+  },
+})

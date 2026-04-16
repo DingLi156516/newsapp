@@ -1,7 +1,13 @@
-import { Pressable } from 'react-native'
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
+import { Pressable, StyleSheet } from 'react-native'
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSequence,
+  withTiming,
+  withSpring,
+} from 'react-native-reanimated'
 import { Bookmark } from 'lucide-react-native'
-import { hapticLight } from '@/lib/haptics'
+import { hapticLight, hapticMedium } from '@/lib/haptics'
 import { TOUCH_TARGET } from '@/lib/shared/design'
 
 interface BookmarkButtonProps {
@@ -12,16 +18,44 @@ interface BookmarkButtonProps {
 
 export function BookmarkButton({ isSaved, onPress, size = 20 }: BookmarkButtonProps) {
   const scale = useSharedValue(1)
+  const ringScale = useSharedValue(0.5)
+  const ringOpacity = useSharedValue(0)
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }))
 
+  const ringStyle = useAnimatedStyle(() => ({
+    position: 'absolute' as const,
+    width: size * 2,
+    height: size * 2,
+    borderRadius: size,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    opacity: ringOpacity.value,
+    transform: [{ scale: ringScale.value }],
+  }))
+
   const handlePress = () => {
-    scale.value = withSpring(0.8, {}, () => {
-      scale.value = withSpring(1)
-    })
-    hapticLight()
+    const saving = !isSaved
+    if (saving) {
+      scale.value = withSequence(
+        withTiming(0.75, { duration: 80 }),
+        withSpring(1.15, { damping: 8 }),
+        withSpring(1, { damping: 15 })
+      )
+      ringScale.value = 0.5
+      ringOpacity.value = 0.5
+      ringScale.value = withTiming(2.0, { duration: 400 })
+      ringOpacity.value = withTiming(0, { duration: 400 })
+      hapticMedium()
+    } else {
+      scale.value = withSequence(
+        withTiming(0.85, { duration: 60 }),
+        withSpring(1, { damping: 15 })
+      )
+      hapticLight()
+    }
     onPress()
   }
 
@@ -32,8 +66,9 @@ export function BookmarkButton({ isSaved, onPress, size = 20 }: BookmarkButtonPr
       hitSlop={TOUCH_TARGET.hitSlop}
       accessibilityLabel={isSaved ? 'Remove bookmark' : 'Bookmark story'}
       accessibilityRole="button"
-      style={{ minWidth: TOUCH_TARGET.min, minHeight: TOUCH_TARGET.min, alignItems: 'center', justifyContent: 'center' }}
+      style={styles.container}
     >
+      <Animated.View style={ringStyle} />
       <Animated.View style={animatedStyle}>
         <Bookmark
           size={size}
@@ -44,3 +79,12 @@ export function BookmarkButton({ isSaved, onPress, size = 20 }: BookmarkButtonPr
     </Pressable>
   )
 }
+
+const styles = StyleSheet.create({
+  container: {
+    minWidth: TOUCH_TARGET.min,
+    minHeight: TOUCH_TARGET.min,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+})

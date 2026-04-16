@@ -1,10 +1,12 @@
 /**
- * EditFeedModal — Full-screen modal for customizing visible feed tabs and sort order.
+ * EditFeedModal — Bottom sheet for customizing visible feed tabs and sort order.
  * Now includes a TRENDING TOPICS section for hiding/showing promoted tags.
+ * Converted from Modal to @gorhom/bottom-sheet for native-feeling interaction.
  */
 
-import { View, Text, ScrollView, Pressable, Switch, Modal } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { useCallback, useRef, useEffect } from 'react'
+import { View, Text, Pressable, Switch } from 'react-native'
+import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet'
 import type { FeedSort, UnifiedTab, StoryTag } from '@/lib/shared/types'
 import type { FeedConfig } from '@/lib/hooks/use-feed-config'
 import {
@@ -24,17 +26,27 @@ interface Props {
 }
 
 const SORT_OPTIONS: FeedSort[] = ['most-covered', 'most-recent']
+const SHEET_SNAP_POINTS = ['75%', '95%']
 
 export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hiddenPromotedTags, promotedTags, onUpdateConfig }: Props) {
+  const bottomSheetRef = useRef<BottomSheet>(null)
   const visibleSet = new Set<string>(visibleFeeds)
   const enabledCount = visibleSet.size
   const hiddenSet = new Set<string>(hiddenPromotedTags)
 
   const tagKey = (slug: string, type: string) => `${slug}:${type}`
 
+  useEffect(() => {
+    if (visible) {
+      bottomSheetRef.current?.snapToIndex(0)
+    } else {
+      bottomSheetRef.current?.close()
+    }
+  }, [visible])
+
   const toggleFeed = (tab: UnifiedTab) => {
     const isEnabled = visibleSet.has(tab)
-    if (isEnabled && enabledCount <= 1) return // prevent disabling last tab
+    if (isEnabled && enabledCount <= 1) return
 
     const updated = isEnabled
       ? visibleFeeds.filter((t) => t !== tab)
@@ -55,148 +67,161 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hidden
     onUpdateConfig({ feedSort: sort })
   }
 
+  const renderBackdrop = useCallback(
+    (props: React.ComponentProps<typeof BottomSheetBackdrop>) => (
+      <BottomSheetBackdrop {...props} opacity={0.4} pressBehavior="close" disappearsOnIndex={-1} appearsOnIndex={0} />
+    ),
+    []
+  )
+
+  const handleSheetChange = useCallback((index: number) => {
+    if (index === -1) onClose()
+  }, [onClose])
+
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
+    <BottomSheet
+      ref={bottomSheetRef}
+      index={-1}
+      snapPoints={SHEET_SNAP_POINTS}
+      enablePanDownToClose
+      onChange={handleSheetChange}
+      backdropComponent={renderBackdrop}
+      backgroundStyle={{ backgroundColor: 'rgba(15, 15, 15, 0.97)' }}
+      handleIndicatorStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.2)', width: 36 }}
     >
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }} edges={['top']}>
-        <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-          {/* Header */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: 'white' }}>
-              Edit Feed
+      <BottomSheetScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: 'white' }}>
+            Edit Feed
+          </Text>
+          <Pressable testID="edit-feed-done" onPress={onClose} hitSlop={8}>
+            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: 'white' }}>
+              Done
             </Text>
-            <Pressable testID="edit-feed-done" onPress={onClose} hitSlop={8}>
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: 'white' }}>
-                Done
-              </Text>
-            </Pressable>
-          </View>
+          </Pressable>
+        </View>
 
-          {/* Feeds section */}
-          <GlassView style={{ padding: 16, gap: 12 }}>
-            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: 1 }}>
-              FEEDS
-            </Text>
-            {ALL_FEED_TABS.map((tab) => {
-              const isEnabled = visibleSet.has(tab)
-              return (
-                <View key={tab} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={{ fontFamily: 'Inter', fontSize: 15, color: 'white' }}>
-                    {FEED_TAB_LABELS[tab]}
-                  </Text>
-                  <Switch
-                    testID={`edit-feed-toggle-${tab}`}
-                    value={isEnabled}
-                    onValueChange={() => toggleFeed(tab)}
-                    disabled={isEnabled && enabledCount <= 1}
-                    trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.3)' }}
-                    thumbColor="white"
-                  />
-                </View>
-              )
-            })}
-          </GlassView>
-
-          {/* Topics section */}
-          <GlassView style={{ padding: 16, gap: 12 }}>
-            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: 1 }}>
-              TOPICS
-            </Text>
-            {ALL_TOPICS.map((topic) => {
-              const isEnabled = visibleSet.has(topic)
-              return (
-                <View key={topic} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={{ fontFamily: 'Inter', fontSize: 15, color: 'white' }}>
-                    {TOPIC_LABELS[topic]}
-                  </Text>
-                  <Switch
-                    testID={`edit-feed-toggle-${topic}`}
-                    value={isEnabled}
-                    onValueChange={() => toggleFeed(topic)}
-                    disabled={isEnabled && enabledCount <= 1}
-                    trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.3)' }}
-                    thumbColor="white"
-                  />
-                </View>
-              )
-            })}
-          </GlassView>
-
-          {/* Trending topics section */}
-          {promotedTags && promotedTags.length > 0 && (
-            <GlassView style={{ padding: 16, gap: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: 1 }}>
-                  TRENDING TOPICS
+        {/* Feeds section */}
+        <GlassView style={{ padding: 16, gap: 12 }}>
+          <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: 1 }}>
+            FEEDS
+          </Text>
+          {ALL_FEED_TABS.map((tab) => {
+            const isEnabled = visibleSet.has(tab)
+            return (
+              <View key={tab} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ fontFamily: 'Inter', fontSize: 15, color: 'white' }}>
+                  {FEED_TAB_LABELS[tab]}
                 </Text>
-                <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.25)' }}>
-                  auto-detected
-                </Text>
+                <Switch
+                  testID={`edit-feed-toggle-${tab}`}
+                  value={isEnabled}
+                  onValueChange={() => toggleFeed(tab)}
+                  disabled={isEnabled && enabledCount <= 1}
+                  trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.3)' }}
+                  thumbColor="white"
+                />
               </View>
-              {promotedTags.map((tag) => {
-                const isEnabled = !hiddenSet.has(tagKey(tag.slug, tag.type))
-                const dotColor = TAG_TYPE_COLORS[tag.type]
-                return (
-                  <View key={`${tag.slug}:${tag.type}`} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />
-                      <Text style={{ fontFamily: 'Inter', fontSize: 15, color: 'white' }}>
-                        {tag.label}
-                      </Text>
-                      <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.3)' }}>
-                        ({tag.storyCount})
-                      </Text>
-                    </View>
-                    <Switch
-                      testID={`edit-feed-toggle-ptag-${tag.slug}`}
-                      value={isEnabled}
-                      onValueChange={() => togglePromotedTag(tag.slug, tag.type)}
-                      trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.3)' }}
-                      thumbColor="white"
-                    />
-                  </View>
-                )
-              })}
-            </GlassView>
-          )}
+            )
+          })}
+        </GlassView>
 
-          {/* Sort section */}
+        {/* Topics section */}
+        <GlassView style={{ padding: 16, gap: 12 }}>
+          <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: 1 }}>
+            TOPICS
+          </Text>
+          {ALL_TOPICS.map((topic) => {
+            const isEnabled = visibleSet.has(topic)
+            return (
+              <View key={topic} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={{ fontFamily: 'Inter', fontSize: 15, color: 'white' }}>
+                  {TOPIC_LABELS[topic]}
+                </Text>
+                <Switch
+                  testID={`edit-feed-toggle-${topic}`}
+                  value={isEnabled}
+                  onValueChange={() => toggleFeed(topic)}
+                  disabled={isEnabled && enabledCount <= 1}
+                  trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.3)' }}
+                  thumbColor="white"
+                />
+              </View>
+            )
+          })}
+        </GlassView>
+
+        {/* Trending topics section */}
+        {promotedTags && promotedTags.length > 0 && (
           <GlassView style={{ padding: 16, gap: 12 }}>
-            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: 1 }}>
-              SORT ORDER
-            </Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {SORT_OPTIONS.map((sort) => {
-                const isActive = feedSort === sort
-                return (
-                  <Pressable key={sort} testID={`edit-feed-sort-${sort}`} onPress={() => setSortOrder(sort)}>
-                    <View style={{
-                      backgroundColor: isActive ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                      borderWidth: 0.5,
-                      borderColor: isActive ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-                      borderRadius: 9999,
-                      paddingHorizontal: 14,
-                      paddingVertical: 6,
-                    }}>
-                      <Text style={{
-                        fontFamily: 'Inter',
-                        fontSize: 13,
-                        color: isActive ? 'white' : 'rgba(255, 255, 255, 0.5)',
-                      }}>
-                        {FEED_SORT_LABELS[sort]}
-                      </Text>
-                    </View>
-                  </Pressable>
-                )
-              })}
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
+              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: 1 }}>
+                TRENDING TOPICS
+              </Text>
+              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.25)' }}>
+                auto-detected
+              </Text>
             </View>
+            {promotedTags.map((tag) => {
+              const isEnabled = !hiddenSet.has(tagKey(tag.slug, tag.type))
+              const dotColor = TAG_TYPE_COLORS[tag.type]
+              return (
+                <View key={`${tag.slug}:${tag.type}`} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor }} />
+                    <Text style={{ fontFamily: 'Inter', fontSize: 15, color: 'white' }}>
+                      {tag.label}
+                    </Text>
+                    <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.3)' }}>
+                      ({tag.storyCount})
+                    </Text>
+                  </View>
+                  <Switch
+                    testID={`edit-feed-toggle-ptag-${tag.slug}`}
+                    value={isEnabled}
+                    onValueChange={() => togglePromotedTag(tag.slug, tag.type)}
+                    trackColor={{ false: 'rgba(255, 255, 255, 0.1)', true: 'rgba(255, 255, 255, 0.3)' }}
+                    thumbColor="white"
+                  />
+                </View>
+              )
+            })}
           </GlassView>
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
+        )}
+
+        {/* Sort section */}
+        <GlassView style={{ padding: 16, gap: 12 }}>
+          <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'rgba(255, 255, 255, 0.4)', letterSpacing: 1 }}>
+            SORT ORDER
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {SORT_OPTIONS.map((sort) => {
+              const isActive = feedSort === sort
+              return (
+                <Pressable key={sort} testID={`edit-feed-sort-${sort}`} onPress={() => setSortOrder(sort)}>
+                  <View style={{
+                    backgroundColor: isActive ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                    borderWidth: 0.5,
+                    borderColor: isActive ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.08)',
+                    borderRadius: 9999,
+                    paddingHorizontal: 14,
+                    paddingVertical: 6,
+                  }}>
+                    <Text style={{
+                      fontFamily: 'Inter',
+                      fontSize: 13,
+                      color: isActive ? 'white' : 'rgba(255, 255, 255, 0.5)',
+                    }}>
+                      {FEED_SORT_LABELS[sort]}
+                    </Text>
+                  </View>
+                </Pressable>
+              )
+            })}
+          </View>
+        </GlassView>
+      </BottomSheetScrollView>
+    </BottomSheet>
   )
 }

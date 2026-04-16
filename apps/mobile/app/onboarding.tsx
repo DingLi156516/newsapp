@@ -7,7 +7,15 @@ import { useCallback, useRef, useState } from 'react'
 import { View, Text, FlatList, Pressable, useWindowDimensions } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  useAnimatedReaction,
+  FadeIn,
+  SlideInLeft,
+} from 'react-native-reanimated'
 import { useOnboarding } from '@/lib/hooks/use-onboarding'
 import { hapticLight } from '@/lib/haptics'
 import { SEMANTIC } from '@/lib/shared/design'
@@ -40,20 +48,30 @@ const PAGES: readonly OnboardingPage[] = [
   },
 ] as const
 
+const SPECTRUM_SEGMENTS = [
+  { flex: 15, color: '#3b82f6' },
+  { flex: 20, color: '#60a5fa' },
+  { flex: 25, color: '#9ca3af' },
+  { flex: 22, color: '#f87171' },
+  { flex: 18, color: '#ef4444' },
+]
+
 function SpectrumIllustration() {
   return (
     <View style={{ gap: 12, width: '100%', paddingHorizontal: 8 }}>
       <View style={{ flexDirection: 'row', height: 32, borderRadius: 8, overflow: 'hidden' }}>
-        <View style={{ flex: 15, backgroundColor: '#3b82f6' }} />
-        <View style={{ flex: 20, backgroundColor: '#60a5fa' }} />
-        <View style={{ flex: 25, backgroundColor: '#9ca3af' }} />
-        <View style={{ flex: 22, backgroundColor: '#f87171' }} />
-        <View style={{ flex: 18, backgroundColor: '#ef4444' }} />
+        {SPECTRUM_SEGMENTS.map((seg, i) => (
+          <Animated.View
+            key={seg.color}
+            entering={FadeIn.delay(200 + i * 100).springify()}
+            style={{ flex: seg.flex, backgroundColor: seg.color }}
+          />
+        ))}
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ fontFamily: 'Inter', fontSize: 11, color: '#60a5fa' }}>{'◀ Left'}</Text>
-        <Text style={{ fontFamily: 'Inter', fontSize: 11, color: '#9ca3af' }}>Center</Text>
-        <Text style={{ fontFamily: 'Inter', fontSize: 11, color: '#f87171' }}>{'Right ▶'}</Text>
+        <Animated.Text entering={FadeIn.delay(700).duration(300)} style={{ fontFamily: 'Inter', fontSize: 11, color: '#60a5fa' }}>{'◀ Left'}</Animated.Text>
+        <Animated.Text entering={FadeIn.delay(800).duration(300)} style={{ fontFamily: 'Inter', fontSize: 11, color: '#9ca3af' }}>Center</Animated.Text>
+        <Animated.Text entering={FadeIn.delay(900).duration(300)} style={{ fontFamily: 'Inter', fontSize: 11, color: '#f87171' }}>{'Right ▶'}</Animated.Text>
       </View>
     </View>
   )
@@ -68,12 +86,16 @@ function SourcesIllustration() {
   ]
   return (
     <View style={{ gap: 8, width: '100%' }}>
-      {sources.map((s) => (
-        <View key={s.name} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10 }}>
+      {sources.map((s, i) => (
+        <Animated.View
+          key={s.name}
+          entering={SlideInLeft.delay(200 + i * 150).springify().damping(18)}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10 }}
+        >
           <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: s.color }} />
           <Text style={{ flex: 1, fontFamily: 'Inter', fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>{s.name}</Text>
           <Text style={{ fontFamily: 'Inter', fontSize: 10, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 99, backgroundColor: `${s.color}22`, color: s.color }}>{s.label}</Text>
-        </View>
+        </Animated.View>
       ))}
     </View>
   )
@@ -83,21 +105,53 @@ function BlindspotIllustration() {
   return (
     <View style={{ alignItems: 'center', gap: 12 }}>
       <View style={{ flexDirection: 'row', gap: 12 }}>
-        <View style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderStyle: 'dashed', borderColor: 'rgba(245,158,11,0.4)', alignItems: 'center', justifyContent: 'center' }}>
+        <Animated.View
+          entering={FadeIn.delay(300).springify()}
+          style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderStyle: 'dashed', borderColor: 'rgba(245,158,11,0.4)', alignItems: 'center', justifyContent: 'center' }}
+        >
           <Text style={{ fontSize: 24, color: SEMANTIC.warning.color }}>?</Text>
-        </View>
-        <View style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderStyle: 'dashed', borderColor: 'rgba(245,158,11,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+        </Animated.View>
+        <Animated.View
+          entering={FadeIn.delay(500).springify()}
+          style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderStyle: 'dashed', borderColor: 'rgba(245,158,11,0.2)', alignItems: 'center', justifyContent: 'center' }}
+        >
           <Text style={{ fontSize: 24, color: 'rgba(245,158,11,0.5)' }}>?</Text>
-        </View>
+        </Animated.View>
       </View>
-      <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(245,158,11,0.7)', textAlign: 'center', lineHeight: 16 }}>
+      <Animated.Text
+        entering={FadeIn.delay(700).duration(400)}
+        style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(245,158,11,0.7)', textAlign: 'center', lineHeight: 16 }}
+      >
         Stories your reading habits{'\n'}might cause you to miss
-      </Text>
+      </Animated.Text>
     </View>
   )
 }
 
 const ILLUSTRATIONS = [SpectrumIllustration, SourcesIllustration, BlindspotIllustration] as const
+
+function AnimatedDot({ isActive }: { isActive: boolean }) {
+  const width = useSharedValue(isActive ? 24 : 8)
+  const bgOpacity = useSharedValue(isActive ? 1 : 0.15)
+
+  useAnimatedReaction(
+    () => isActive,
+    (active) => {
+      width.value = withSpring(active ? 24 : 8, { damping: 20, stiffness: 200 })
+      bgOpacity.value = withTiming(active ? 1 : 0.15, { duration: 200 })
+    },
+    [isActive]
+  )
+
+  const dotStyle = useAnimatedStyle(() => ({
+    width: width.value,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: `rgba(255, 255, 255, ${bgOpacity.value})`,
+  }))
+
+  return <Animated.View style={dotStyle} />
+}
 
 export default function OnboardingScreen() {
   const router = useRouter()
@@ -175,18 +229,10 @@ export default function OnboardingScreen() {
 
       {/* Dots + buttons */}
       <View style={{ paddingHorizontal: 24, paddingBottom: 24, gap: 20 }}>
-        {/* Page dots */}
+        {/* Page dots — spring-animated width + color */}
         <View testID="page-dots" style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
           {PAGES.map((_, i) => (
-            <View
-              key={i}
-              style={{
-                width: i === currentIndex ? 24 : 8,
-                height: 8,
-                borderRadius: 4,
-                backgroundColor: i === currentIndex ? '#fff' : 'rgba(255,255,255,0.15)',
-              }}
-            />
+            <AnimatedDot key={i} isActive={i === currentIndex} />
           ))}
         </View>
 

@@ -1,16 +1,25 @@
 /**
  * Story Detail screen — Shows full story with spectrum bar, AI tabs, timeline, sources.
  * Uses useLocalSearchParams() instead of Next.js use(params).
+ * Parallax hero image + sticky mini-header on scroll.
  */
 
-import { useEffect, useMemo } from 'react'
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native'
+import { useEffect, useMemo, useState } from 'react'
+import { View, Text, Pressable, ActivityIndicator, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
+import { BlurView } from 'expo-blur'
 import { ChevronLeft } from 'lucide-react-native'
 import { useCallback } from 'react'
+import Animated, {
+  useSharedValue,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  interpolate,
+  Extrapolation,
+} from 'react-native-reanimated'
 import { useStory } from '@/lib/hooks/use-story'
 import { useStoryTimeline } from '@/lib/hooks/use-story-timeline'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
@@ -37,6 +46,10 @@ import { HeadlineComparisonList } from '@/components/organisms/HeadlineCompariso
 import { KeyQuotesCarousel } from '@/components/organisms/KeyQuotesCarousel'
 import { ClaimsComparison } from '@/components/organisms/ClaimsComparison'
 import { StoryScores } from '@/components/molecules/StoryScores'
+import { ScrollProgressBar } from '@/components/atoms/ScrollProgressBar'
+
+const HERO_HEIGHT = 200
+const MINI_HEADER_HEIGHT = 56
 
 export default function StoryDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
@@ -47,6 +60,16 @@ export default function StoryDetailScreen() {
   const { markAsRead } = useReadingHistory()
   const { showToast } = useToast()
   const { tags: promotedTags } = usePromotedTags()
+
+  const scrollY = useSharedValue(0)
+  const [contentHeight, setContentHeight] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(0)
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (event) => {
+      scrollY.value = event.contentOffset.y
+    },
+  })
 
   const promotedSlugs = useMemo(
     () => new Set(promotedTags.map((t) => `${t.slug}:${t.type}`)),
@@ -69,6 +92,24 @@ export default function StoryDetailScreen() {
       markAsRead(id)
     }
   }, [story, id, markAsRead])
+
+  // Parallax style for hero image
+  const heroParallaxStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: interpolate(scrollY.value, [0, HERO_HEIGHT], [0, -HERO_HEIGHT * 0.5], Extrapolation.CLAMP) },
+    ],
+  }))
+
+  // Gradient overlay intensifies with scroll
+  const heroOverlayStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [0, HERO_HEIGHT], [0.5, 1], Extrapolation.CLAMP),
+  }))
+
+  // Sticky mini-header fades in after scrolling past hero
+  const miniHeaderStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scrollY.value, [150, 220], [0, 1], Extrapolation.CLAMP),
+    pointerEvents: scrollY.value > 150 ? 'auto' as const : 'none' as const,
+  }))
 
   if (isLoading) {
     return (
@@ -95,9 +136,39 @@ export default function StoryDetailScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }} edges={['top']}>
-      <ScrollView
+      {/* Scroll progress bar */}
+      <ScrollProgressBar scrollY={scrollY} contentHeight={contentHeight} viewportHeight={viewportHeight} />
+
+      {/* Sticky mini-header — fades in after scrolling past hero */}
+      <Animated.View style={[styles.miniHeader, miniHeaderStyle]}>
+        <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill}>
+          <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10, 10, 10, 0.8)' }} />
+        </BlurView>
+        <View style={styles.miniHeaderContent}>
+          <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <ChevronLeft size={18} color="rgba(255, 255, 255, 0.7)" />
+          </Pressable>
+          <Text style={styles.miniHeaderTitle} numberOfLines={1}>
+            {story.headline}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <ShareButton url={`/story/${story.id}`} title={story.headline} size={16} />
+            <BookmarkButton
+              isSaved={isBookmarked(story.id)}
+              onPress={() => toggleWithToast(story.id)}
+              size={16}
+            />
+          </View>
+        </View>
+      </Animated.View>
+
+      <Animated.ScrollView
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
         contentContainerStyle={{ paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
+        onContentSizeChange={(_, h) => setContentHeight(h)}
+        onLayout={(e) => setViewportHeight(e.nativeEvent.layout.height)}
       >
         {/* Header with back button */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 }}>
@@ -114,20 +185,24 @@ export default function StoryDetailScreen() {
           </View>
         </View>
 
-        {/* Hero image */}
+        {/* Hero image with parallax */}
         {story.imageUrl && (
-          <View style={{ height: 200, marginHorizontal: 16, borderRadius: 20, overflow: 'hidden', marginBottom: 16 }}>
-            <Image
-              source={{ uri: story.imageUrl }}
-              placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
-              transition={300}
-              style={{ width: '100%', height: '100%', opacity: 0.7 }}
-              contentFit="cover"
-            />
-            <LinearGradient
-              colors={['transparent', '#0A0A0A']}
-              style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100 }}
-            />
+          <View style={{ height: HERO_HEIGHT, marginHorizontal: 16, borderRadius: 20, overflow: 'hidden', marginBottom: 16 }}>
+            <Animated.View style={[{ width: '100%', height: HERO_HEIGHT * 1.3 }, heroParallaxStyle]}>
+              <Image
+                source={{ uri: story.imageUrl }}
+                placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+                transition={300}
+                style={{ width: '100%', height: '100%', opacity: 0.7 }}
+                contentFit="cover"
+              />
+            </Animated.View>
+            <Animated.View style={[{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100 }, heroOverlayStyle]}>
+              <LinearGradient
+                colors={['transparent', '#0A0A0A']}
+                style={{ width: '100%', height: '100%' }}
+              />
+            </Animated.View>
           </View>
         )}
 
@@ -265,7 +340,33 @@ export default function StoryDetailScreen() {
             </Text>
           )}
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
     </SafeAreaView>
   )
 }
+
+const styles = StyleSheet.create({
+  miniHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+    height: MINI_HEADER_HEIGHT + 50, // account for safe area
+    overflow: 'hidden',
+  },
+  miniHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 50, // safe area offset
+    height: '100%',
+  },
+  miniHeaderTitle: {
+    flex: 1,
+    fontFamily: 'Inter-SemiBold',
+    fontSize: 14,
+    color: 'white',
+  },
+})

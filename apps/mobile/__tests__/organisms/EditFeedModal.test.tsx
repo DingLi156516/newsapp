@@ -9,6 +9,7 @@ const defaultProps = {
   onClose: jest.fn(),
   visibleFeeds: ['for-you', 'trending', 'latest', 'politics'] as readonly UnifiedTab[],
   feedSort: 'most-covered' as const,
+  hiddenPromotedTags: [] as readonly string[],
   onUpdateConfig: jest.fn(),
 }
 

@@ -4,6 +4,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { View, Text, FlatList, RefreshControl, Pressable } from 'react-native'
+import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import type { NewsArticle, UnifiedTab, FeedSort, SelectedPromotedTag } from '@/lib/shared/types'
@@ -16,6 +17,7 @@ import { useForYou } from '@/lib/hooks/use-for-you'
 import { useVisibleTabs } from '@/lib/hooks/use-visible-tabs'
 import { usePromotedTags } from '@/lib/hooks/use-promoted-tags'
 import { NexusCard } from '@/components/organisms/NexusCard'
+import { SwipeableCard } from '@/components/molecules/SwipeableCard'
 import { NexusCardSkeleton, NexusCardSkeletonList } from '@/components/organisms/NexusCardSkeleton'
 import { HeroCard } from '@/components/organisms/HeroCard'
 import { UnifiedTabBar } from '@/components/organisms/UnifiedTabBar'
@@ -24,6 +26,7 @@ import { SearchBar } from '@/components/organisms/SearchBar'
 import { EmptyStateView } from '@/components/molecules/EmptyStateView'
 import { NetworkErrorView } from '@/components/molecules/NetworkErrorView'
 import { ForYouCta } from '@/components/molecules/ForYouCta'
+import { PullToRefreshIndicator } from '@/components/molecules/PullToRefreshIndicator'
 import { OfflineIndicator } from '@/components/atoms/OfflineIndicator'
 import { Settings2, BookOpen } from 'lucide-react-native'
 import { hapticMedium } from '@/lib/haptics'
@@ -179,23 +182,36 @@ export default function HomeFeedScreen() {
     }
   }, [total, accumulated.length, isForYou, isLoading])
 
-  const renderItem = useCallback(({ item }: { item: NewsArticle }) => (
-    <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
-      <NexusCard
-        article={item}
-        onClick={() => router.push(`/story/${item.id}`)}
-        onSave={toggleWithToast}
+  const renderItem = useCallback(({ item, index }: { item: NewsArticle; index: number }) => (
+    <Animated.View
+      entering={FadeInDown.delay(Math.min(index, 8) * 60).springify().damping(18)}
+      style={{ paddingHorizontal: 16, paddingVertical: 6 }}
+    >
+      <SwipeableCard
+        storyId={item.id}
+        storyTitle={item.headline}
         isSaved={isBookmarked(item.id)}
-        isRead={isRead(item.id)}
-        compact
-      />
-    </View>
+        onSave={toggleWithToast}
+      >
+        <NexusCard
+          article={item}
+          onClick={() => router.push(`/story/${item.id}`)}
+          onSave={toggleWithToast}
+          isSaved={isBookmarked(item.id)}
+          isRead={isRead(item.id)}
+          compact
+        />
+      </SwipeableCard>
+    </Animated.View>
   ), [router, toggleWithToast, isBookmarked, isRead])
 
   const isCurrentlyLoading = isForYou ? forYouLoading : isLoading
 
   const ListHeader = useMemo(() => (
     <View style={{ gap: 12, paddingBottom: 8 }}>
+      {/* Custom pull-to-refresh indicator */}
+      {refreshing && <PullToRefreshIndicator progress={1} refreshing={refreshing} />}
+
       {/* Header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 16 }}>
         <Text testID="axiom-header" style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: 'white' }}>
@@ -252,17 +268,19 @@ export default function HomeFeedScreen() {
         ) : isCurrentlyLoading ? (
           <NexusCardSkeleton />
         ) : heroStory ? (
-          <HeroCard
-            article={heroStory}
-            onClick={() => router.push(`/story/${heroStory.id}`)}
-            onSave={toggleWithToast}
-            isSaved={isBookmarked(heroStory.id)}
-            isRead={isRead(heroStory.id)}
-          />
+          <Animated.View entering={FadeIn.duration(300)}>
+            <HeroCard
+              article={heroStory}
+              onClick={() => router.push(`/story/${heroStory.id}`)}
+              onSave={toggleWithToast}
+              isSaved={isBookmarked(heroStory.id)}
+              isRead={isRead(heroStory.id)}
+            />
+          </Animated.View>
         ) : null}
       </View>
     </View>
-  ), [search, activeTab, visibleTabs, promotedTags, selectedPromotedTag, filtered.length, isAuthenticated, isCurrentlyLoading, isForYou, heroStory, router, toggleWithToast, isBookmarked, isRead, handleTabChange])
+  ), [search, activeTab, visibleTabs, promotedTags, selectedPromotedTag, filtered.length, isAuthenticated, isCurrentlyLoading, isForYou, heroStory, router, toggleWithToast, isBookmarked, isRead, handleTabChange, refreshing])
 
   const ListEmpty = useMemo(() => {
     if (filtered.length > 0) return null

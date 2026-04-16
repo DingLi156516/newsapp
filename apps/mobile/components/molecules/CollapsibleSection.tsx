@@ -12,6 +12,8 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  FadeIn,
+  FadeOut,
 } from 'react-native-reanimated'
 import { hapticLight } from '@/lib/haptics'
 import { ChevronDown } from 'lucide-react-native'
@@ -81,12 +83,16 @@ export function CollapsibleSection({ title, subtitle, defaultExpanded = false, c
       </Pressable>
 
       {expanded && (
-        <View style={{
-          borderTopWidth: 0.5,
-          borderTopColor: 'rgba(255, 255, 255, 0.06)',
-        }}>
+        <Animated.View
+          entering={FadeIn.duration(200)}
+          exiting={FadeOut.duration(150)}
+          style={{
+            borderTopWidth: 0.5,
+            borderTopColor: 'rgba(255, 255, 255, 0.06)',
+          }}
+        >
           {children}
-        </View>
+        </Animated.View>
       )}
     </GlassView>
   )

@@ -47,7 +47,7 @@ describe('useLocalReadingHistory', () => {
     expect(result.current.localIds.has('story-new')).toBe(true)
 
     const stored = await AsyncStorage.getItem(STORAGE_KEY)
-    expect(JSON.parse(stored)).toContain('story-new')
+    expect(JSON.parse(stored!)).toContain('story-new')
   })
 
   it('removeLocal removes a story id and persists', async () => {
@@ -65,7 +65,7 @@ describe('useLocalReadingHistory', () => {
     expect(result.current.localIds.has('story-2')).toBe(true)
 
     const stored = await AsyncStorage.getItem(STORAGE_KEY)
-    expect(JSON.parse(stored)).not.toContain('story-1')
+    expect(JSON.parse(stored!)).not.toContain('story-1')
   })
 
   it('clearLocal empties all reading history', async () => {

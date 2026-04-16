@@ -4,6 +4,7 @@
 
 import { useCallback, useMemo } from 'react'
 import { View, Text, FlatList, Pressable } from 'react-native'
+import Animated, { FadeInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
@@ -12,6 +13,7 @@ import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
 import type { NewsArticle } from '@/lib/shared/types'
 import { NexusCard } from '@/components/organisms/NexusCard'
+import { SwipeableCard } from '@/components/molecules/SwipeableCard'
 import { NexusCardSkeletonList } from '@/components/organisms/NexusCardSkeleton'
 import { EmptyStateView } from '@/components/molecules/EmptyStateView'
 import { useToast } from '@/lib/hooks/use-toast'
@@ -37,17 +39,27 @@ export default function SavedScreen() {
     savedIds.length > 0 ? { ids: savedIds } : null
   )
 
-  const renderItem = useCallback(({ item }: { item: NewsArticle }) => (
-    <View style={{ paddingHorizontal: 16, paddingVertical: 4 }}>
-      <NexusCard
-        article={item}
-        onClick={() => router.push(`/story/${item.id}`)}
-        onSave={toggleWithToast}
+  const renderItem = useCallback(({ item, index }: { item: NewsArticle; index: number }) => (
+    <Animated.View
+      entering={FadeInDown.delay(Math.min(index, 8) * 60).springify().damping(18)}
+      style={{ paddingHorizontal: 16, paddingVertical: 4 }}
+    >
+      <SwipeableCard
+        storyId={item.id}
+        storyTitle={item.headline}
         isSaved={isBookmarked(item.id)}
-        isRead={isRead(item.id)}
-        compact
-      />
-    </View>
+        onSave={toggleWithToast}
+      >
+        <NexusCard
+          article={item}
+          onClick={() => router.push(`/story/${item.id}`)}
+          onSave={toggleWithToast}
+          isSaved={isBookmarked(item.id)}
+          isRead={isRead(item.id)}
+          compact
+        />
+      </SwipeableCard>
+    </Animated.View>
   ), [router, toggleWithToast, isBookmarked, isRead])
 
   return (

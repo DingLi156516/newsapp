@@ -64,3 +64,10 @@ nativewind-env.d.ts
 
 # oh my codex
 .omx
+
+# supabase CLI cache
+supabase/.temp/
+
+# runtime logs
+*.log
+error.log

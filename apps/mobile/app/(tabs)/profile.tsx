@@ -6,6 +6,7 @@
  */
 
 import { View, Text, ScrollView, Pressable } from 'react-native'
+import Animated, { FadeInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Settings, Clock, LogOut, LogIn, BarChart3, Bookmark, BookOpen } from 'lucide-react-native'
@@ -20,10 +21,12 @@ import { NexusCard } from '@/components/organisms/NexusCard'
 import { BIAS_LABELS, BIAS_OPACITY } from '@/lib/shared/types'
 import { SEMANTIC, GLASS } from '@/lib/shared/design'
 import { Skeleton } from '@/components/atoms/Skeleton'
+import { BiasDonutChart } from '@/components/molecules/BiasDonutChart'
+import { AnimatedCounter } from '@/components/atoms/AnimatedCounter'
 
 export default function ProfileScreen() {
   const router = useRouter()
-  const { user, signOut, isLoading: authLoading } = useAuth()
+  const { user, signOut } = useAuth()
   const { profile, isLoading: profileLoading } = useBiasProfile()
   const { suggestions, isLoading: suggestionsLoading } = useSuggestions()
   const { toggle, isBookmarked } = useBookmarks()
@@ -96,22 +99,25 @@ export default function ProfileScreen() {
               <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255, 255, 255, 0.7)', lineHeight: 20 }}>
                 Your reading habits shape your worldview. This dashboard shows which perspectives you consume most — and which you're missing.
               </Text>
-              {profile && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
-                    {profile.totalStoriesRead} stories analyzed
-                  </Text>
-                  {profile.blindspots.length > 0 && (
-                    <>
-                      <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.3)' }}>·</Text>
-                      <Text style={{ fontFamily: 'Inter', fontSize: 12, color: SEMANTIC.warning.color }}>
-                        {profile.blindspots.length} blindspot{profile.blindspots.length !== 1 ? 's' : ''} detected
-                      </Text>
-                    </>
-                  )}
-                </View>
-              )}
             </GlassView>
+
+            {/* Stat cards with animated counters */}
+            {profile && (
+              <Animated.View entering={FadeInDown.delay(100).springify()} style={{ flexDirection: 'row', gap: 8 }}>
+                <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
+                  <AnimatedCounter value={profile.totalStoriesRead} style={{ fontSize: 22 }} />
+                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.4)' }}>Stories Read</Text>
+                </GlassView>
+                <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
+                  <AnimatedCounter value={readCount} style={{ fontSize: 22 }} />
+                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.4)' }}>This Session</Text>
+                </GlassView>
+                <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }} glow={profile.blindspots.length > 0 ? '#f59e0b' : undefined}>
+                  <AnimatedCounter value={profile.blindspots.length} style={{ fontSize: 22, color: profile.blindspots.length > 0 ? SEMANTIC.warning.color : 'white' }} />
+                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.4)' }}>Blindspots</Text>
+                </GlassView>
+              </Animated.View>
+            )}
 
             {/* Bias Profile */}
             {profileLoading ? (
@@ -121,6 +127,18 @@ export default function ProfileScreen() {
               </View>
             ) : profile ? (
               <>
+                {/* Donut Chart Overview */}
+                {(profile.userDistribution ?? []).length > 0 && (
+                  <Animated.View entering={FadeInDown.delay(200).springify()} style={{ gap: 8 }}>
+                    <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                      Your Reading Spectrum
+                    </Text>
+                    <GlassView style={{ padding: 20, alignItems: 'center' }}>
+                      <BiasDonutChart distribution={profile.userDistribution ?? []} />
+                    </GlassView>
+                  </Animated.View>
+                )}
+
                 {/* Spectrum Comparison */}
                 <View style={{ gap: 8 }}>
                   <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', letterSpacing: 1.5 }}>
