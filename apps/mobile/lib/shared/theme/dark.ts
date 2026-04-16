@@ -62,4 +62,5 @@ export const darkTheme: Theme = {
 
   blurTint: 'dark',
   statusBarStyle: 'light',
+  texture: { kind: 'none', intensity: 0 },
 }

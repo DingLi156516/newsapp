@@ -7,14 +7,27 @@
  * theme-invariant by design.
  */
 
+import type { ImageSourcePropType } from 'react-native'
+
+export type ThemeName = 'dark' | 'paper'
+
 export interface SemanticColor {
   readonly color: string
   readonly bg: string
   readonly border: string
 }
 
+export interface ThemeTexture {
+  /** 'none' draws nothing; 'grain' tiles an image at the given intensity. */
+  readonly kind: 'none' | 'grain'
+  /** Overlay opacity (0–1). Ignored when kind === 'none'. */
+  readonly intensity: number
+  /** Tileable image asset for the overlay. Required when kind === 'grain'. */
+  readonly asset?: ImageSourcePropType
+}
+
 export interface Theme {
-  readonly name: 'dark' | 'light'
+  readonly name: ThemeName
 
   readonly surface: {
     /** App background — was '#0A0A0A' */
@@ -55,6 +68,8 @@ export interface Theme {
   readonly blurTint: 'light' | 'dark' | 'default'
   /** StatusBar style passed to expo-status-bar */
   readonly statusBarStyle: 'light' | 'dark'
+  /** Optional surface texture overlay (e.g. paper grain). */
+  readonly texture: ThemeTexture
 }
 
 export type SemanticRole = keyof Theme['semantic']

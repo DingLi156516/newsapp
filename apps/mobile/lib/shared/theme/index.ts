@@ -8,6 +8,18 @@
  * in `@/lib/shared/design`.
  */
 
-export type { Theme, SemanticColor, SemanticRole } from './types'
+export type {
+  Theme,
+  ThemeName,
+  ThemeTexture,
+  SemanticColor,
+  SemanticRole,
+} from './types'
 export { darkTheme } from './dark'
-export { ThemeProvider, useTheme } from './ThemeProvider'
+export { paperTheme } from './paper'
+export {
+  ThemeProvider,
+  useTheme,
+  useSetTheme,
+  useThemeHydrated,
+} from './ThemeProvider'

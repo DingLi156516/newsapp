@@ -27,7 +27,7 @@ import { sampleArticles } from '@/lib/shared/sample-data'
 
 const swappedTheme: Theme = {
   ...darkTheme,
-  name: 'light',
+  name: 'paper',
   surface: {
     ...darkTheme.surface,
     background: '#ff00ff',
