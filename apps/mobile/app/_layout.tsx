@@ -1,5 +1,12 @@
 /**
  * Root layout — Loads fonts, wraps app in providers.
+ *
+ * Splash hide and the first-launch onboarding redirect both depend on the
+ * Stack being mounted, which only happens after `ThemeProvider` finishes
+ * hydrating from AsyncStorage. To avoid Expo Router's
+ * "navigate before mounting the Root Layout" path, we run those side-effects
+ * inside `ReadinessGate` (a child of `ThemeProvider`) once
+ * `fontsLoaded && useThemeHydrated()` is true.
  */
 
 import { useEffect } from 'react'
@@ -87,9 +94,30 @@ function ThemedAppShell({ toastCtx }: { toastCtx: ReturnType<typeof useToastProv
   )
 }
 
-function HydrationGate({ children }: { children: React.ReactNode }) {
-  const hydrated = useThemeHydrated()
-  if (!hydrated) return null
+interface ReadinessGateProps {
+  readonly fontsLoaded: boolean
+  readonly hasSeenOnboarding: boolean | null
+  readonly children: React.ReactNode
+}
+
+function ReadinessGate({ fontsLoaded, hasSeenOnboarding, children }: ReadinessGateProps) {
+  const themeHydrated = useThemeHydrated()
+  const router = useRouter()
+  const ready = fontsLoaded && themeHydrated
+
+  useEffect(() => {
+    if (ready) {
+      SplashScreen.hideAsync().catch(() => {})
+    }
+  }, [ready])
+
+  useEffect(() => {
+    if (ready && hasSeenOnboarding === false) {
+      router.replace('/onboarding')
+    }
+  }, [ready, hasSeenOnboarding, router])
+
+  if (!ready) return null
   return <>{children}</>
 }
 
@@ -103,34 +131,17 @@ export default function RootLayout() {
   })
 
   const toastCtx = useToastProvider()
-  const router = useRouter()
   const { hasSeenOnboarding } = useOnboarding()
 
   useEffect(() => {
     if (fontError) throw fontError
   }, [fontError])
 
-  useEffect(() => {
-    if (fontsLoaded) {
-      SplashScreen.hideAsync()
-    }
-  }, [fontsLoaded])
-
-  useEffect(() => {
-    if (fontsLoaded && hasSeenOnboarding === false) {
-      router.replace('/onboarding')
-    }
-  }, [fontsLoaded, hasSeenOnboarding, router])
-
-  if (!fontsLoaded) {
-    return null
-  }
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <BottomSheetModalProvider>
         <ThemeProvider>
-          <HydrationGate>
+          <ReadinessGate fontsLoaded={fontsLoaded} hasSeenOnboarding={hasSeenOnboarding}>
             <AuthProvider>
               <SWRProvider>
                 <ToastContext.Provider value={toastCtx}>
@@ -138,7 +149,7 @@ export default function RootLayout() {
                 </ToastContext.Provider>
               </SWRProvider>
             </AuthProvider>
-          </HydrationGate>
+          </ReadinessGate>
         </ThemeProvider>
       </BottomSheetModalProvider>
     </GestureHandlerRootView>

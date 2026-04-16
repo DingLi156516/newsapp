@@ -12,6 +12,7 @@ import Animated, {
   withTiming,
   Easing,
 } from 'react-native-reanimated'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   /** 0..1 representing pull progress before refresh triggers */
@@ -24,6 +25,7 @@ const SPECTRUM_COLORS = ['#3b82f6', '#60a5fa', '#9ca3af', '#f87171', '#ef4444']
 const BAR_HEIGHT = 4
 
 export function PullToRefreshIndicator({ progress, refreshing }: Props) {
+  const theme = useTheme()
   const shimmerTranslate = useSharedValue(-1)
 
   useEffect(() => {
@@ -49,7 +51,7 @@ export function PullToRefreshIndicator({ progress, refreshing }: Props) {
 
   return (
     <View style={styles.container}>
-      <Animated.View style={[styles.barWrapper, shimmerStyle]}>
+      <Animated.View style={[styles.barWrapper, { backgroundColor: theme.semantic.muted.bg }, shimmerStyle]}>
         <View style={[styles.bar, { width: `${fillFraction * 100}%` }]}>
           <View style={styles.segments}>
             {SPECTRUM_COLORS.map((color, i) => (
@@ -74,7 +76,6 @@ const styles = StyleSheet.create({
     width: 120,
     height: BAR_HEIGHT,
     borderRadius: BAR_HEIGHT / 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     overflow: 'hidden',
   },
   bar: {

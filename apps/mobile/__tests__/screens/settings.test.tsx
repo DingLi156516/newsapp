@@ -3,8 +3,8 @@ import { render, screen, fireEvent } from '@testing-library/react-native'
 
 const mockUpdatePreferences = jest.fn()
 
-jest.mock('@/lib/hooks/use-require-auth', () => ({
-  useRequireAuth: () => ({ user: { id: 'u1' }, isLoading: false }),
+jest.mock('@/lib/hooks/use-auth', () => ({
+  useAuth: () => ({ user: { id: 'u1' } }),
 }))
 
 jest.mock('@/lib/hooks/use-preferences', () => ({

@@ -56,6 +56,11 @@ export function ThemeProvider({ theme: forced, children }: ThemeProviderProps) {
   const [name, setName] = useState<ThemeName>('dark')
   const [hydrated, setHydrated] = useState<boolean>(forced !== undefined)
   const isMounted = useRef(true)
+  // Set by setTheme to mark a user choice that must outlive a still-pending
+  // hydration read. Without it, an in-flight `AsyncStorage.getItem()` could
+  // resolve after `setTheme('paper')` and overwrite the new value with the
+  // previously persisted one.
+  const userSelectedRef = useRef(false)
 
   useEffect(() => {
     isMounted.current = true
@@ -70,7 +75,7 @@ export function ThemeProvider({ theme: forced, children }: ThemeProviderProps) {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((stored) => {
         if (cancelled || !isMounted.current) return
-        if (stored === 'dark' || stored === 'paper') {
+        if (!userSelectedRef.current && (stored === 'dark' || stored === 'paper')) {
           setName(stored)
         }
         setHydrated(true)
@@ -85,6 +90,7 @@ export function ThemeProvider({ theme: forced, children }: ThemeProviderProps) {
   }, [forced])
 
   const setTheme = useCallback((next: ThemeName) => {
+    userSelectedRef.current = true
     setName(next)
     AsyncStorage.setItem(STORAGE_KEY, next).catch(() => {
       /* swallow — UI already reflects the change */

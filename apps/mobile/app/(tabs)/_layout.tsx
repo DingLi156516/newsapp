@@ -8,14 +8,16 @@ import { Tabs } from 'expo-router'
 import { BlurView } from 'expo-blur'
 import { Newspaper, Globe, User } from 'lucide-react-native'
 import { hapticLight } from '@/lib/haptics'
+import { useTheme } from '@/lib/shared/theme'
 
 function TabBarBackground() {
+  const theme = useTheme()
   return (
-    <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill}>
+    <BlurView intensity={25} tint={theme.blurTint} style={StyleSheet.absoluteFill}>
       <View
         style={{
           ...StyleSheet.absoluteFillObject,
-          backgroundColor: 'rgba(10, 10, 10, 0.7)',
+          backgroundColor: theme.surface.glass,
         }}
       />
     </BlurView>
@@ -28,15 +30,21 @@ function TabIcon({ Icon, color, size, focused }: {
   size: number
   focused: boolean
 }) {
+  const theme = useTheme()
   return (
     <View style={styles.iconWrapper}>
-      {focused && <View style={styles.activeGlow} />}
+      {focused && (
+        <View
+          style={[styles.activeGlow, { backgroundColor: `rgba(${theme.inkRgb}, 0.06)` }]}
+        />
+      )}
       <Icon size={size} color={color} />
     </View>
   )
 }
 
 export default function TabLayout() {
+  const theme = useTheme()
   return (
     <Tabs
       screenOptions={{
@@ -45,13 +53,13 @@ export default function TabLayout() {
           position: 'absolute',
           backgroundColor: 'transparent',
           borderTopWidth: 0.5,
-          borderTopColor: 'rgba(255, 255, 255, 0.06)',
+          borderTopColor: theme.surface.border,
           elevation: 0,
           paddingBottom: 4,
         },
         tabBarBackground: () => <TabBarBackground />,
-        tabBarActiveTintColor: '#FFFFFF',
-        tabBarInactiveTintColor: 'rgba(255, 255, 255, 0.4)',
+        tabBarActiveTintColor: theme.text.primary,
+        tabBarInactiveTintColor: theme.text.tertiary,
         tabBarLabelStyle: {
           fontFamily: 'Inter',
           fontSize: 11,
@@ -110,6 +118,5 @@ const styles = StyleSheet.create({
     width: 36,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
   },
 })

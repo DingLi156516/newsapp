@@ -6,6 +6,7 @@ import { View, Text } from 'react-native'
 import type { TimelineEvent } from '@/lib/shared/types'
 import { BIAS_LABELS, BIAS_COLOR } from '@/lib/shared/types'
 import { SpectrumBar } from '@/components/molecules/SpectrumBar'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly events: readonly TimelineEvent[]
@@ -22,6 +23,7 @@ function formatEventTime(timestamp: string): string {
 }
 
 export function StoryTimeline({ events }: Props) {
+  const theme = useTheme()
   if (events.length === 0) return null
 
   return (
@@ -37,13 +39,13 @@ export function StoryTimeline({ events }: Props) {
               backgroundColor: BIAS_COLOR[event.sourceBias],
               opacity: 0.85,
               borderWidth: 1,
-              borderColor: 'rgba(255, 255, 255, 0.2)',
+              borderColor: theme.surface.border,
             }} />
             {index < events.length - 1 && (
               <View style={{
                 width: 1,
                 flex: 1,
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                backgroundColor: theme.surface.border,
                 marginTop: 4,
               }} />
             )}
@@ -52,7 +54,7 @@ export function StoryTimeline({ events }: Props) {
           {/* Event content */}
           <View style={{ flex: 1, gap: 4, paddingTop: -2 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: 'rgba(255, 255, 255, 0.9)' }}>
+              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>
                 {event.sourceName}
               </Text>
               <View style={{
@@ -71,10 +73,10 @@ export function StoryTimeline({ events }: Props) {
                 </Text>
               </View>
             </View>
-            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.6)' }}>
+            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.secondary }}>
               {event.description}
             </Text>
-            <Text style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(255, 255, 255, 0.35)' }}>
+            <Text style={{ fontFamily: 'Inter', fontSize: 10, color: theme.text.muted }}>
               {formatEventTime(event.timestamp)} · {event.cumulativeSourceCount} sources
             </Text>
             {event.cumulativeSpectrum.length > 0 && (

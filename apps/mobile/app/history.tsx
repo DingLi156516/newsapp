@@ -17,9 +17,11 @@ import { NexusCard } from '@/components/organisms/NexusCard'
 import { SwipeableCard } from '@/components/molecules/SwipeableCard'
 import { NexusCardSkeletonList } from '@/components/organisms/NexusCardSkeleton'
 import { EmptyStateView } from '@/components/molecules/EmptyStateView'
+import { useTheme } from '@/lib/shared/theme'
 
 export default function HistoryScreen() {
   const router = useRouter()
+  const theme = useTheme()
   const { readStoryIds } = useReadingHistory()
   const { isBookmarked, toggle } = useBookmarks()
   const { showToast } = useToast()
@@ -62,7 +64,7 @@ export default function HistoryScreen() {
   ), [router, toggleWithToast, isBookmarked])
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background }} edges={['top']}>
       <FlatList
         data={stories}
         renderItem={renderItem}
@@ -70,9 +72,9 @@ export default function HistoryScreen() {
         ListHeaderComponent={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12 }}>
             <Pressable testID="back-button" onPress={() => router.back()} hitSlop={8}>
-              <ChevronLeft size={20} color="rgba(255, 255, 255, 0.7)" />
+              <ChevronLeft size={20} color={theme.text.secondary} />
             </Pressable>
-            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: 'white' }}>
+            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: theme.text.primary }}>
               Reading History
             </Text>
           </View>

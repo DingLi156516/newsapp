@@ -9,6 +9,7 @@ import { GlassView } from '@/components/ui/GlassView'
 import { SPACING, FONT } from '@/lib/shared/design'
 import type { KeyQuote, BiasCategory } from '@/lib/shared/types'
 import { BIAS_COLOR, BIAS_LABELS } from '@/lib/shared/types'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly quotes: readonly KeyQuote[]
@@ -18,6 +19,7 @@ const CARD_GAP = 12
 const HORIZONTAL_PADDING = 16
 
 function QuoteCard({ quote, cardWidth }: { quote: KeyQuote; cardWidth: number }) {
+  const theme = useTheme()
   const color = BIAS_COLOR[quote.sourceBias as BiasCategory] ?? '#A1A1AA'
 
   return (
@@ -26,18 +28,18 @@ function QuoteCard({ quote, cardWidth }: { quote: KeyQuote; cardWidth: number })
         fontFamily: 'Inter',
         fontSize: 15,
         lineHeight: 22,
-        color: 'rgba(255, 255, 255, 0.8)',
+        color: theme.text.primary,
         fontStyle: 'italic',
       }}>
         {'\u201C'}{quote.text}{'\u201D'}
       </Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: SPACING.md }}>
         <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
-        <Text style={{ fontFamily: FONT.caption.family, fontSize: FONT.caption.size, color: 'rgba(255, 255, 255, 0.5)' }}>
+        <Text style={{ fontFamily: FONT.caption.family, fontSize: FONT.caption.size, color: theme.text.tertiary }}>
           {quote.sourceName}
           {BIAS_LABELS[quote.sourceBias as BiasCategory] && (
             <>
-              <Text style={{ color: 'rgba(255, 255, 255, 0.2)' }}> {'\u00B7'} </Text>
+              <Text style={{ color: theme.text.muted }}> {'\u00B7'} </Text>
               {BIAS_LABELS[quote.sourceBias as BiasCategory]}
             </>
           )}
@@ -50,6 +52,7 @@ function QuoteCard({ quote, cardWidth }: { quote: KeyQuote; cardWidth: number })
 export function KeyQuotesCarousel({ quotes }: Props) {
   if (!quotes || quotes.length === 0) return null
 
+  const theme = useTheme()
   const { width: screenWidth } = useWindowDimensions()
   const cardWidth = screenWidth - HORIZONTAL_PADDING * 2
   const snapInterval = cardWidth + CARD_GAP
@@ -72,7 +75,7 @@ export function KeyQuotesCarousel({ quotes }: Props) {
       <Text style={{
         fontFamily: 'Inter-SemiBold',
         fontSize: FONT.body.size,
-        color: 'rgba(255, 255, 255, 0.9)',
+        color: theme.text.primary,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
         paddingHorizontal: HORIZONTAL_PADDING,
@@ -106,8 +109,8 @@ export function KeyQuotesCarousel({ quotes }: Props) {
                 height: 6,
                 borderRadius: 3,
                 backgroundColor: activeIndex === i
-                  ? 'rgba(255, 255, 255, 0.6)'
-                  : 'rgba(255, 255, 255, 0.15)',
+                  ? `rgba(${theme.inkRgb}, 0.6)`
+                  : `rgba(${theme.inkRgb}, 0.15)`,
               }}
             />
           ))}

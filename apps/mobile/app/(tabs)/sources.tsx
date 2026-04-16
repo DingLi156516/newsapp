@@ -30,6 +30,7 @@ import { NetworkErrorView } from '@/components/molecules/NetworkErrorView'
 import { EmptyStateView } from '@/components/molecules/EmptyStateView'
 import { hapticLight } from '@/lib/haptics'
 import { TOUCH_TARGET } from '@/lib/shared/design'
+import { useTheme } from '@/lib/shared/theme'
 
 type SortMode = 'name' | 'bias' | 'factuality'
 
@@ -44,6 +45,7 @@ const FACTUALITY_ORDER: Record<FactualityLevel, number> = {
 const SHEET_SNAP_POINTS = ['70%', '95%']
 
 export default function SourcesScreen() {
+  const theme = useTheme()
   const [search, setSearch] = useState('')
   const [biasFilter, setBiasFilter] = useState<BiasCategory | null>(null)
   const [factualityFilter, setFactualityFilter] = useState<FactualityLevel | null>(null)
@@ -103,7 +105,7 @@ export default function SourcesScreen() {
           <View style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
             <SourceLogo domain={item.url} name={item.name} bias={item.bias} size={42} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: 'white', marginBottom: 3 }}>
+              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: theme.text.primary, marginBottom: 3 }}>
                 {item.name}
               </Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
@@ -112,7 +114,7 @@ export default function SourcesScreen() {
                 </View>
                 <FactualityBar level={item.factuality} size="compact" showLabel />
               </View>
-              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.3)' }}>
+              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.muted }}>
                 {item.url}
               </Text>
             </View>
@@ -120,40 +122,40 @@ export default function SourcesScreen() {
         </GlassView>
       </Pressable>
     )
-  }, [])
+  }, [theme])
 
   const SkeletonCards = useMemo(() => (
     <View style={{ paddingHorizontal: 16, gap: 8 }}>
       {Array.from({ length: 5 }, (_, i) => (
         <GlassView key={i} variant="sm" style={{ padding: 14, flexDirection: 'row', gap: 12 }}>
-          <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.04)' }} />
+          <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: theme.semantic.muted.bg }} />
           <View style={{ flex: 1, gap: 6 }}>
-            <View style={{ height: 12, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.04)', width: '60%' }} />
-            <View style={{ height: 10, borderRadius: 5, backgroundColor: 'rgba(255,255,255,0.03)', width: '40%' }} />
-            <View style={{ height: 10, borderRadius: 5, backgroundColor: 'rgba(255,255,255,0.03)', width: '70%' }} />
+            <View style={{ height: 12, borderRadius: 6, backgroundColor: theme.semantic.muted.bg, width: '60%' }} />
+            <View style={{ height: 10, borderRadius: 5, backgroundColor: `rgba(${theme.inkRgb}, 0.03)`, width: '40%' }} />
+            <View style={{ height: 10, borderRadius: 5, backgroundColor: `rgba(${theme.inkRgb}, 0.03)`, width: '70%' }} />
           </View>
         </GlassView>
       ))}
     </View>
-  ), [])
+  ), [theme])
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background }} edges={['top']}>
       {/* Sticky header */}
       <View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, gap: 10 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: 'white' }}>Sources</Text>
+          <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: theme.text.primary }}>Sources</Text>
           <Pressable
             onPress={openFilters}
             hitSlop={TOUCH_TARGET.hitSlop}
             accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(26,26,26,0.6)', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: theme.surface.glassPill, borderWidth: 0.5, borderColor: theme.surface.borderPill, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}
           >
-            <SlidersHorizontal size={14} color="rgba(255,255,255,0.6)" />
-            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>Filters</Text>
+            <SlidersHorizontal size={14} color={theme.text.secondary} />
+            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.secondary }}>Filters</Text>
             {activeFilterCount > 0 && (
-              <View style={{ backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 99 }}>
-                <Text style={{ fontFamily: 'Inter-Bold', fontSize: 10, color: '#fff' }}>{activeFilterCount}</Text>
+              <View style={{ backgroundColor: `rgba(${theme.inkRgb}, 0.15)`, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 99 }}>
+                <Text style={{ fontFamily: 'Inter-Bold', fontSize: 10, color: theme.text.primary }}>{activeFilterCount}</Text>
               </View>
             )}
           </Pressable>
@@ -178,14 +180,14 @@ export default function SourcesScreen() {
                 onPress={() => { hapticLight(); setSortMode(mode) }}
               >
                 <View style={{
-                  backgroundColor: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
+                  backgroundColor: isActive ? `rgba(${theme.inkRgb}, 0.1)` : 'transparent',
                   borderWidth: 0.5,
-                  borderColor: isActive ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.08)',
+                  borderColor: isActive ? theme.surface.borderPill : theme.surface.border,
                   borderRadius: 99,
                   paddingHorizontal: 14,
                   paddingVertical: 5,
                 }}>
-                  <Text style={{ fontFamily: 'Inter', fontSize: 12, color: isActive ? '#fff' : 'rgba(255,255,255,0.4)' }}>
+                  <Text style={{ fontFamily: 'Inter', fontSize: 12, color: isActive ? theme.text.primary : theme.text.tertiary }}>
                     {label}
                   </Text>
                 </View>
@@ -196,7 +198,7 @@ export default function SourcesScreen() {
 
         {/* Active filter chips + source count */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
+          <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
             {sorted.length} source{sorted.length !== 1 ? 's' : ''}
           </Text>
           {biasFilter && (
@@ -237,14 +239,14 @@ export default function SourcesScreen() {
         snapPoints={SHEET_SNAP_POINTS}
         enablePanDownToClose
         backdropComponent={renderBackdrop}
-        backgroundStyle={{ backgroundColor: 'rgba(15, 15, 15, 0.97)' }}
-        handleIndicatorStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.2)', width: 36 }}
+        backgroundStyle={{ backgroundColor: theme.surface.background }}
+        handleIndicatorStyle={{ backgroundColor: theme.surface.borderPill, width: 36 }}
       >
         <BottomSheetScrollView contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 40 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 22, color: 'white' }}>Filters</Text>
+            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 22, color: theme.text.primary }}>Filters</Text>
             <Pressable onPress={closeFilters} hitSlop={TOUCH_TARGET.hitSlop}>
-              <X size={20} color="rgba(255,255,255,0.5)" />
+              <X size={20} color={theme.text.tertiary} />
             </Pressable>
           </View>
 
@@ -264,15 +266,15 @@ export default function SourcesScreen() {
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <Pressable
               onPress={() => { setBiasFilter(null); setFactualityFilter(null); setOwnershipFilter(null); setRegionFilter(null) }}
-              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center' }}
+              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: theme.semantic.muted.bg, alignItems: 'center' }}
             >
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: 'rgba(255,255,255,0.6)' }}>Clear All</Text>
+              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: theme.text.secondary }}>Clear All</Text>
             </Pressable>
             <Pressable
               onPress={closeFilters}
-              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#fff', alignItems: 'center' }}
+              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: theme.text.primary, alignItems: 'center' }}
             >
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: '#0A0A0A' }}>Done</Text>
+              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: theme.surface.background }}>Done</Text>
             </Pressable>
           </View>
         </BottomSheetScrollView>
@@ -286,18 +288,20 @@ export default function SourcesScreen() {
 // ---------------------------------------------------------------------------
 
 function ActiveChip({ label, onDismiss }: { readonly label: string; readonly onDismiss: () => void }) {
+  const theme = useTheme()
   return (
-    <Pressable onPress={onDismiss} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.1)', borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 }}>
-      <Text style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(255,255,255,0.6)' }}>{label}</Text>
-      <Text style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)' }}>✕</Text>
+    <Pressable onPress={onDismiss} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: theme.semantic.muted.bg, borderWidth: 0.5, borderColor: theme.surface.borderPill, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 }}>
+      <Text style={{ fontFamily: 'Inter', fontSize: 10, color: theme.text.secondary }}>{label}</Text>
+      <Text style={{ fontSize: 8, color: theme.text.tertiary }}>✕</Text>
     </Pressable>
   )
 }
 
 function FilterSection({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
+  const theme = useTheme()
   return (
     <View style={{ gap: 6 }}>
-      <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: 'rgba(255, 255, 255, 0.35)', textTransform: 'uppercase', letterSpacing: 1 }}>
+      <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: theme.text.muted, textTransform: 'uppercase', letterSpacing: 1 }}>
         {label}
       </Text>
       {children}
@@ -315,18 +319,19 @@ function FilterPillRow<T extends string>({
   readonly onSelectAll: () => void
   readonly allSelected: boolean
 }) {
+  const theme = useTheme()
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
       <Pressable onPress={() => { hapticLight(); onSelectAll() }}>
         <View style={{
-          backgroundColor: allSelected ? 'rgba(255,255,255,0.1)' : 'transparent',
+          backgroundColor: allSelected ? `rgba(${theme.inkRgb}, 0.1)` : 'transparent',
           borderWidth: 0.5,
-          borderColor: allSelected ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)',
+          borderColor: allSelected ? theme.surface.borderPill : theme.surface.border,
           borderRadius: 9999,
           paddingHorizontal: 14,
           paddingVertical: 6,
         }}>
-          <Text style={{ fontFamily: 'Inter', fontSize: 13, color: allSelected ? 'white' : 'rgba(255,255,255,0.5)' }}>All</Text>
+          <Text style={{ fontFamily: 'Inter', fontSize: 13, color: allSelected ? theme.text.primary : theme.text.tertiary }}>All</Text>
         </View>
       </Pressable>
       {items.map((item) => {
@@ -334,14 +339,14 @@ function FilterPillRow<T extends string>({
         return (
           <Pressable key={item} onPress={() => { hapticLight(); onSelect(item) }}>
             <View style={{
-              backgroundColor: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
+              backgroundColor: isActive ? `rgba(${theme.inkRgb}, 0.1)` : 'transparent',
               borderWidth: 0.5,
-              borderColor: isActive ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)',
+              borderColor: isActive ? theme.surface.borderPill : theme.surface.border,
               borderRadius: 9999,
               paddingHorizontal: 14,
               paddingVertical: 6,
             }}>
-              <Text style={{ fontFamily: 'Inter', fontSize: 13, color: isActive ? 'white' : 'rgba(255,255,255,0.5)' }}>{labels[item]}</Text>
+              <Text style={{ fontFamily: 'Inter', fontSize: 13, color: isActive ? theme.text.primary : theme.text.tertiary }}>{labels[item]}</Text>
             </View>
           </Pressable>
         )

@@ -34,9 +34,11 @@ import { TOUCH_TARGET } from '@/lib/shared/design'
 import { useToast } from '@/lib/hooks/use-toast'
 import { usePreferences } from '@/lib/hooks/use-preferences'
 import { useFeedConfig } from '@/lib/hooks/use-feed-config'
+import { useTheme } from '@/lib/shared/theme'
 
 export default function HomeFeedScreen() {
   const router = useRouter()
+  const theme = useTheme()
   const params = useLocalSearchParams<{ tag?: string; tag_type?: string }>()
 
   const [activeTab, setActiveTab] = useState<UnifiedTab>('trending')
@@ -214,7 +216,7 @@ export default function HomeFeedScreen() {
 
       {/* Header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 16 }}>
-        <Text testID="axiom-header" style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: 'white' }}>
+        <Text testID="axiom-header" style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: theme.text.primary }}>
           Axiom
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -227,7 +229,7 @@ export default function HomeFeedScreen() {
             accessibilityRole="button"
             style={{ minWidth: TOUCH_TARGET.min, minHeight: TOUCH_TARGET.min, alignItems: 'center', justifyContent: 'center' }}
           >
-            <BookOpen size={20} color="rgba(255, 255, 255, 0.5)" />
+            <BookOpen size={20} color={theme.text.tertiary} />
           </Pressable>
           <Pressable
             testID="edit-feed-button"
@@ -237,7 +239,7 @@ export default function HomeFeedScreen() {
             accessibilityRole="button"
             style={{ minWidth: TOUCH_TARGET.min, minHeight: TOUCH_TARGET.min, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Settings2 size={20} color="rgba(255, 255, 255, 0.5)" />
+            <Settings2 size={20} color={theme.text.tertiary} />
           </Pressable>
         </View>
       </View>
@@ -291,7 +293,7 @@ export default function HomeFeedScreen() {
   }, [filtered.length, isForYou, isAuthenticated, isCurrentlyLoading, isError, mutate])
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background }} edges={['top']}>
       <FlatList
         data={gridStories}
         renderItem={renderItem}
@@ -304,7 +306,8 @@ export default function HomeFeedScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="rgba(255, 255, 255, 0.5)"
+            tintColor={theme.text.tertiary}
+            colors={[theme.text.tertiary]}
           />
         }
         contentContainerStyle={{ paddingBottom: 20 }}

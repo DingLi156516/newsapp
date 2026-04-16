@@ -9,6 +9,7 @@
 import { View, Text } from 'react-native'
 import type { SpectrumSegment } from '@/lib/shared/types'
 import { groupSpectrumSegments } from '@/lib/shared/types'
+import { useTheme } from '@/lib/shared/theme'
 
 interface SpectrumBarProps {
   readonly segments: SpectrumSegment[]
@@ -17,6 +18,7 @@ interface SpectrumBarProps {
 }
 
 export function SpectrumBar({ segments, height = 6, showLabels = false }: SpectrumBarProps) {
+  const theme = useTheme()
   const groups = groupSpectrumSegments(segments)
   const total = groups.reduce((sum, g) => sum + g.percentage, 0)
   if (total === 0) return null
@@ -32,7 +34,7 @@ export function SpectrumBar({ segments, height = 6, showLabels = false }: Spectr
           height,
           borderRadius: height / 2,
           overflow: 'hidden',
-          backgroundColor: 'rgba(255, 255, 255, 0.06)',
+          backgroundColor: theme.semantic.muted.bg,
         }}
       >
         {groups.map((group) => {
@@ -56,7 +58,7 @@ export function SpectrumBar({ segments, height = 6, showLabels = false }: Spectr
           {groups.map((group) => (
             <View key={group.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: group.color, opacity: 0.85 }} />
-              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.6)' }}>
+              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.secondary }}>
                 {group.label} {group.percentage}%
               </Text>
             </View>

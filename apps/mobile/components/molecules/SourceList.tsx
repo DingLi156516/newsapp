@@ -5,6 +5,7 @@ import { BiasTag } from '@/components/atoms/BiasTag'
 import { FactualityBar } from '@/components/atoms/FactualityBar'
 import { SourceLogo } from '@/components/atoms/SourceLogo'
 import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-react-native'
+import { useTheme } from '@/lib/shared/theme'
 
 interface SourceListProps {
   readonly sources: NewsSource[]
@@ -13,6 +14,7 @@ interface SourceListProps {
 
 export function SourceList({ sources, initialExpanded = false }: SourceListProps) {
   const [expanded, setExpanded] = useState(initialExpanded)
+  const theme = useTheme()
   const visibleSources = expanded ? sources : sources.slice(0, 3)
 
   return (
@@ -32,20 +34,20 @@ export function SourceList({ sources, initialExpanded = false }: SourceListProps
             paddingHorizontal: 4,
             opacity: pressed ? 0.7 : 1,
             borderBottomWidth: 0.5,
-            borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+            borderBottomColor: theme.surface.border,
           })}
         >
           <View style={{ flex: 1, gap: 4 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <SourceLogo domain={source.url} name={source.name} bias={source.bias} size={24} />
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: 'rgba(255, 255, 255, 0.9)' }}>
+              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>
                 {source.name}
               </Text>
               <BiasTag bias={source.bias} compact />
             </View>
             <FactualityBar level={source.factuality} size="compact" />
           </View>
-          <ExternalLink size={14} color="rgba(255, 255, 255, 0.3)" />
+          <ExternalLink size={14} color={theme.text.tertiary} />
         </Pressable>
       ))}
       {sources.length > 3 && (
@@ -53,13 +55,13 @@ export function SourceList({ sources, initialExpanded = false }: SourceListProps
           onPress={() => setExpanded((prev) => !prev)}
           style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10 }}
         >
-          <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
+          <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
             {expanded ? 'Show less' : `Show all ${sources.length} sources`}
           </Text>
           {expanded ? (
-            <ChevronUp size={14} color="rgba(255, 255, 255, 0.5)" />
+            <ChevronUp size={14} color={theme.text.tertiary} />
           ) : (
-            <ChevronDown size={14} color="rgba(255, 255, 255, 0.5)" />
+            <ChevronDown size={14} color={theme.text.tertiary} />
           )}
         </Pressable>
       )}

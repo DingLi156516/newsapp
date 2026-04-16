@@ -1,7 +1,9 @@
 import { View, Text } from 'react-native'
 import { ALL_BIASES, BIAS_LABELS, BIAS_OPACITY } from '@/lib/shared/types'
+import { useTheme } from '@/lib/shared/theme'
 
 export function BiasLegend() {
+  const theme = useTheme()
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 8 }}>
       {ALL_BIASES.map((bias) => (
@@ -11,12 +13,12 @@ export function BiasLegend() {
               width: 10,
               height: 10,
               borderRadius: 2,
-              backgroundColor: `rgba(255, 255, 255, ${BIAS_OPACITY[bias]})`,
+              backgroundColor: `rgba(${theme.inkRgb}, ${BIAS_OPACITY[bias]})`,
               borderWidth: 0.5,
-              borderColor: 'rgba(255, 255, 255, 0.15)',
+              borderColor: theme.surface.border,
             }}
           />
-          <Text style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(255, 255, 255, 0.6)' }}>
+          <Text style={{ fontFamily: 'Inter', fontSize: 10, color: theme.text.secondary }}>
             {BIAS_LABELS[bias]}
           </Text>
         </View>

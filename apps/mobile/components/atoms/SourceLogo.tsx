@@ -35,7 +35,7 @@ function FallbackAvatar({ name, bias, size }: { readonly name: string; readonly 
         justifyContent: 'center',
       }}
     >
-      <Text style={{ fontFamily: 'Inter-Bold', fontSize: size * 0.42, color: '#fff' }}>
+      <Text style={{ fontFamily: 'Inter-Bold', fontSize: size * 0.42, color: '#fff' /* on bias-tinted swatch */ }}>
         {name.charAt(0)}
       </Text>
     </View>

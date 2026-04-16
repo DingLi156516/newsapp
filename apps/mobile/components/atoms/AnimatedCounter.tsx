@@ -12,6 +12,7 @@ import {
   useAnimatedReaction,
   runOnJS,
 } from 'react-native-reanimated'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly value: number
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export function AnimatedCounter({ value, duration = 800, style, suffix = '', prefix = '' }: Props) {
+  const theme = useTheme()
   const animatedValue = useSharedValue(0)
   const [displayValue, setDisplayValue] = useState(0)
 
@@ -43,7 +45,7 @@ export function AnimatedCounter({ value, duration = 800, style, suffix = '', pre
   )
 
   return (
-    <Text style={[{ fontFamily: 'Inter-SemiBold', fontSize: 24, color: 'white' }, style]}>
+    <Text style={[{ fontFamily: 'Inter-SemiBold', fontSize: 24, color: theme.text.primary }, style]}>
       {prefix}{displayValue}{suffix}
     </Text>
   )

@@ -9,6 +9,7 @@ import Animated, { useAnimatedStyle, withSpring, useSharedValue } from 'react-na
 import type { UnifiedTab, StoryTag, SelectedPromotedTag } from '@/lib/shared/types'
 import { getUnifiedTabLabel, TAG_TYPE_COLORS } from '@/lib/shared/types'
 import { hapticLight } from '@/lib/haptics'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly value: UnifiedTab
@@ -22,6 +23,7 @@ interface Props {
 const SPRING_CONFIG = { stiffness: 300, damping: 30 }
 
 export function UnifiedTabBar({ value, onChange, visibleTabs, promotedTags, selectedPromotedTag, onPromotedTagChange }: Props) {
+  const theme = useTheme()
   const scrollRef = useRef<ScrollView>(null)
   const underlineLeft = useSharedValue(0)
   const underlineWidth = useSharedValue(0)
@@ -96,7 +98,7 @@ export function UnifiedTabBar({ value, onChange, visibleTabs, promotedTags, sele
   return (
     <View style={{
       borderBottomWidth: 0.5,
-      borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+      borderBottomColor: theme.surface.border,
     }}>
       <ScrollView
         ref={scrollRef}
@@ -123,7 +125,7 @@ export function UnifiedTabBar({ value, onChange, visibleTabs, promotedTags, sele
                   style={{
                     fontFamily: 'Inter',
                     fontSize: 13,
-                    color: isActive ? 'white' : 'rgba(255, 255, 255, 0.5)',
+                    color: isActive ? theme.text.primary : theme.text.tertiary,
                   }}
                 >
                   {getUnifiedTabLabel(tab)}
@@ -136,7 +138,7 @@ export function UnifiedTabBar({ value, onChange, visibleTabs, promotedTags, sele
           {hasPromotedTags && (
             <>
               <View style={{ paddingHorizontal: 6, justifyContent: 'center' }}>
-                <Text style={{ fontSize: 13, color: 'rgba(255, 255, 255, 0.2)' }}>{'·'}</Text>
+                <Text style={{ fontSize: 13, color: theme.text.muted }}>{'·'}</Text>
               </View>
               {promotedTags.map((tag) => {
                 const key = `ptag-${tag.slug}:${tag.type}`
@@ -166,7 +168,7 @@ export function UnifiedTabBar({ value, onChange, visibleTabs, promotedTags, sele
                       style={{
                         fontFamily: 'Inter',
                         fontSize: 13,
-                        color: isActive ? 'white' : 'rgba(255, 255, 255, 0.5)',
+                        color: isActive ? theme.text.primary : theme.text.tertiary,
                       }}
                     >
                       {tag.label}
@@ -186,7 +188,7 @@ export function UnifiedTabBar({ value, onChange, visibleTabs, promotedTags, sele
               bottom: 0,
               left: 0,
               height: 2,
-              backgroundColor: 'white',
+              backgroundColor: theme.text.primary,
             },
             underlineStyle,
           ]}

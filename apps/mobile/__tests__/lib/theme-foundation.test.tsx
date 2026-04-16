@@ -1,19 +1,16 @@
 /**
  * Theme foundation smoke test.
  *
- * Renders each of the 8 sentinel components under a non-default theme via
- * `ThemeProvider theme={...}` and asserts they don't crash. This is the
- * programmatic equivalent of the plan's manual simulator smoke test and
- * guards the architecture against future regressions.
- *
- * Deliberately does NOT test visual correctness — that belongs with a real
- * light/alternate theme once design specs exist.
+ * Renders each of the 8 sentinel components under both shipped themes via
+ * `ThemeProvider theme={...}` and asserts they don't crash. Catches the most
+ * common regression: a `useTheme()` consumer that crashes when given a theme
+ * other than dark (e.g. references a removed token).
  */
 
 import React from 'react'
 import { Text } from 'react-native'
 import { render } from '@testing-library/react-native'
-import { ThemeProvider, darkTheme, useTheme } from '@/lib/shared/theme'
+import { ThemeProvider, darkTheme, paperTheme, useTheme } from '@/lib/shared/theme'
 import type { Theme } from '@/lib/shared/theme'
 import { GlassView } from '@/components/ui/GlassView'
 import { Skeleton } from '@/components/atoms/Skeleton'
@@ -24,28 +21,6 @@ import { CollapsibleSection } from '@/components/molecules/CollapsibleSection'
 import { Toast } from '@/components/molecules/Toast'
 import { NexusCard } from '@/components/organisms/NexusCard'
 import { sampleArticles } from '@/lib/shared/sample-data'
-
-const swappedTheme: Theme = {
-  ...darkTheme,
-  name: 'paper',
-  surface: {
-    ...darkTheme.surface,
-    background: '#ff00ff',
-    glass: '#ff00ff',
-    glassSm: '#ff00ff',
-    glassPill: '#ff00ff',
-    border: '#00ff00',
-    borderPill: '#00ff00',
-  },
-  text: {
-    primary: '#000000',
-    secondary: '#111111',
-    tertiary: '#222222',
-    muted: '#333333',
-  },
-  blurTint: 'light',
-  statusBarStyle: 'dark',
-}
 
 const sampleArticle = sampleArticles[0]
 
@@ -67,14 +42,17 @@ describe('theme foundation', () => {
       return <Text>probe</Text>
     }
     render(
-      <ThemeProvider theme={swappedTheme}>
+      <ThemeProvider theme={paperTheme}>
         <Probe />
       </ThemeProvider>,
     )
-    expect(captured).toBe(swappedTheme)
+    expect(captured).toBe(paperTheme)
   })
 
-  describe('sentinels render under a swapped theme without crashing', () => {
+  describe.each([
+    ['darkTheme', darkTheme],
+    ['paperTheme', paperTheme],
+  ])('sentinels render under %s without crashing', (_name, theme) => {
     const sentinels: Array<[string, React.ReactElement]> = [
       ['GlassView', <GlassView key="g"><Text>glass</Text></GlassView>],
       ['Skeleton', <Skeleton key="s" width={100} height={12} />],
@@ -116,9 +94,9 @@ describe('theme foundation', () => {
       ],
     ]
 
-    it.each(sentinels)('%s', (_name, element) => {
+    it.each(sentinels)('%s', (_sentinelName, element) => {
       expect(() =>
-        render(<ThemeProvider theme={swappedTheme}>{element}</ThemeProvider>),
+        render(<ThemeProvider theme={theme}>{element}</ThemeProvider>),
       ).not.toThrow()
     })
   })

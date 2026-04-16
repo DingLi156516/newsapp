@@ -2,6 +2,7 @@ import { View, Text } from 'react-native'
 import type { FactualityLevel } from '@/lib/shared/types'
 import { FACTUALITY_LABELS } from '@/lib/shared/types'
 import { FACTUALITY } from '@/lib/shared/design'
+import { useTheme } from '@/lib/shared/theme'
 
 interface FactualityBarProps {
   readonly level: FactualityLevel
@@ -15,6 +16,7 @@ const SIZES = {
 } as const
 
 export function FactualityBar({ level, size = 'default', showLabel = false }: FactualityBarProps) {
+  const theme = useTheme()
   const token = FACTUALITY[level]
   const { width, height } = SIZES[size]
   const borderRadius = height / 2
@@ -29,7 +31,7 @@ export function FactualityBar({ level, size = 'default', showLabel = false }: Fa
           width,
           height,
           borderRadius,
-          backgroundColor: 'rgba(255, 255, 255, 0.06)',
+          backgroundColor: theme.semantic.muted.bg,
           overflow: 'hidden',
         }}
       >

@@ -70,6 +70,13 @@ export interface Theme {
   readonly statusBarStyle: 'light' | 'dark'
   /** Optional surface texture overlay (e.g. paper grain). */
   readonly texture: ThemeTexture
+  /**
+   * Comma-separated RGB triplet for the theme's monochrome ink color, used to
+   * compose `rgba(${inkRgb}, opacity)` for tints (e.g. monochrome bias bars
+   * that modulate opacity over a single base color). On dark this is white;
+   * on paper, the ink-brown text color.
+   */
+  readonly inkRgb: string
 }
 
 export type SemanticRole = keyof Theme['semantic']

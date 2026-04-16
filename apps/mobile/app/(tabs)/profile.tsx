@@ -19,13 +19,14 @@ import { GlassView } from '@/components/ui/GlassView'
 import { BiasComparisonBar } from '@/components/molecules/BiasComparisonBar'
 import { NexusCard } from '@/components/organisms/NexusCard'
 import { BIAS_LABELS, BIAS_OPACITY } from '@/lib/shared/types'
-import { SEMANTIC, GLASS } from '@/lib/shared/design'
 import { Skeleton } from '@/components/atoms/Skeleton'
 import { BiasDonutChart } from '@/components/molecules/BiasDonutChart'
 import { AnimatedCounter } from '@/components/atoms/AnimatedCounter'
+import { useTheme } from '@/lib/shared/theme'
 
 export default function ProfileScreen() {
   const router = useRouter()
+  const theme = useTheme()
   const { user, signOut } = useAuth()
   const { profile, isLoading: profileLoading } = useBiasProfile()
   const { suggestions, isLoading: suggestionsLoading } = useSuggestions()
@@ -34,21 +35,25 @@ export default function ProfileScreen() {
 
   const blindspotSet = new Set(profile?.blindspots ?? [])
 
+  const sectionLabel = { fontFamily: 'Inter-Medium', fontSize: 10, color: theme.text.tertiary, textTransform: 'uppercase' as const, letterSpacing: 1.5 }
+  const error = theme.semantic.error
+  const warn = theme.semantic.warning
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background }} edges={['top']}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <View style={{ gap: 2 }}>
-            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: 'white' }}>
+            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: theme.text.primary }}>
               Dashboard
             </Text>
-            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.4)' }}>
+            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
               {user?.email ?? 'Guest'}
             </Text>
           </View>
           <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
-            <Settings size={20} color="rgba(255, 255, 255, 0.6)" />
+            <Settings size={20} color={theme.text.secondary} />
           </Pressable>
         </View>
 
@@ -56,20 +61,20 @@ export default function ProfileScreen() {
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Pressable onPress={() => router.push('/history')} style={{ flex: 1 }}>
             <GlassView variant="sm" style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-              <Clock size={16} color="rgba(255, 255, 255, 0.6)" />
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: 'white' }}>History</Text>
+              <Clock size={16} color={theme.text.secondary} />
+              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>History</Text>
             </GlassView>
           </Pressable>
           <Pressable onPress={() => router.push('/saved')} style={{ flex: 1 }}>
             <GlassView variant="sm" style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-              <Bookmark size={16} color="rgba(255, 255, 255, 0.6)" />
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: 'white' }}>Saved</Text>
+              <Bookmark size={16} color={theme.text.secondary} />
+              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>Saved</Text>
             </GlassView>
           </Pressable>
           <Pressable onPress={() => router.push('/guide')} style={{ flex: 1 }}>
             <GlassView variant="sm" style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-              <BookOpen size={16} color="rgba(255, 255, 255, 0.6)" />
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: 'white' }}>Guide</Text>
+              <BookOpen size={16} color={theme.text.secondary} />
+              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>Guide</Text>
             </GlassView>
           </Pressable>
         </View>
@@ -84,19 +89,19 @@ export default function ProfileScreen() {
                   width: 32,
                   height: 32,
                   borderRadius: 16,
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  backgroundColor: theme.surface.glassPill,
                   borderWidth: 0.5,
-                  borderColor: 'rgba(255, 255, 255, 0.1)',
+                  borderColor: theme.surface.borderPill,
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}>
-                  <BarChart3 size={16} color="rgba(255, 255, 255, 0.8)" />
+                  <BarChart3 size={16} color={theme.text.primary} />
                 </View>
-                <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 20, color: 'white' }}>
+                <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 20, color: theme.text.primary }}>
                   Bias Calibration
                 </Text>
               </View>
-              <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255, 255, 255, 0.7)', lineHeight: 20 }}>
+              <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.secondary, lineHeight: 20 }}>
                 Your reading habits shape your worldview. This dashboard shows which perspectives you consume most — and which you're missing.
               </Text>
             </GlassView>
@@ -106,15 +111,15 @@ export default function ProfileScreen() {
               <Animated.View entering={FadeInDown.delay(100).springify()} style={{ flexDirection: 'row', gap: 8 }}>
                 <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
                   <AnimatedCounter value={profile.totalStoriesRead} style={{ fontSize: 22 }} />
-                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.4)' }}>Stories Read</Text>
+                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>Stories Read</Text>
                 </GlassView>
                 <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
                   <AnimatedCounter value={readCount} style={{ fontSize: 22 }} />
-                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.4)' }}>This Session</Text>
+                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>This Session</Text>
                 </GlassView>
-                <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }} glow={profile.blindspots.length > 0 ? '#f59e0b' : undefined}>
-                  <AnimatedCounter value={profile.blindspots.length} style={{ fontSize: 22, color: profile.blindspots.length > 0 ? SEMANTIC.warning.color : 'white' }} />
-                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.4)' }}>Blindspots</Text>
+                <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }} glow={profile.blindspots.length > 0 ? warn.color : undefined}>
+                  <AnimatedCounter value={profile.blindspots.length} style={{ fontSize: 22, color: profile.blindspots.length > 0 ? warn.color : theme.text.primary }} />
+                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>Blindspots</Text>
                 </GlassView>
               </Animated.View>
             )}
@@ -130,9 +135,7 @@ export default function ProfileScreen() {
                 {/* Donut Chart Overview */}
                 {(profile.userDistribution ?? []).length > 0 && (
                   <Animated.View entering={FadeInDown.delay(200).springify()} style={{ gap: 8 }}>
-                    <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', letterSpacing: 1.5 }}>
-                      Your Reading Spectrum
-                    </Text>
+                    <Text style={sectionLabel}>Your Reading Spectrum</Text>
                     <GlassView style={{ padding: 20, alignItems: 'center' }}>
                       <BiasDonutChart distribution={profile.userDistribution ?? []} />
                     </GlassView>
@@ -141,9 +144,7 @@ export default function ProfileScreen() {
 
                 {/* Spectrum Comparison */}
                 <View style={{ gap: 8 }}>
-                  <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', letterSpacing: 1.5 }}>
-                    Spectrum Comparison
-                  </Text>
+                  <Text style={sectionLabel}>Spectrum Comparison</Text>
                   <BiasComparisonBar
                     userDistribution={profile.userDistribution ?? []}
                     overallDistribution={profile.overallDistribution ?? []}
@@ -152,24 +153,22 @@ export default function ProfileScreen() {
 
                 {/* Detailed Breakdown */}
                 <View style={{ gap: 8 }}>
-                  <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', letterSpacing: 1.5 }}>
-                    Detailed Breakdown
-                  </Text>
+                  <Text style={sectionLabel}>Detailed Breakdown</Text>
                   <GlassView style={{ padding: 16, gap: 16 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: 'rgba(255, 255, 255, 0.8)' }}>
+                      <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>
                         Bias Distribution
                       </Text>
                       {profile.dominantBias && (
                         <View style={{
-                          backgroundColor: GLASS.bgPill,
+                          backgroundColor: theme.surface.glassPill,
                           borderRadius: 9999,
                           paddingHorizontal: 10,
                           paddingVertical: 4,
                           borderWidth: 0.5,
-                          borderColor: GLASS.borderPill,
+                          borderColor: theme.surface.borderPill,
                         }}>
-                          <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.6)' }}>
+                          <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.secondary }}>
                             Dominant: {BIAS_LABELS[profile.dominantBias]}
                           </Text>
                         </View>
@@ -186,16 +185,16 @@ export default function ProfileScreen() {
                             <Text style={{
                               fontFamily: 'Inter',
                               fontSize: 12,
-                              color: isBlindspot ? SEMANTIC.warning.color : 'rgba(255, 255, 255, 0.7)',
+                              color: isBlindspot ? warn.color : theme.text.secondary,
                             }}>
                               {BIAS_LABELS[item.bias]}
                               {isBlindspot ? ' (blindspot)' : ''}
                             </Text>
-                            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
+                            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
                               {item.percentage}% / {overall?.percentage ?? 0}%
                             </Text>
                           </View>
-                          <View style={{ height: 8, borderRadius: 4, backgroundColor: 'rgba(255, 255, 255, 0.05)', position: 'relative', overflow: 'hidden' }}>
+                          <View style={{ height: 8, borderRadius: 4, backgroundColor: `rgba(${theme.inkRgb}, 0.05)`, position: 'relative', overflow: 'hidden' }}>
                             {/* Overall (background) */}
                             <View style={{
                               position: 'absolute',
@@ -204,7 +203,7 @@ export default function ProfileScreen() {
                               height: 8,
                               borderRadius: 4,
                               width: `${overall?.percentage ?? 0}%`,
-                              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                              backgroundColor: `rgba(${theme.inkRgb}, 0.1)`,
                             }} />
                             {/* User (foreground) */}
                             <View style={{
@@ -214,7 +213,7 @@ export default function ProfileScreen() {
                               height: 8,
                               borderRadius: 4,
                               width: `${item.percentage}%`,
-                              backgroundColor: `rgba(255, 255, 255, ${BIAS_OPACITY[item.bias]})`,
+                              backgroundColor: `rgba(${theme.inkRgb}, ${BIAS_OPACITY[item.bias]})`,
                             }} />
                           </View>
                         </View>
@@ -224,12 +223,12 @@ export default function ProfileScreen() {
                     {/* Legend */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingTop: 4 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255, 255, 255, 0.3)' }} />
-                        <Text style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(255, 255, 255, 0.4)' }}>Your reading</Text>
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: `rgba(${theme.inkRgb}, 0.3)` }} />
+                        <Text style={{ fontFamily: 'Inter', fontSize: 10, color: theme.text.tertiary }}>Your reading</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255, 255, 255, 0.1)' }} />
-                        <Text style={{ fontFamily: 'Inter', fontSize: 10, color: 'rgba(255, 255, 255, 0.4)' }}>All stories</Text>
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: `rgba(${theme.inkRgb}, 0.1)` }} />
+                        <Text style={{ fontFamily: 'Inter', fontSize: 10, color: theme.text.tertiary }}>All stories</Text>
                       </View>
                     </View>
                   </GlassView>
@@ -238,24 +237,22 @@ export default function ProfileScreen() {
                 {/* Blindspots */}
                 {profile.blindspots.length > 0 && (
                   <View testID="blindspot-section" style={{ gap: 8 }}>
-                    <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', letterSpacing: 1.5 }}>
-                      Your Blindspots
-                    </Text>
+                    <Text style={sectionLabel}>Your Blindspots</Text>
                     <GlassView style={{ padding: 16, gap: 10 }}>
-                      <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255, 255, 255, 0.7)', lineHeight: 20 }}>
+                      <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.secondary, lineHeight: 20 }}>
                         You read significantly less from these perspectives compared to the overall distribution:
                       </Text>
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                         {profile.blindspots.map((bias) => (
                           <View key={bias} style={{
-                            backgroundColor: SEMANTIC.warning.bg,
+                            backgroundColor: warn.bg,
                             borderRadius: 9999,
                             paddingHorizontal: 12,
                             paddingVertical: 6,
                             borderWidth: 0.5,
-                            borderColor: SEMANTIC.warning.border,
+                            borderColor: warn.border,
                           }}>
-                            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: SEMANTIC.warning.color }}>
+                            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: warn.color }}>
                               {BIAS_LABELS[bias]}
                             </Text>
                           </View>
@@ -267,7 +264,7 @@ export default function ProfileScreen() {
               </>
             ) : (
               <GlassView style={{ padding: 32, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(255, 255, 255, 0.5)', textAlign: 'center' }}>
+                <Text style={{ fontFamily: 'Inter', fontSize: 14, color: theme.text.tertiary, textAlign: 'center' }}>
                   Start reading stories to build your bias profile!
                 </Text>
               </GlassView>
@@ -275,10 +272,8 @@ export default function ProfileScreen() {
 
             {/* Suggestions */}
             <View style={{ gap: 8 }}>
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: 'rgba(255, 255, 255, 0.5)', textTransform: 'uppercase', letterSpacing: 1.5 }}>
-                Suggested For You
-              </Text>
-              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.4)' }}>
+              <Text style={sectionLabel}>Suggested For You</Text>
+              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
                 Stories from perspectives you read less often.
               </Text>
               {suggestionsLoading ? (
@@ -299,7 +294,7 @@ export default function ProfileScreen() {
                 ))
               ) : (
                 <GlassView style={{ padding: 24, alignItems: 'center' }}>
-                  <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255, 255, 255, 0.4)' }}>
+                  <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.tertiary }}>
                     No suggestions yet — keep reading to get personalized picks.
                   </Text>
                 </GlassView>
@@ -318,12 +313,12 @@ export default function ProfileScreen() {
                 padding: 14,
                 borderRadius: 12,
                 borderWidth: 0.5,
-                borderColor: 'rgba(239, 68, 68, 0.3)',
-                backgroundColor: pressed ? 'rgba(239, 68, 68, 0.1)' : 'transparent',
+                borderColor: error.border,
+                backgroundColor: pressed ? error.bg : 'transparent',
               })}
             >
-              <LogOut size={16} color="#ef4444" />
-              <Text style={{ fontFamily: 'Inter', fontSize: 14, color: '#ef4444' }}>Sign Out</Text>
+              <LogOut size={16} color={error.color} />
+              <Text style={{ fontFamily: 'Inter', fontSize: 14, color: error.color }}>Sign Out</Text>
             </Pressable>
           </>
         ) : (
@@ -333,18 +328,18 @@ export default function ProfileScreen() {
               width: 40,
               height: 40,
               borderRadius: 20,
-              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              backgroundColor: theme.surface.glassPill,
               borderWidth: 0.5,
-              borderColor: 'rgba(255, 255, 255, 0.1)',
+              borderColor: theme.surface.borderPill,
               alignItems: 'center',
               justifyContent: 'center',
             }}>
-              <BarChart3 size={20} color="rgba(255, 255, 255, 0.8)" />
+              <BarChart3 size={20} color={theme.text.primary} />
             </View>
-            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 18, color: 'white', textAlign: 'center' }}>
+            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 18, color: theme.text.primary, textAlign: 'center' }}>
               Unlock Bias Calibration
             </Text>
-            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255, 255, 255, 0.5)', textAlign: 'center', lineHeight: 20 }}>
+            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.tertiary, textAlign: 'center', lineHeight: 20 }}>
               Sign in to see your bias profile, reading stats, and personalized suggestions.
             </Text>
             <Pressable
@@ -354,14 +349,14 @@ export default function ProfileScreen() {
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 8,
-                backgroundColor: pressed ? 'rgba(255, 255, 255, 0.85)' : 'white',
+                backgroundColor: pressed ? theme.text.secondary : theme.text.primary,
                 borderRadius: 12,
                 paddingHorizontal: 24,
                 paddingVertical: 12,
               })}
             >
-              <LogIn size={18} color="#0A0A0A" />
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: '#0A0A0A' }}>Sign In</Text>
+              <LogIn size={18} color={theme.surface.background} />
+              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: theme.surface.background }}>Sign In</Text>
             </Pressable>
           </GlassView>
         )}

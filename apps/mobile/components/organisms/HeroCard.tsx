@@ -14,7 +14,8 @@ import { BookmarkButton } from '@/components/atoms/BookmarkButton'
 import { ShareButton } from '@/components/atoms/ShareButton'
 import { SpectrumBar } from '@/components/molecules/SpectrumBar'
 import { GlassView } from '@/components/ui/GlassView'
-import { BADGE, GLASS } from '@/lib/shared/design'
+import { BADGE } from '@/lib/shared/design'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly article: NewsArticle
@@ -25,6 +26,7 @@ interface Props {
 }
 
 export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: Props) {
+  const theme = useTheme()
   const scale = useSharedValue(1)
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -44,14 +46,14 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: 
             {/* Badges row */}
             <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
               <View style={{
-                backgroundColor: GLASS.bgPill,
+                backgroundColor: theme.surface.glassPill,
                 borderWidth: 0.5,
-                borderColor: GLASS.borderPill,
+                borderColor: theme.surface.borderPill,
                 borderRadius: BADGE.borderRadius,
                 paddingHorizontal: BADGE.paddingH,
                 paddingVertical: BADGE.paddingV,
               }}>
-                <Text style={{ fontFamily: 'Inter', fontSize: BADGE.fontSize, color: 'rgba(255, 255, 255, 0.7)' }}>
+                <Text style={{ fontFamily: 'Inter', fontSize: BADGE.fontSize, color: theme.text.secondary }}>
                   {TOPIC_LABELS[article.topic]}
                 </Text>
               </View>
@@ -59,14 +61,14 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: 
               {article.isBlindspot && <BlindspotBadge />}
               {isRead && (
                 <View style={{
-                  backgroundColor: GLASS.bgPill,
+                  backgroundColor: theme.surface.glassPill,
                   borderRadius: BADGE.borderRadius,
                   paddingHorizontal: BADGE.paddingH,
                   paddingVertical: BADGE.paddingV,
                   borderWidth: 0.5,
-                  borderColor: GLASS.borderPill,
+                  borderColor: theme.surface.borderPill,
                 }}>
-                  <Text style={{ fontFamily: 'Inter', fontSize: BADGE.fontSize, color: 'rgba(255, 255, 255, 0.4)' }}>Read</Text>
+                  <Text style={{ fontFamily: 'Inter', fontSize: BADGE.fontSize, color: theme.text.tertiary }}>Read</Text>
                 </View>
               )}
               <FactualityBar level={article.factuality} />
@@ -82,7 +84,7 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: 
                 fontFamily: 'DMSerifDisplay',
                 fontSize: 20,
                 lineHeight: 28,
-                color: isRead ? 'rgba(255, 255, 255, 0.5)' : 'white',
+                color: isRead ? theme.text.tertiary : theme.text.primary,
               }}
               numberOfLines={3}
             >

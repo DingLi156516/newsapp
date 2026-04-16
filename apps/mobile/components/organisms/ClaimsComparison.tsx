@@ -8,6 +8,7 @@ import { View, Text, Pressable } from 'react-native'
 import { CollapsibleSection } from '@/components/molecules/CollapsibleSection'
 import { SPACING } from '@/lib/shared/design'
 import type { KeyClaim } from '@/lib/shared/types'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly claims: readonly KeyClaim[]
@@ -20,8 +21,10 @@ const SIDE_CONFIG: Record<string, { label: string; color: string }> = {
 }
 
 function ClaimRow({ claim }: { claim: KeyClaim }) {
+  const theme = useTheme()
   const [showCounter, setShowCounter] = useState(false)
   const side = SIDE_CONFIG[claim.side] ?? SIDE_CONFIG.both
+  const warn = theme.semantic.warning
 
   const toggleCounter = useCallback(() => {
     setShowCounter((prev) => !prev)
@@ -46,13 +49,13 @@ function ClaimRow({ claim }: { claim: KeyClaim }) {
         {claim.disputed && (
           <View style={{
             borderWidth: 0.5,
-            borderColor: 'rgba(245, 158, 11, 0.4)',
-            backgroundColor: 'rgba(245, 158, 11, 0.15)',
+            borderColor: warn.border,
+            backgroundColor: warn.bg,
             borderRadius: 9999,
             paddingHorizontal: 8,
             paddingVertical: 2,
           }}>
-            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 9, color: '#F59E0B', letterSpacing: 0.8 }}>
+            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 9, color: warn.color, letterSpacing: 0.8 }}>
               DISPUTED
             </Text>
           </View>
@@ -60,7 +63,7 @@ function ClaimRow({ claim }: { claim: KeyClaim }) {
       </View>
 
       {/* Claim text */}
-      <Text style={{ fontFamily: 'Inter', fontSize: 13, lineHeight: 19, color: 'rgba(255, 255, 255, 0.8)' }}>
+      <Text style={{ fontFamily: 'Inter', fontSize: 13, lineHeight: 19, color: theme.text.primary }}>
         {claim.claim}
       </Text>
 
@@ -73,7 +76,7 @@ function ClaimRow({ claim }: { claim: KeyClaim }) {
             accessibilityState={{ expanded: showCounter }}
             style={{ marginTop: 6 }}
           >
-            <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.45)' }}>
+            <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>
               {showCounter ? 'Hide counter-claim' : 'Show counter-claim'}
             </Text>
           </Pressable>
@@ -82,10 +85,10 @@ function ClaimRow({ claim }: { claim: KeyClaim }) {
               marginTop: 6,
               paddingLeft: 12,
               borderLeftWidth: 2,
-              borderLeftColor: 'rgba(255, 255, 255, 0.1)',
+              borderLeftColor: theme.surface.border,
             }}>
-              <Text style={{ fontFamily: 'Inter', fontSize: 12, lineHeight: 18, color: 'rgba(255, 255, 255, 0.5)' }}>
-                <Text style={{ fontFamily: 'Inter-SemiBold', color: 'rgba(255, 255, 255, 0.6)' }}>Counter: </Text>
+              <Text style={{ fontFamily: 'Inter', fontSize: 12, lineHeight: 18, color: theme.text.secondary }}>
+                <Text style={{ fontFamily: 'Inter-SemiBold', color: theme.text.primary }}>Counter: </Text>
                 {claim.counterClaim}
               </Text>
             </View>
@@ -99,6 +102,7 @@ function ClaimRow({ claim }: { claim: KeyClaim }) {
 export function ClaimsComparison({ claims }: Props) {
   if (!claims || claims.length === 0) return null
 
+  const theme = useTheme()
   return (
     <CollapsibleSection
       title="Key Claims"
@@ -111,7 +115,7 @@ export function ClaimsComparison({ claims }: Props) {
           key={`${claim.side}-${i}`}
           style={{
             borderBottomWidth: i < claims.length - 1 ? 0.5 : 0,
-            borderBottomColor: 'rgba(255, 255, 255, 0.04)',
+            borderBottomColor: theme.surface.border,
           }}
         >
           <ClaimRow claim={claim} />

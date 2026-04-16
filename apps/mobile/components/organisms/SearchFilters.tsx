@@ -24,6 +24,7 @@ import {
   PERSPECTIVE_BIASES,
 } from '@/lib/shared/types'
 import { GlassView } from '@/components/ui/GlassView'
+import { useTheme } from '@/lib/shared/theme'
 
 const ALL_FACTUALITIES: FactualityLevel[] = [
   'very-low', 'low', 'mixed', 'high', 'very-high',
@@ -94,6 +95,7 @@ export function SearchFilters({
   onDatePresetChange,
   onClose,
 }: Props) {
+  const theme = useTheme()
   const activeCount = countActiveFilters(topic, region, biasRange, minFactuality, datePreset)
   const activePreset = useMemo(() => deriveActivePreset(biasRange), [biasRange])
 
@@ -121,17 +123,17 @@ export function SearchFilters({
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: '#0A0A0A' }}
+      style={{ flex: 1, backgroundColor: theme.surface.background }}
       contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 40 }}
       showsVerticalScrollIndicator={false}
     >
       {/* Header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 18, color: 'white' }}>
+        <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 18, color: theme.text.primary }}>
           Filters
         </Text>
         <Pressable onPress={onClose} hitSlop={8}>
-          <X size={20} color="rgba(255, 255, 255, 0.5)" />
+          <X size={20} color={theme.text.tertiary} />
         </Pressable>
       </View>
 
@@ -206,8 +208,8 @@ export function SearchFilters({
           onPress={handleClear}
           style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
         >
-          <X size={12} color="rgba(255, 255, 255, 0.5)" />
-          <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
+          <X size={12} color={theme.text.tertiary} />
+          <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
             Clear filters
           </Text>
         </Pressable>
@@ -221,12 +223,13 @@ export function SearchFilters({
 // ---------------------------------------------------------------------------
 
 function FilterSection({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
+  const theme = useTheme()
   return (
     <View style={{ gap: 8 }}>
       <Text style={{
         fontFamily: 'Inter-Medium',
         fontSize: 11,
-        color: 'rgba(255, 255, 255, 0.4)',
+        color: theme.text.tertiary,
         letterSpacing: 1,
       }}>
         {label}
@@ -243,6 +246,7 @@ function Pill({ label, isActive, onPress }: {
   readonly isActive: boolean
   readonly onPress: () => void
 }) {
+  const theme = useTheme()
   return (
     <Pressable onPress={onPress}>
       <GlassView
@@ -251,15 +255,15 @@ function Pill({ label, isActive, onPress }: {
           paddingHorizontal: 12,
           paddingVertical: 6,
           borderRadius: 9999,
-          backgroundColor: isActive ? 'rgba(255, 255, 255, 0.15)' : undefined,
+          backgroundColor: isActive ? `rgba(${theme.inkRgb}, 0.15)` : undefined,
           borderWidth: isActive ? 1 : 0,
-          borderColor: isActive ? 'rgba(255, 255, 255, 0.2)' : undefined,
+          borderColor: isActive ? theme.surface.borderPill : undefined,
         }}
       >
         <Text style={{
           fontFamily: 'Inter',
           fontSize: 12,
-          color: isActive ? 'white' : 'rgba(255, 255, 255, 0.4)',
+          color: isActive ? theme.text.primary : theme.text.tertiary,
         }}>
           {label}
         </Text>

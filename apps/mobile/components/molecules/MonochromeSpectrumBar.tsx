@@ -1,6 +1,7 @@
 import { View, type ViewProps } from 'react-native'
 import type { SpectrumSegment } from '@/lib/shared/types'
 import { BIAS_LABELS, BIAS_OPACITY } from '@/lib/shared/types'
+import { useTheme } from '@/lib/shared/theme'
 
 interface MonochromeSpectrumBarProps extends ViewProps {
   readonly segments: SpectrumSegment[]
@@ -8,6 +9,7 @@ interface MonochromeSpectrumBarProps extends ViewProps {
 }
 
 export function MonochromeSpectrumBar({ segments, height = 8, style, ...props }: MonochromeSpectrumBarProps) {
+  const theme = useTheme()
   const total = segments.reduce((sum, s) => sum + s.percentage, 0)
   if (total === 0) return null
 
@@ -21,7 +23,7 @@ export function MonochromeSpectrumBar({ segments, height = 8, style, ...props }:
         height,
         borderRadius: 9999,
         overflow: 'hidden',
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        backgroundColor: `rgba(${theme.inkRgb}, 0.1)`,
         padding: 2,
       }, style]}
       {...props}
@@ -33,7 +35,7 @@ export function MonochromeSpectrumBar({ segments, height = 8, style, ...props }:
             key={segment.bias}
             style={{
               flex: segment.percentage / total,
-              backgroundColor: `rgba(255, 255, 255, ${BIAS_OPACITY[segment.bias]})`,
+              backgroundColor: `rgba(${theme.inkRgb}, ${BIAS_OPACITY[segment.bias]})`,
               borderRadius: 9999,
               marginHorizontal: 0.5,
             }}

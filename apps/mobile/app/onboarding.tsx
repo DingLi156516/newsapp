@@ -18,7 +18,7 @@ import Animated, {
 } from 'react-native-reanimated'
 import { useOnboarding } from '@/lib/hooks/use-onboarding'
 import { hapticLight } from '@/lib/haptics'
-import { SEMANTIC } from '@/lib/shared/design'
+import { useTheme, darkTheme } from '@/lib/shared/theme'
 
 interface OnboardingPage {
   readonly id: string
@@ -44,7 +44,7 @@ const PAGES: readonly OnboardingPage[] = [
     id: 'blindspots',
     title: 'Find Your Blindspots',
     body: 'Axiom tracks your reading patterns and highlights blindspots — perspectives you might be missing. Build a more complete worldview.',
-    accentColor: SEMANTIC.warning.color,
+    accentColor: darkTheme.semantic.warning.color,
   },
 ] as const
 
@@ -78,6 +78,7 @@ function SpectrumIllustration() {
 }
 
 function SourcesIllustration() {
+  const theme = useTheme()
   const sources = [
     { name: 'Associated Press', color: '#9ca3af', label: 'Center' },
     { name: 'NPR', color: '#60a5fa', label: 'Lean Left' },
@@ -90,10 +91,10 @@ function SourcesIllustration() {
         <Animated.View
           key={s.name}
           entering={SlideInLeft.delay(200 + i * 150).springify().damping(18)}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, paddingHorizontal: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10 }}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, paddingHorizontal: 12, backgroundColor: `rgba(${theme.inkRgb}, 0.04)`, borderRadius: 10 }}
         >
           <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: s.color }} />
-          <Text style={{ flex: 1, fontFamily: 'Inter', fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>{s.name}</Text>
+          <Text style={{ flex: 1, fontFamily: 'Inter', fontSize: 12, color: theme.text.secondary }}>{s.name}</Text>
           <Text style={{ fontFamily: 'Inter', fontSize: 10, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 99, backgroundColor: `${s.color}22`, color: s.color }}>{s.label}</Text>
         </Animated.View>
       ))}
@@ -102,25 +103,27 @@ function SourcesIllustration() {
 }
 
 function BlindspotIllustration() {
+  const theme = useTheme()
+  const warn = theme.semantic.warning
   return (
     <View style={{ alignItems: 'center', gap: 12 }}>
       <View style={{ flexDirection: 'row', gap: 12 }}>
         <Animated.View
           entering={FadeIn.delay(300).springify()}
-          style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderStyle: 'dashed', borderColor: 'rgba(245,158,11,0.4)', alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderStyle: 'dashed', borderColor: warn.border, alignItems: 'center', justifyContent: 'center' }}
         >
-          <Text style={{ fontSize: 24, color: SEMANTIC.warning.color }}>?</Text>
+          <Text style={{ fontSize: 24, color: warn.color }}>?</Text>
         </Animated.View>
         <Animated.View
           entering={FadeIn.delay(500).springify()}
-          style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderStyle: 'dashed', borderColor: 'rgba(245,158,11,0.2)', alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: 80, height: 80, borderRadius: 40, borderWidth: 3, borderStyle: 'dashed', borderColor: warn.bg, alignItems: 'center', justifyContent: 'center' }}
         >
-          <Text style={{ fontSize: 24, color: 'rgba(245,158,11,0.5)' }}>?</Text>
+          <Text style={{ fontSize: 24, color: warn.color, opacity: 0.5 }}>?</Text>
         </Animated.View>
       </View>
       <Animated.Text
         entering={FadeIn.delay(700).duration(400)}
-        style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(245,158,11,0.7)', textAlign: 'center', lineHeight: 16 }}
+        style={{ fontFamily: 'Inter', fontSize: 11, color: warn.color, textAlign: 'center', lineHeight: 16 }}
       >
         Stories your reading habits{'\n'}might cause you to miss
       </Animated.Text>
@@ -131,6 +134,8 @@ function BlindspotIllustration() {
 const ILLUSTRATIONS = [SpectrumIllustration, SourcesIllustration, BlindspotIllustration] as const
 
 function AnimatedDot({ isActive }: { isActive: boolean }) {
+  const theme = useTheme()
+  const inkRgb = theme.inkRgb
   const width = useSharedValue(isActive ? 24 : 8)
   const bgOpacity = useSharedValue(isActive ? 1 : 0.15)
 
@@ -147,7 +152,7 @@ function AnimatedDot({ isActive }: { isActive: boolean }) {
     width: width.value,
     height: 8,
     borderRadius: 4,
-    backgroundColor: `rgba(255, 255, 255, ${bgOpacity.value})`,
+    backgroundColor: `rgba(${inkRgb}, ${bgOpacity.value})`,
   }))
 
   return <Animated.View style={dotStyle} />
@@ -155,6 +160,7 @@ function AnimatedDot({ isActive }: { isActive: boolean }) {
 
 export default function OnboardingScreen() {
   const router = useRouter()
+  const theme = useTheme()
   const { completeOnboarding } = useOnboarding()
   const { width } = useWindowDimensions()
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -195,22 +201,22 @@ export default function OnboardingScreen() {
           <Illustration />
         </View>
 
-        <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 22, color: '#fff', textAlign: 'center', marginBottom: 12, lineHeight: 28 }}>
+        <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 22, color: theme.text.primary, textAlign: 'center', marginBottom: 12, lineHeight: 28 }}>
           {item.title}
         </Text>
-        <Text style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 22, paddingHorizontal: 16 }}>
+        <Text style={{ fontFamily: 'Inter', fontSize: 14, color: theme.text.secondary, textAlign: 'center', lineHeight: 22, paddingHorizontal: 16 }}>
           {item.body}
         </Text>
       </View>
     )
-  }, [width])
+  }, [width, theme])
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background }}>
       {/* Skip button */}
       <View style={{ alignItems: 'flex-end', paddingHorizontal: 20, paddingTop: 8 }}>
         <Pressable onPress={finish} hitSlop={12} testID="skip-button">
-          <Text style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(255,255,255,0.4)' }}>Skip</Text>
+          <Text style={{ fontFamily: 'Inter', fontSize: 14, color: theme.text.tertiary }}>Skip</Text>
         </Pressable>
       </View>
 
@@ -238,16 +244,16 @@ export default function OnboardingScreen() {
 
         {isLastPage ? (
           <View style={{ gap: 10 }}>
-            <Pressable onPress={finish} testID="get-started-button" style={{ backgroundColor: '#fff', padding: 16, borderRadius: 14, alignItems: 'center' }}>
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: '#0A0A0A' }}>Get Started</Text>
+            <Pressable onPress={finish} testID="get-started-button" style={{ backgroundColor: theme.text.primary, padding: 16, borderRadius: 14, alignItems: 'center' }}>
+              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: theme.surface.background }}>Get Started</Text>
             </Pressable>
-            <Pressable onPress={goToSignup} testID="create-account-button" style={{ backgroundColor: 'rgba(255,255,255,0.08)', padding: 16, borderRadius: 14, alignItems: 'center' }}>
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: '#fff' }}>Create Account</Text>
+            <Pressable onPress={goToSignup} testID="create-account-button" style={{ backgroundColor: theme.semantic.muted.bg, padding: 16, borderRadius: 14, alignItems: 'center' }}>
+              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: theme.text.primary }}>Create Account</Text>
             </Pressable>
           </View>
         ) : (
-          <Pressable onPress={next} testID="next-button" style={{ backgroundColor: '#fff', padding: 16, borderRadius: 14, alignItems: 'center' }}>
-            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: '#0A0A0A' }}>Next</Text>
+          <Pressable onPress={next} testID="next-button" style={{ backgroundColor: theme.text.primary, padding: 16, borderRadius: 14, alignItems: 'center' }}>
+            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: theme.surface.background }}>Next</Text>
           </Pressable>
         )}
       </View>

@@ -14,6 +14,7 @@ import Animated, {
 } from 'react-native-reanimated'
 import { BIAS_LABELS } from '@/lib/shared/types'
 import type { BiasCategory } from '@/lib/shared/types'
+import { useTheme } from '@/lib/shared/theme'
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle)
 
@@ -88,6 +89,7 @@ function DonutSegment({
 }
 
 export function BiasDonutChart({ distribution, size = 160, strokeWidth = 14 }: Props) {
+  const theme = useTheme()
   const cx = size / 2
   const cy = size / 2
   const radius = (size - strokeWidth) / 2
@@ -104,7 +106,7 @@ export function BiasDonutChart({ distribution, size = 160, strokeWidth = 14 }: P
           cx={cx}
           cy={cy}
           r={radius}
-          stroke="rgba(255, 255, 255, 0.06)"
+          stroke={`rgba(${theme.inkRgb}, 0.06)`}
           strokeWidth={strokeWidth}
           fill="transparent"
         />
@@ -133,8 +135,8 @@ export function BiasDonutChart({ distribution, size = 160, strokeWidth = 14 }: P
         {segments.map((s) => (
           <View key={s.bias} style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: SEGMENT_COLORS[s.bias] }]} />
-            <Text style={styles.legendLabel}>{BIAS_LABELS[s.bias]}</Text>
-            <Text style={styles.legendValue}>{s.percentage}%</Text>
+            <Text style={[styles.legendLabel, { color: theme.text.secondary }]}>{BIAS_LABELS[s.bias]}</Text>
+            <Text style={[styles.legendValue, { color: theme.text.primary }]}>{s.percentage}%</Text>
           </View>
         ))}
       </View>
@@ -166,11 +168,9 @@ const styles = StyleSheet.create({
   legendLabel: {
     fontFamily: 'Inter',
     fontSize: 11,
-    color: 'rgba(255, 255, 255, 0.6)',
   },
   legendValue: {
     fontFamily: 'Inter-SemiBold',
     fontSize: 11,
-    color: 'rgba(255, 255, 255, 0.8)',
   },
 })

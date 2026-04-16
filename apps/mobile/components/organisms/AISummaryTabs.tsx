@@ -9,6 +9,7 @@ import Animated, { FadeIn, FadeOut, useAnimatedStyle, withSpring, useSharedValue
 import { GlassView } from '@/components/ui/GlassView'
 import { SentimentPill } from '@/components/atoms/SentimentPill'
 import type { StorySentiment } from '@/lib/shared/types'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly commonGround: string
@@ -33,11 +34,12 @@ const SINGLE_SOURCE_TABS: { id: TabId; label: string }[] = [
 const SPRING_CONFIG = { stiffness: 300, damping: 30 }
 
 function ContentBlock({ content }: { content: string }) {
+  const theme = useTheme()
   const lines = content.split('\n').filter((l) => l.trim())
   return (
     <View style={{ gap: 8 }}>
       {lines.map((line, i) => (
-        <Text key={i} style={{ fontFamily: 'Inter', fontSize: 13, lineHeight: 20, color: 'rgba(255, 255, 255, 0.8)' }}>
+        <Text key={i} style={{ fontFamily: 'Inter', fontSize: 13, lineHeight: 20, color: theme.text.primary }}>
           {line.startsWith('•') ? line : `• ${line}`}
         </Text>
       ))}
@@ -46,6 +48,7 @@ function ContentBlock({ content }: { content: string }) {
 }
 
 export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentiment, sourceCount }: Props) {
+  const theme = useTheme()
   const [activeTab, setActiveTab] = useState<TabId>('common')
   const underlineX = useSharedValue(0)
   const underlineWidth = useSharedValue(0)
@@ -89,7 +92,7 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentime
       <View style={{
         flexDirection: 'row',
         borderBottomWidth: 0.5,
-        borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+        borderBottomColor: theme.surface.border,
         position: 'relative',
       }}>
         {tabs.map((tab) => {
@@ -111,7 +114,7 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentime
               <Text style={{
                 fontFamily: 'Inter',
                 fontSize: 13,
-                color: isActive ? 'white' : 'rgba(255, 255, 255, 0.5)',
+                color: isActive ? theme.text.primary : theme.text.tertiary,
               }}>
                 {tab.label}
               </Text>
@@ -132,7 +135,7 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentime
               position: 'absolute',
               bottom: 0,
               height: 1,
-              backgroundColor: 'rgba(255, 255, 255, 0.6)',
+              backgroundColor: `rgba(${theme.inkRgb}, 0.6)`,
             },
             underlineStyle,
           ]}

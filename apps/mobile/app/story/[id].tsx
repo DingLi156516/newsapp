@@ -26,7 +26,8 @@ import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
 import { useToast } from '@/lib/hooks/use-toast'
 import { TOPIC_LABELS, BIAS_LABELS, BIAS_COLOR } from '@/lib/shared/types'
-import { SEMANTIC, FONT, SPACING } from '@/lib/shared/design'
+import { FONT, SPACING } from '@/lib/shared/design'
+import { useTheme } from '@/lib/shared/theme'
 import { GlassView } from '@/components/ui/GlassView'
 import { SpectrumBar } from '@/components/molecules/SpectrumBar'
 import { SourceList } from '@/components/molecules/SourceList'
@@ -54,6 +55,7 @@ const MINI_HEADER_HEIGHT = 56
 export default function StoryDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
+  const theme = useTheme()
   const { story, isLoading, isError } = useStory(id)
   const { timeline } = useStoryTimeline(id)
   const { isBookmarked, toggle } = useBookmarks()
@@ -113,20 +115,20 @@ export default function StoryDetailScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator color="white" size="large" />
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator color={theme.text.primary} size="large" />
       </SafeAreaView>
     )
   }
 
   if (isError || !story) {
     return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A', justifyContent: 'center', alignItems: 'center' }}>
-        <Text style={{ fontFamily: 'Inter', fontSize: 16, color: 'rgba(255, 255, 255, 0.5)' }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background, justifyContent: 'center', alignItems: 'center' }}>
+        <Text style={{ fontFamily: 'Inter', fontSize: 16, color: theme.text.tertiary }}>
           Story not found
         </Text>
         <Pressable onPress={() => router.back()} style={{ marginTop: 16 }}>
-          <Text style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(255, 255, 255, 0.7)' }}>
+          <Text style={{ fontFamily: 'Inter', fontSize: 14, color: theme.text.secondary }}>
             Go back
           </Text>
         </Pressable>
@@ -135,20 +137,20 @@ export default function StoryDetailScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }} edges={['top']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background }} edges={['top']}>
       {/* Scroll progress bar */}
       <ScrollProgressBar scrollY={scrollY} contentHeight={contentHeight} viewportHeight={viewportHeight} />
 
       {/* Sticky mini-header — fades in after scrolling past hero */}
       <Animated.View style={[styles.miniHeader, miniHeaderStyle]}>
-        <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill}>
-          <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(10, 10, 10, 0.8)' }} />
+        <BlurView intensity={30} tint={theme.blurTint} style={StyleSheet.absoluteFill}>
+          <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: theme.surface.glass }} />
         </BlurView>
         <View style={styles.miniHeaderContent}>
           <Pressable onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <ChevronLeft size={18} color="rgba(255, 255, 255, 0.7)" />
+            <ChevronLeft size={18} color={theme.text.secondary} />
           </Pressable>
-          <Text style={styles.miniHeaderTitle} numberOfLines={1}>
+          <Text style={[styles.miniHeaderTitle, { color: theme.text.primary }]} numberOfLines={1}>
             {story.headline}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -173,8 +175,8 @@ export default function StoryDetailScreen() {
         {/* Header with back button */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 }}>
           <Pressable testID="back-button" onPress={() => router.back()} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <ChevronLeft size={20} color="rgba(255, 255, 255, 0.7)" />
-            <Text style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(255, 255, 255, 0.7)' }}>Back</Text>
+            <ChevronLeft size={20} color={theme.text.secondary} />
+            <Text style={{ fontFamily: 'Inter', fontSize: 14, color: theme.text.secondary }}>Back</Text>
           </Pressable>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <ShareButton url={`/story/${story.id}`} title={story.headline} />
@@ -199,7 +201,7 @@ export default function StoryDetailScreen() {
             </Animated.View>
             <Animated.View style={[{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100 }, heroOverlayStyle]}>
               <LinearGradient
-                colors={['transparent', '#0A0A0A']}
+                colors={['transparent', theme.surface.background]}
                 style={{ width: '100%', height: '100%' }}
               />
             </Animated.View>
@@ -210,14 +212,14 @@ export default function StoryDetailScreen() {
           {/* Badges */}
           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <View style={{
-              backgroundColor: 'rgba(26, 26, 26, 0.6)',
+              backgroundColor: theme.surface.glassPill,
               borderRadius: 9999,
               paddingHorizontal: 10,
               paddingVertical: 4,
               borderWidth: 0.5,
-              borderColor: 'rgba(255, 255, 255, 0.1)',
+              borderColor: theme.surface.borderPill,
             }}>
-              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.6)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.secondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                 {TOPIC_LABELS[story.topic]}
               </Text>
             </View>
@@ -229,7 +231,7 @@ export default function StoryDetailScreen() {
           </View>
 
           {/* Headline */}
-          <Text testID="story-headline" style={{ fontFamily: 'DMSerifDisplay', fontSize: 26, lineHeight: 34, color: 'white' }}>
+          <Text testID="story-headline" style={{ fontFamily: 'DMSerifDisplay', fontSize: 26, lineHeight: 34, color: theme.text.primary }}>
             {story.headline}
           </Text>
 
@@ -247,12 +249,12 @@ export default function StoryDetailScreen() {
             <SpectrumBar segments={story.spectrumSegments} height={14} showLabels />
           ) : story.sources[0] && (
             <View style={{ gap: 4 }}>
-              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase', letterSpacing: 1 }}>
+              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary, textTransform: 'uppercase', letterSpacing: 1 }}>
                 Source Bias
               </Text>
               <View style={{
                 alignSelf: 'flex-start',
-                backgroundColor: 'rgba(26, 26, 26, 0.6)',
+                backgroundColor: theme.surface.glassPill,
                 borderRadius: 9999,
                 paddingHorizontal: 10,
                 paddingVertical: 4,
@@ -273,7 +275,7 @@ export default function StoryDetailScreen() {
                 fontFamily: FONT.body.family,
                 fontSize: FONT.body.size - 1,
                 lineHeight: 20,
-                color: SEMANTIC.warning.color,
+                color: theme.semantic.warning.color,
               }}>
                 This story is based on a single source. Cross-spectrum analysis is limited —
                 perspectives may update as more outlets cover this story.
@@ -315,10 +317,10 @@ export default function StoryDetailScreen() {
           {/* Timeline (multi-source only) */}
           {story.sourceCount > 1 && timeline && timeline.events.length > 0 && (
             <View style={{ gap: 8 }}>
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: 'white' }}>
+              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: theme.text.primary }}>
                 Coverage Timeline
               </Text>
-              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
+              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
                 {timeline.totalArticles} articles over {Math.round(timeline.timeSpanHours)}h
               </Text>
               <StoryTimeline events={timeline.events} />
@@ -327,7 +329,7 @@ export default function StoryDetailScreen() {
 
           {/* Sources */}
           <GlassView style={{ padding: 16 }}>
-            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: 'white', marginBottom: 8 }}>
+            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 16, color: theme.text.primary, marginBottom: 8 }}>
               Sources ({story.sources.length})
             </Text>
             <SourceList sources={story.sources} />
@@ -335,7 +337,7 @@ export default function StoryDetailScreen() {
 
           {/* Single-source CTA */}
           {story.sourceCount === 1 && (
-            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255, 255, 255, 0.35)', textAlign: 'center', paddingVertical: 8 }}>
+            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.muted, textAlign: 'center', paddingVertical: 8 }}>
               Check back as more outlets cover this story
             </Text>
           )}
@@ -367,6 +369,5 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: 'Inter-SemiBold',
     fontSize: 14,
-    color: 'white',
   },
 })

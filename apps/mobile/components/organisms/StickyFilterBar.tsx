@@ -20,6 +20,7 @@ import {
   DATE_PRESET_LABELS,
 } from '@/lib/shared/types'
 import { GlassView } from '@/components/ui/GlassView'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly topic: Topic | null
@@ -88,6 +89,7 @@ function FilterChip({ label, onDismiss }: {
   readonly label: string
   readonly onDismiss: () => void
 }) {
+  const theme = useTheme()
   return (
     <GlassView
       variant="sm"
@@ -100,11 +102,11 @@ function FilterChip({ label, onDismiss }: {
         borderRadius: 9999,
       }}
     >
-      <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.7)' }}>
+      <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.secondary }}>
         {label}
       </Text>
       <Pressable onPress={onDismiss} hitSlop={8} testID="filter-chip-dismiss">
-        <X size={12} color="rgba(255, 255, 255, 0.5)" />
+        <X size={12} color={theme.text.tertiary} />
       </Pressable>
     </GlassView>
   )

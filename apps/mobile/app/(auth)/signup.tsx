@@ -10,9 +10,12 @@ import { X } from 'lucide-react-native'
 import { useAuth } from '@/lib/hooks/use-auth'
 import { signupSchema } from '@/lib/shared/validation/auth'
 import { GlassView } from '@/components/ui/GlassView'
+import { useTheme } from '@/lib/shared/theme'
+import { PaperTextureOverlay } from '@/components/ui/PaperTextureOverlay'
 
 export default function SignupScreen() {
   const router = useRouter()
+  const theme = useTheme()
   const { signUpWithEmail } = useAuth()
 
   const [email, setEmail] = useState('')
@@ -50,8 +53,22 @@ export default function SignupScreen() {
     }
   }
 
+  const errSemantic = theme.semantic.error
+  const inputBg = `rgba(${theme.inkRgb}, 0.10)`
+  const inputBorderDefault = theme.surface.border
+  const fieldLabel = { fontFamily: 'Inter', fontSize: 13, color: theme.text.secondary, marginBottom: 6 } as const
+  const inputBase = {
+    fontFamily: 'Inter',
+    fontSize: 15,
+    color: theme.text.primary,
+    backgroundColor: inputBg,
+    borderRadius: 12,
+    borderWidth: 0.5,
+    padding: 14,
+  } as const
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background }}>
       {/* Close button */}
       <Pressable
         onPress={() => router.dismiss()}
@@ -59,7 +76,7 @@ export default function SignupScreen() {
         testID="close-button"
         style={{ position: 'absolute', top: 60, right: 20, zIndex: 10 }}
       >
-        <X size={24} color="rgba(255,255,255,0.6)" />
+        <X size={24} color={theme.text.secondary} />
       </Pressable>
 
       <KeyboardAvoidingView
@@ -67,99 +84,75 @@ export default function SignupScreen() {
         style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 24 }}
       >
         <Text
-          style={{ fontFamily: 'DMSerifDisplay', fontSize: 32, color: 'white', textAlign: 'center', marginBottom: 8 }}
+          style={{ fontFamily: 'DMSerifDisplay', fontSize: 32, color: theme.text.primary, textAlign: 'center', marginBottom: 8 }}
         >
           Axiom
         </Text>
-        <Text style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(255,255,255,0.5)', textAlign: 'center', marginBottom: 32 }}>
+        <Text style={{ fontFamily: 'Inter', fontSize: 14, color: theme.text.tertiary, textAlign: 'center', marginBottom: 32 }}>
           Create your account
         </Text>
 
-        <GlassView style={{ padding: 24, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.12)' }}>
-          <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 20, color: 'white', marginBottom: 20 }}>
+        <GlassView style={{ padding: 24, borderWidth: 0.5, borderColor: theme.surface.border }}>
+          <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 20, color: theme.text.primary, marginBottom: 20 }}>
             Sign Up
           </Text>
 
           {error && (
-            <View style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', borderRadius: 8, padding: 12, marginBottom: 16 }}>
-              <Text style={{ fontFamily: 'Inter', fontSize: 13, color: '#ef4444' }}>{error}</Text>
+            <View style={{ backgroundColor: errSemantic.bg, borderRadius: 8, padding: 12, marginBottom: 16 }}>
+              <Text style={{ fontFamily: 'Inter', fontSize: 13, color: errSemantic.color }}>{error}</Text>
             </View>
           )}
 
           <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 6 }}>Email</Text>
+            <Text style={fieldLabel}>Email</Text>
             <TextInput
               testID="email-input"
               value={email}
               onChangeText={setEmail}
               placeholder="you@example.com"
-              placeholderTextColor="rgba(255,255,255,0.25)"
+              placeholderTextColor={theme.text.muted}
               keyboardType="email-address"
+              keyboardAppearance={theme.name === 'paper' ? 'light' : 'dark'}
               autoCapitalize="none"
               autoCorrect={false}
-              style={{
-                fontFamily: 'Inter',
-                fontSize: 15,
-                color: 'white',
-                backgroundColor: 'rgba(255,255,255,0.10)',
-                borderRadius: 12,
-                borderWidth: 0.5,
-                borderColor: fieldErrors.email ? '#ef4444' : 'rgba(255,255,255,0.15)',
-                padding: 14,
-              }}
+              style={[inputBase, { borderColor: fieldErrors.email ? errSemantic.color : inputBorderDefault }]}
             />
             {fieldErrors.email && (
-              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: '#ef4444', marginTop: 4 }}>{fieldErrors.email}</Text>
+              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: errSemantic.color, marginTop: 4 }}>{fieldErrors.email}</Text>
             )}
           </View>
 
           <View style={{ marginBottom: 16 }}>
-            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 6 }}>Password</Text>
+            <Text style={fieldLabel}>Password</Text>
             <TextInput
               testID="password-input"
               value={password}
               onChangeText={setPassword}
               placeholder="At least 8 characters"
-              placeholderTextColor="rgba(255,255,255,0.25)"
+              placeholderTextColor={theme.text.muted}
               secureTextEntry
-              style={{
-                fontFamily: 'Inter',
-                fontSize: 15,
-                color: 'white',
-                backgroundColor: 'rgba(255,255,255,0.10)',
-                borderRadius: 12,
-                borderWidth: 0.5,
-                borderColor: fieldErrors.password ? '#ef4444' : 'rgba(255,255,255,0.15)',
-                padding: 14,
-              }}
+              keyboardAppearance={theme.name === 'paper' ? 'light' : 'dark'}
+              style={[inputBase, { borderColor: fieldErrors.password ? errSemantic.color : inputBorderDefault }]}
             />
             {fieldErrors.password && (
-              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: '#ef4444', marginTop: 4 }}>{fieldErrors.password}</Text>
+              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: errSemantic.color, marginTop: 4 }}>{fieldErrors.password}</Text>
             )}
           </View>
 
           <View style={{ marginBottom: 24 }}>
-            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 6 }}>Confirm Password</Text>
+            <Text style={fieldLabel}>Confirm Password</Text>
             <TextInput
               testID="confirm-password-input"
               value={confirmPassword}
               onChangeText={setConfirmPassword}
               placeholder="Confirm your password"
-              placeholderTextColor="rgba(255,255,255,0.25)"
+              placeholderTextColor={theme.text.muted}
               secureTextEntry
-              style={{
-                fontFamily: 'Inter',
-                fontSize: 15,
-                color: 'white',
-                backgroundColor: 'rgba(255,255,255,0.10)',
-                borderRadius: 12,
-                borderWidth: 0.5,
-                borderColor: fieldErrors.confirmPassword ? '#ef4444' : 'rgba(255,255,255,0.15)',
-                padding: 14,
-              }}
+              keyboardAppearance={theme.name === 'paper' ? 'light' : 'dark'}
+              style={[inputBase, { borderColor: fieldErrors.confirmPassword ? errSemantic.color : inputBorderDefault }]}
             />
             {fieldErrors.confirmPassword && (
-              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: '#ef4444', marginTop: 4 }}>{fieldErrors.confirmPassword}</Text>
+              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: errSemantic.color, marginTop: 4 }}>{fieldErrors.confirmPassword}</Text>
             )}
           </View>
 
@@ -168,7 +161,7 @@ export default function SignupScreen() {
             onPress={handleSignup}
             disabled={isSubmitting}
             style={({ pressed }) => ({
-              backgroundColor: pressed ? 'rgba(255,255,255,0.85)' : 'white',
+              backgroundColor: pressed ? theme.text.secondary : theme.text.primary,
               borderRadius: 12,
               padding: 14,
               alignItems: 'center',
@@ -176,9 +169,9 @@ export default function SignupScreen() {
             })}
           >
             {isSubmitting ? (
-              <ActivityIndicator color="#0A0A0A" size="small" />
+              <ActivityIndicator color={theme.surface.background} size="small" />
             ) : (
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: '#0A0A0A' }}>
+              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: theme.surface.background }}>
                 Create Account
               </Text>
             )}
@@ -186,16 +179,20 @@ export default function SignupScreen() {
         </GlassView>
 
         <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 24, gap: 4 }}>
-          <Text style={{ fontFamily: 'Inter', fontSize: 14, color: 'rgba(255,255,255,0.5)' }}>
+          <Text style={{ fontFamily: 'Inter', fontSize: 14, color: theme.text.tertiary }}>
             Already have an account?
           </Text>
           <Link href="/(auth)/login">
-            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: 'white' }}>
+            <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 14, color: theme.text.primary }}>
               Sign In
             </Text>
           </Link>
         </View>
       </KeyboardAvoidingView>
+      {/* Texture overlay must be the LAST child so it paints above modal
+         content (matching the root shell). It is pointer-transparent, so
+         all buttons remain tappable. */}
+      <PaperTextureOverlay />
     </SafeAreaView>
   )
 }

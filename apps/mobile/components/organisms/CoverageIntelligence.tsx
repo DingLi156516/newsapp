@@ -8,6 +8,7 @@ import { View, Text } from 'react-native'
 import type { NewsArticle, StoryTimeline } from '@/lib/shared/types'
 import { buildStoryIntelligence } from '@/lib/story-intelligence'
 import { GlassView } from '@/components/ui/GlassView'
+import { useTheme } from '@/lib/shared/theme'
 
 interface Props {
   readonly article: NewsArticle
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function CoverageIntelligence({ article, timeline }: Props) {
+  const theme = useTheme()
   const intelligence = useMemo(
     () => buildStoryIntelligence(article, timeline),
     [article, timeline]
@@ -25,7 +27,7 @@ export function CoverageIntelligence({ article, timeline }: Props) {
       <Text style={{
         fontFamily: 'Inter',
         fontSize: 11,
-        color: 'rgba(255, 255, 255, 0.6)',
+        color: theme.text.secondary,
         textTransform: 'uppercase',
         letterSpacing: 2,
       }}>
@@ -35,10 +37,10 @@ export function CoverageIntelligence({ article, timeline }: Props) {
       <GlassView style={{ padding: 16, gap: 16 }}>
         {/* Coverage shape */}
         <View style={{ gap: 4 }}>
-          <Text style={{ fontFamily: 'Inter-Medium', fontSize: 14, color: 'white' }}>
+          <Text style={{ fontFamily: 'Inter-Medium', fontSize: 14, color: theme.text.primary }}>
             Coverage shape
           </Text>
-          <Text style={{ fontFamily: 'Inter', fontSize: 13, color: 'rgba(255, 255, 255, 0.75)', lineHeight: 20 }}>
+          <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.secondary, lineHeight: 20 }}>
             {intelligence.overview}
           </Text>
         </View>
@@ -60,18 +62,19 @@ export function CoverageIntelligence({ article, timeline }: Props) {
 }
 
 function IntelCard({ label, text }: { readonly label: string; readonly text: string }) {
+  const theme = useTheme()
   return (
     <GlassView variant="sm" style={{ flex: 1, padding: 12, gap: 4 }}>
       <Text style={{
         fontFamily: 'Inter',
         fontSize: 10,
-        color: 'rgba(255, 255, 255, 0.45)',
+        color: theme.text.tertiary,
         textTransform: 'uppercase',
         letterSpacing: 1.5,
       }}>
         {label}
       </Text>
-      <Text style={{ fontFamily: 'Inter', fontSize: 12, color: 'rgba(255, 255, 255, 0.75)', lineHeight: 18 }}>
+      <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.secondary, lineHeight: 18 }}>
         {text}
       </Text>
     </GlassView>
