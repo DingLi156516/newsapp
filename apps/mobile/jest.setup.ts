@@ -31,11 +31,12 @@ jest.mock('expo-router', () => ({
 
 // Mock @gorhom/bottom-sheet
 jest.mock('@gorhom/bottom-sheet', () => {
+  const React = require('react')
   const { View, ScrollView } = require('react-native')
   return {
     __esModule: true,
     default: ({ children }: { children: React.ReactNode }) =>
-      View({ testID: 'bottom-sheet', children }),
+      React.createElement(View, { testID: 'bottom-sheet' }, children),
     BottomSheetScrollView: ScrollView,
     BottomSheetModalProvider: ({ children }: { children: React.ReactNode }) => children,
     BottomSheetBackdrop: View,

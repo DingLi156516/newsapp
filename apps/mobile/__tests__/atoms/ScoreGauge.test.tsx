@@ -15,8 +15,8 @@ describe('ScoreGauge', () => {
     expect(screen.getByText('0')).toBeTruthy()
   })
 
-  it('clamps displayed value to rounded integer', () => {
+  it('displays non-integer values to one decimal place', () => {
     render(<ScoreGauge label="Score" value={85.7} />)
-    expect(screen.getByText('86')).toBeTruthy()
+    expect(screen.getByText('85.7')).toBeTruthy()
   })
 })

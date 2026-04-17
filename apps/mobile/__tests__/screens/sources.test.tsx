@@ -38,7 +38,7 @@ describe('SourcesScreen', () => {
 
   it('renders filter button with count', () => {
     render(<SourcesScreen />)
-    expect(screen.getByText('Filters')).toBeTruthy()
+    expect(screen.getByLabelText(/^Filters/)).toBeTruthy()
   })
 
   it('renders sort options', () => {
@@ -68,17 +68,18 @@ describe('SourcesScreen', () => {
 
   it('renders bias pills with spectrum colors', () => {
     render(<SourcesScreen />)
-    expect(screen.getByText('Lean Left')).toBeTruthy()
-    expect(screen.getByText('Right')).toBeTruthy()
-    expect(screen.getByText('Center')).toBeTruthy()
+    // Labels also appear in the filter sheet's bias pills — assert at least one of each.
+    expect(screen.getAllByText('Lean Left').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Right').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Center').length).toBeGreaterThan(0)
   })
 
   it('renders factuality labels on source cards', () => {
     render(<SourcesScreen />)
-    // FactualityBar with showLabel renders the text
-    expect(screen.getByText('High Factuality')).toBeTruthy()
-    expect(screen.getByText('Mixed Factuality')).toBeTruthy()
-    expect(screen.getByText('Very High Factuality')).toBeTruthy()
+    // FactualityBar and filter pills both render factuality labels.
+    expect(screen.getAllByText('High Factuality').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Mixed Factuality').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Very High Factuality').length).toBeGreaterThan(0)
   })
 
   it('sorts by name by default', () => {
@@ -89,7 +90,7 @@ describe('SourcesScreen', () => {
 
   it('opens filter modal on filter button press', () => {
     render(<SourcesScreen />)
-    fireEvent.press(screen.getByText('Filters'))
+    fireEvent.press(screen.getByLabelText(/^Filters/))
     // Modal should show filter section labels
     expect(screen.getByText('BIAS')).toBeTruthy()
     expect(screen.getByText('FACTUALITY')).toBeTruthy()

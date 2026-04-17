@@ -125,16 +125,16 @@ describe('ProfileScreen', () => {
       expect(screen.getByText('Bias Calibration')).toBeTruthy()
     })
 
-    it('shows stories analyzed count in banner', () => {
+    it('shows Stories Read stat card for authenticated users', () => {
       setupAuthenticated()
       render(<ProfileScreen />)
-      expect(screen.getByText('42 stories analyzed')).toBeTruthy()
+      expect(screen.getByText('Stories Read')).toBeTruthy()
     })
 
-    it('shows blindspots detected count', () => {
+    it('shows Blindspots stat card for authenticated users', () => {
       setupAuthenticated()
       render(<ProfileScreen />)
-      expect(screen.getByText('1 blindspot detected')).toBeTruthy()
+      expect(screen.getByText('Blindspots')).toBeTruthy()
     })
 
     it('shows spectrum comparison section', () => {
