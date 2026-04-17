@@ -78,6 +78,14 @@ Claim timestamp semantics:
 - `BiasProfile`: `{ userDistribution, overallDistribution, blindspots, totalStoriesRead, dominantBias }`
 - `StoryWithSpectrum`: `{ spectrum_segments: { bias: string, percentage: number }[] | null }`
 
+## Ownership Types (`@/lib/types`, `@/lib/api/ownership-aggregator`)
+
+- `OwnerType`: `'public_company' | 'private_company' | 'cooperative' | 'public_broadcaster' | 'trust' | 'individual' | 'state_adjacent' | 'nonprofit'`
+- `MediaOwner`: `{ id, name, slug, ownerType, isIndividual, country, wikidataQid, ownerSource, ownerVerifiedAt, sourceCount? }`
+- `OwnershipGroup`: `{ ownerId, ownerName, ownerSlug, ownerType, isIndividual, country, sourceCount, percentage }` (percentage is share of total sources, including unknowns)
+- `OwnershipDistribution`: `{ groups: OwnershipGroup[], unknownCount, concentrationIndex (0..1, HHI over exact fractional shares), dominantOwner: OwnershipGroup | null }` — `dominantOwner` is count-based (`sourceCount * 2 >= total`), not percentage-based, so 99/200 is not dominant
+- `NewsArticle.ownershipUnavailable?: boolean` — set when media_owners enrichment lookup failed for the request; story + sources still valid, owner field simply absent. UI can render a distinct "ownership data temporarily unavailable" hint instead of "no known owners".
+
 ## For You Types (`@/lib/api/for-you-scoring`, `@/lib/api/validation`)
 
 - `ForYouSignals`: `{ followedTopics, blindspotCategories, readStoryIds, now }`

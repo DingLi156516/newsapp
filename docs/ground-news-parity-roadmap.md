@@ -97,7 +97,12 @@ trending_score = impact_score
 
 ---
 
-### Phase 2 — Source Ownership Graph
+### Phase 2 — Source Ownership Graph ✅ SHIPPED (branch `feat/ownership-graph`, 2026-04-17)
+
+**Shipped scope:** `OwnershipBar` + `OwnershipSummary` on web + mobile story detail; `SourcesView` "Group by owner" toggle; `SourceList` owner chips on mobile; `querySources` owner join + transformer update; `lib/api/ownership-aggregator.ts` pure function with 9 unit tests; `lib/wikidata/sparql-client.ts` with 7 unit tests; `scripts/seed-ownership.ts` dry-run-only backfill emitting CSV for manual migration 051 review. Playwright + Maestro smoke tests added.
+
+**Deferred.** Mobile sources-tab grouping (FlatList → SectionList rewrite); owner-based feed filter; `/owners/[slug]` profile page; actual migration 051 (to be generated from staging dry-run CSV).
+
 **Goal.** Surface "8 of 10 sources owned by Sinclair" on story detail and source directory. This is Ground News's single biggest differentiator.
 
 **Data work:**

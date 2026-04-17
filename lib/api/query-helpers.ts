@@ -404,7 +404,18 @@ interface ArticleSourceJoin {
 export async function querySourcesForStory(
   client: SupabaseClient<Database>,
   storyId: string
-): Promise<{ sources: SourceRow[]; articleUrlMap: Map<string, string>; ownerMap: Map<string, OwnerRow> }> {
+): Promise<{
+  sources: SourceRow[]
+  articleUrlMap: Map<string, string>
+  ownerMap: Map<string, OwnerRow>
+  /**
+   * True when a non-empty set of owner_ids existed but the media_owners
+   * fetch failed. The story still returns with sources, but the flag lets
+   * the UI distinguish "no linked owners" from "ownership lookup broke"
+   * and lets monitoring tell them apart.
+   */
+  ownershipUnavailable: boolean
+}> {
   // Get source IDs and article URLs from articles
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: articles, error: articleError } = await (client.from('articles') as any)
@@ -417,7 +428,9 @@ export async function querySourcesForStory(
     throw new Error(`Failed to fetch articles: ${articleError.message}`)
   }
 
-  if (!articles || articles.length === 0) return { sources: [], articleUrlMap: new Map(), ownerMap: new Map() }
+  if (!articles || articles.length === 0) {
+    return { sources: [], articleUrlMap: new Map(), ownerMap: new Map(), ownershipUnavailable: false }
+  }
 
   // Build map of source_id → first article URL
   const articleUrlMap = new Map<string, string>()
@@ -451,15 +464,39 @@ export async function querySourcesForStory(
       .in('id', ownerIds)
 
     if (ownerError) {
-      console.error(`[querySourcesForStory] Owner fetch failed for story ${storyId}:`, ownerError.message)
-    } else if (owners) {
+      // Story data is fully valid without ownership — degrade gracefully so
+      // a transient media_owners issue doesn't 500 the primary read path.
+      // Log + return the flag so monitoring can tell this apart from stories
+      // that legitimately have no linked owners.
+      console.error(
+        `[querySourcesForStory] media_owners lookup failed for story ${storyId}:`,
+        ownerError.message
+      )
+      return { sources: sourceRows, articleUrlMap, ownerMap, ownershipUnavailable: true }
+    }
+    if (owners) {
       for (const o of owners as OwnerRow[]) {
         ownerMap.set(o.id, o)
       }
     }
+
+    // Silent-partial detection: if any source claims an owner_id but the
+    // fetched row is missing (RLS policy filtered it, soft-deleted row, etc.),
+    // flag as unavailable. Otherwise a policy regression looks identical to
+    // "no known owners" and the Phase 2 trust signal silently disappears.
+    const fetchedOwnerIds = new Set<string>()
+    for (const id of ownerMap.keys()) fetchedOwnerIds.add(id)
+    const missing = ownerIds.filter((id) => !fetchedOwnerIds.has(id))
+    if (missing.length > 0) {
+      console.error(
+        `[querySourcesForStory] media_owners returned ${ownerMap.size}/${ownerIds.length} rows for story ${storyId} — missing ${missing.length}:`,
+        missing.slice(0, 5).join(', ')
+      )
+      return { sources: sourceRows, articleUrlMap, ownerMap, ownershipUnavailable: true }
+    }
   }
 
-  return { sources: sourceRows, articleUrlMap, ownerMap }
+  return { sources: sourceRows, articleUrlMap, ownerMap, ownershipUnavailable: false }
 }
 
 export async function queryRecentStoriesForSource(
@@ -565,52 +602,97 @@ export async function queryArticlesWithSourcesForStory(
     }))
 }
 
+export interface SourceRowWithOwner extends SourceRow {
+  total_articles_ingested?: number
+  owner?: OwnerRow | null
+}
+
 export async function querySources(
   client: SupabaseClient<Database>,
   params: SourcesQuery
-): Promise<{ data: SourceRow[]; count: number }> {
+): Promise<{ data: SourceRowWithOwner[]; count: number; ownershipUnavailable: boolean }> {
   const { bias, factuality, ownership, region, search, page, limit } = params
   const offset = (page - 1) * limit
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let query = (client.from('sources') as any)
-    .select(
-      'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, created_at, updated_at, total_articles_ingested',
-      { count: 'exact' }
-    )
-    .eq('is_active', true)
+  // Three tiered selects, attempted in order:
+  //   1. full        — base + owner_id + owner:media_owners embed
+  //   2. with-fk     — base + owner_id (embed dropped)
+  //   3. bare        — base only (no owner_id, no embed)
+  //
+  // Migration 048 (on `main`) adds both `sources.owner_id` and
+  // `media_owners`, so tier 1 is the expected happy path. Tiers 2 and 3
+  // exist to guarantee that a code deploy landing before the schema
+  // migration — or an RLS/permission regression on either column — still
+  // returns a working source directory rather than 500'ing the route.
+  const preBase =
+    'id, slug, name, bias, factuality, ownership, url, rss_url, region, is_active, created_at, updated_at, total_articles_ingested'
+  const withFk = `${preBase}, owner_id`
+  const withOwnerEmbed = `${withFk}, owner:media_owners(id, name, slug, owner_type, is_individual, country, wikidata_qid, owner_source, owner_verified_at)`
 
-  if (bias) {
-    query = query.eq('bias', bias)
+  const runQuery = async (selectCols: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let q = (client.from('sources') as any)
+      .select(selectCols, { count: 'exact' })
+      .eq('is_active', true)
+    if (bias) q = q.eq('bias', bias)
+    if (factuality) q = q.eq('factuality', factuality)
+    if (ownership) q = q.eq('ownership', ownership)
+    if (region) q = q.eq('region', region)
+    if (search) q = q.ilike('name', `%${search}%`)
+    return q.order('name', { ascending: true }).range(offset, offset + limit - 1)
   }
 
-  if (factuality) {
-    query = query.eq('factuality', factuality)
+  const first = await runQuery(withOwnerEmbed)
+  if (!first.error) {
+    // Silent-partial detection: a row with owner_id populated but
+    // owner === null means PostgREST embed fetched fewer owner rows than
+    // expected (RLS policy, missing FK target, etc.) without raising an
+    // error. Treat as degraded so UI can relabel instead of showing real
+    // owners as "unaffiliated".
+    const rows = (first.data ?? []) as SourceRowWithOwner[]
+    const partialMiss = rows.some((r) => r.owner_id && !r.owner)
+    if (partialMiss) {
+      const missCount = rows.filter((r) => r.owner_id && !r.owner).length
+      console.error(
+        `[querySources] media_owners embed returned ${missCount} rows with owner_id but null owner (silent RLS/FK miss)`
+      )
+    }
+    return {
+      data: rows,
+      count: first.count ?? 0,
+      ownershipUnavailable: partialMiss,
+    }
   }
 
-  if (ownership) {
-    query = query.eq('ownership', ownership)
+  console.error(
+    '[querySources] media_owners join failed, retrying with owner_id only:',
+    first.error.message
+  )
+
+  const second = await runQuery(withFk)
+  if (!second.error) {
+    return {
+      data: (second.data ?? []) as SourceRowWithOwner[],
+      count: second.count ?? 0,
+      ownershipUnavailable: true,
+    }
   }
 
-  if (region) {
-    query = query.eq('region', region)
+  console.error(
+    '[querySources] owner_id select failed, retrying source-only (pre-migration-048 schema):',
+    second.error.message
+  )
+
+  const third = await runQuery(preBase)
+  if (third.error) {
+    throw new Error(`Failed to query sources: ${third.error.message}`)
   }
 
-  if (search) {
-    query = query.ilike('name', `%${search}%`)
+  return {
+    data: (third.data ?? []) as SourceRowWithOwner[],
+    count: third.count ?? 0,
+    ownershipUnavailable: true,
   }
-
-  query = query
-    .order('name', { ascending: true })
-    .range(offset, offset + limit - 1)
-
-  const { data, count, error } = await query
-
-  if (error) {
-    throw new Error(`Failed to query sources: ${error.message}`)
-  }
-
-  return { data: data ?? [], count: count ?? 0 }
 }
 
 // ---------------------------------------------------------------------------

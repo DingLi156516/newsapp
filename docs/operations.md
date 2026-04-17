@@ -145,6 +145,36 @@ npx tsx scripts/backfill-single-source.ts --batch-size 3
 
 The script queries completed single-source stories (`source_count = 1`), calls `assembleSingleStory` to replace AI headlines with the original article title, regenerate summaries via flash-lite, and recompute all metrics. Failed stories are logged but don't stop the batch. Safe to re-run — already-fixed stories will be re-assembled idempotently, though LLM-generated text (summaries) may differ slightly between runs due to non-zero temperature.
 
+### Seed Media Ownership (Wikidata)
+
+Resolves `media_owners` + `sources.owner_id` from Wikidata's SPARQL endpoint. The script is **dry-run only by design** — it never writes to the DB. Review the CSV, then hand-author `supabase/migrations/051_ownership_backfill.sql` from the approved rows.
+
+```bash
+# Emits scripts/out/ownership-backfill.csv with proposed inserts/links
+npx tsx scripts/seed-ownership.ts --dry-run
+
+# Custom output path and parent-walk depth
+npx tsx scripts/seed-ownership.ts --dry-run --out /tmp/ownership.csv --max-hops 4
+```
+
+The CSV columns: `source_slug, source_wikidata_qid, resolved_owner_name, resolved_owner_qid, resolved_owner_type, country, action(insert|link|skip|mismatch|confirmed), confidence(high|medium|low), notes`.
+
+**Action semantics:**
+- `insert` — source has no `owner_id` yet; migration should `INSERT ... ON CONFLICT DO NOTHING` on `media_owners`, then `UPDATE sources SET owner_id = ...`
+- `confirmed` — source is already linked to an owner whose `wikidata_qid` matches Wikidata; no-op, no SQL needed
+- `mismatch` — two cases:
+  1. source is already linked but to a *different* owner (or an owner with no QID). **No `UPDATE` is generated.** Review manually; if you want to relink, re-run with `--allow-overwrite`. This prevents silent clobbering of curated ownership data.
+  2. Wikidata returned multiple distinct P127 candidates (current + former, competing claims). `notes` lists all candidates. Pick one manually before authoring the migration row.
+- `link` — only appears when `--allow-overwrite` is passed. Confidence is clamped to `low` so a reviewer notices.
+- `skip` — missing `wikidata_qid`, no P127 claim, or SPARQL lookup failure (reason in `notes`).
+
+**Apply workflow:**
+1. Run `--dry-run` against staging DB (needs `SUPABASE_SERVICE_ROLE_KEY`)
+2. Review CSV; drop low-confidence or wrong rows. Pay attention to `mismatch` rows — these are pre-existing curated links.
+3. Author `supabase/migrations/051_ownership_backfill.sql` using `INSERT ... ON CONFLICT (slug) DO NOTHING` + `UPDATE sources SET owner_id = ... WHERE slug = ...` (only for `insert` / `link` rows, never `mismatch`)
+4. `supabase db push` against staging, spot-check 5 stories
+5. Repeat against production
+
 ## Running the Pipeline Locally
 
 ### 1. Start the dev server

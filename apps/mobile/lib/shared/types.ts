@@ -115,6 +115,40 @@ export interface AISummary {
   rightFraming: string
 }
 
+export type OwnerType =
+  | 'public_company'
+  | 'private_company'
+  | 'cooperative'
+  | 'public_broadcaster'
+  | 'trust'
+  | 'individual'
+  | 'state_adjacent'
+  | 'nonprofit'
+
+export const OWNER_TYPE_LABELS: Record<OwnerType, string> = {
+  public_company: 'Public Company',
+  private_company: 'Private Company',
+  cooperative: 'Cooperative',
+  public_broadcaster: 'Public Broadcaster',
+  trust: 'Trust',
+  individual: 'Individual',
+  state_adjacent: 'State-Adjacent',
+  nonprofit: 'Nonprofit',
+}
+
+export interface MediaOwner {
+  readonly id: string
+  readonly name: string
+  readonly slug: string
+  readonly ownerType: OwnerType
+  readonly isIndividual: boolean
+  readonly country: string | null
+  readonly wikidataQid: string | null
+  readonly ownerSource: 'wikidata' | 'manual'
+  readonly ownerVerifiedAt: string
+  readonly sourceCount?: number
+}
+
 export interface NewsSource {
   id: string
   name: string
@@ -123,6 +157,7 @@ export interface NewsSource {
   ownership: OwnershipType
   url?: string
   articleUrl?: string
+  owner?: MediaOwner
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +242,13 @@ export interface NewsArticle {
   keyClaims?: KeyClaim[] | null
   headlines?: HeadlineComparison[]
   tags?: StoryTag[]
+  /**
+   * True when the media_owners enrichment lookup failed during this request.
+   * Story payload is still valid; `source.owner` will be absent for all
+   * sources even if some have owner_id in the DB. UI can render a degraded
+   * state instead of a misleading empty "no known owners" message.
+   */
+  ownershipUnavailable?: boolean
 }
 
 // ---------------------------------------------------------------------------

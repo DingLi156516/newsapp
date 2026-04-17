@@ -423,6 +423,87 @@ describe('querySourcesForStory', () => {
 
     await expect(querySourcesForStory(client, 'story-1')).rejects.toThrow('Failed to fetch articles')
   })
+
+  it('returns sources + ownershipUnavailable=true when media_owners lookup fails (no throw)', async () => {
+    // Story data must still flow through on media_owners failure — owner
+    // enrichment is optional. The explicit flag lets the UI + monitoring
+    // distinguish "no linked owners" from "ownership lookup broke".
+    const articlesBuilder = createMockQueryBuilder(
+      [{ source_id: 'src-1', url: 'https://example.com/a' }],
+      0
+    )
+    const sourcesBuilder = createMockQueryBuilder(
+      [{ id: 'src-1', name: 'CNN', bias: 'lean-left', owner_id: 'owner-1' }],
+      0
+    )
+    const ownersBuilder = createMockQueryBuilder(null, 0, {
+      message: 'media_owners RLS denied',
+    })
+    const client = {
+      from: vi
+        .fn()
+        .mockReturnValueOnce(articlesBuilder)
+        .mockReturnValueOnce(sourcesBuilder)
+        .mockReturnValueOnce(ownersBuilder),
+    } as unknown as SupabaseClient<Database>
+
+    const result = await querySourcesForStory(client, 'story-1')
+    expect(result.sources).toHaveLength(1)
+    expect(result.ownerMap.size).toBe(0)
+    expect(result.ownershipUnavailable).toBe(true)
+  })
+
+  it('flags ownershipUnavailable=true when media_owners returns fewer rows than requested (silent RLS miss)', async () => {
+    // Source claims owner_id='owner-1' but media_owners returns zero rows
+    // without an explicit error — classic RLS/policy regression. Must still
+    // degrade, not silently report "unknown owner".
+    const articlesBuilder = createMockQueryBuilder(
+      [{ source_id: 'src-1', url: 'https://example.com/a' }],
+      0
+    )
+    const sourcesBuilder = createMockQueryBuilder(
+      [{ id: 'src-1', name: 'CNN', bias: 'lean-left', owner_id: 'owner-1' }],
+      0
+    )
+    const ownersBuilder = createMockQueryBuilder([], 0)
+    const client = {
+      from: vi
+        .fn()
+        .mockReturnValueOnce(articlesBuilder)
+        .mockReturnValueOnce(sourcesBuilder)
+        .mockReturnValueOnce(ownersBuilder),
+    } as unknown as SupabaseClient<Database>
+
+    const result = await querySourcesForStory(client, 'story-1')
+    expect(result.ownershipUnavailable).toBe(true)
+    expect(result.ownerMap.size).toBe(0)
+  })
+
+  it('returns ownershipUnavailable=false on the happy path', async () => {
+    const articlesBuilder = createMockQueryBuilder(
+      [{ source_id: 'src-1', url: 'https://example.com/a' }],
+      0
+    )
+    const sourcesBuilder = createMockQueryBuilder(
+      [{ id: 'src-1', name: 'CNN', bias: 'lean-left', owner_id: 'owner-1' }],
+      0
+    )
+    const ownersBuilder = createMockQueryBuilder(
+      [{ id: 'owner-1', name: 'Warner', slug: 'warner', owner_type: 'public_company', is_individual: false, country: 'US', wikidata_qid: 'Q1', owner_source: 'manual', owner_verified_at: '2026-01-01' }],
+      0
+    )
+    const client = {
+      from: vi
+        .fn()
+        .mockReturnValueOnce(articlesBuilder)
+        .mockReturnValueOnce(sourcesBuilder)
+        .mockReturnValueOnce(ownersBuilder),
+    } as unknown as SupabaseClient<Database>
+
+    const result = await querySourcesForStory(client, 'story-1')
+    expect(result.ownershipUnavailable).toBe(false)
+    expect(result.ownerMap.get('owner-1')?.name).toBe('Warner')
+  })
 })
 
 describe('querySources', () => {
@@ -442,6 +523,153 @@ describe('querySources', () => {
 
     await querySources(client, { bias: 'left', page: 1, limit: 50 })
     expect(builder.eq).toHaveBeenCalledWith('bias', 'left')
+  })
+
+  it('requests joined owner data via PostgREST relational select', async () => {
+    const builder = createMockQueryBuilder([], 0)
+    const client = createMockClient(builder)
+
+    await querySources(client, { page: 1, limit: 50 })
+    const selectArg = builder.select.mock.calls[0][0] as string
+    expect(selectArg).toContain('owner:media_owners(')
+    expect(selectArg).toContain('owner_type')
+  })
+
+  it('retries without owner embed and flags ownershipUnavailable when media_owners join fails', async () => {
+    // First call (with owner embed) errors; second call (source-only) succeeds.
+    // The source directory must still flow; only the flag surfaces the degradation.
+    const failingBuilder = createMockQueryBuilder(null, 0, {
+      message: 'relation media_owners does not exist',
+    })
+    const fallbackBuilder = createMockQueryBuilder(
+      [{ id: 'src-1', name: 'CNN', bias: 'lean-left' }],
+      1
+    )
+    const client = {
+      from: vi
+        .fn()
+        .mockReturnValueOnce(failingBuilder)
+        .mockReturnValueOnce(fallbackBuilder),
+    } as unknown as SupabaseClient<Database>
+
+    const result = await querySources(client, { page: 1, limit: 50 })
+    expect(result.data).toHaveLength(1)
+    expect(result.ownershipUnavailable).toBe(true)
+    // Second select should NOT include the owner relation
+    const fallbackSelect = fallbackBuilder.select.mock.calls[0][0] as string
+    expect(fallbackSelect).not.toContain('owner:media_owners')
+  })
+
+  it('falls back to pre-migration schema (no owner_id) if both owner selects fail', async () => {
+    // Simulates an app deployed before migration 048 ran: both the owner
+    // embed and the owner_id column don't exist. Route must still return
+    // sources with ownershipUnavailable=true instead of 500'ing.
+    const embedFail = createMockQueryBuilder(null, 0, {
+      message: 'relation media_owners does not exist',
+    })
+    const fkFail = createMockQueryBuilder(null, 0, {
+      message: 'column sources.owner_id does not exist',
+    })
+    const bareOk = createMockQueryBuilder(
+      [{ id: 'src-1', name: 'CNN', bias: 'lean-left' }],
+      1
+    )
+    const client = {
+      from: vi
+        .fn()
+        .mockReturnValueOnce(embedFail)
+        .mockReturnValueOnce(fkFail)
+        .mockReturnValueOnce(bareOk),
+    } as unknown as SupabaseClient<Database>
+
+    const result = await querySources(client, { page: 1, limit: 50 })
+    expect(result.data).toHaveLength(1)
+    expect(result.ownershipUnavailable).toBe(true)
+    const thirdSelect = bareOk.select.mock.calls[0][0] as string
+    expect(thirdSelect).not.toContain('owner_id')
+    expect(thirdSelect).not.toContain('media_owners')
+  })
+
+  it('flags ownershipUnavailable=true when embed returns owner_id populated but owner=null (silent RLS miss)', async () => {
+    // PostgREST returns source rows with owner_id + owner: null without
+    // raising an error when RLS filters the joined row. Must degrade, not
+    // silently report "unaffiliated".
+    const rows = [
+      { id: 'src-1', name: 'CNN', bias: 'lean-left', owner_id: 'owner-1', owner: null },
+      { id: 'src-2', name: 'Indie', bias: 'center', owner_id: null, owner: null },
+    ]
+    const builder = createMockQueryBuilder(rows, 2)
+    const client = createMockClient(builder)
+
+    const result = await querySources(client, { page: 1, limit: 50 })
+    expect(result.data).toHaveLength(2)
+    expect(result.ownershipUnavailable).toBe(true)
+  })
+
+  it('keeps ownershipUnavailable=false when every owner_id has a resolved owner embed', async () => {
+    const rows = [
+      {
+        id: 'src-1',
+        name: 'CNN',
+        bias: 'lean-left',
+        owner_id: 'owner-1',
+        owner: {
+          id: 'owner-1',
+          name: 'Warner',
+          slug: 'warner',
+          owner_type: 'public_company',
+          is_individual: false,
+          country: 'US',
+          wikidata_qid: 'Q1',
+          owner_source: 'manual',
+          owner_verified_at: '2026-01-01',
+        },
+      },
+      { id: 'src-2', name: 'Indie', bias: 'center', owner_id: null, owner: null },
+    ]
+    const builder = createMockQueryBuilder(rows, 2)
+    const client = createMockClient(builder)
+
+    const result = await querySources(client, { page: 1, limit: 50 })
+    expect(result.ownershipUnavailable).toBe(false)
+  })
+
+  it('returns hydrated owner on rows where the join resolves', async () => {
+    const row = {
+      id: 'src-1',
+      name: 'CNN',
+      bias: 'lean-left',
+      owner: {
+        id: 'warner',
+        name: 'Warner Bros. Discovery',
+        slug: 'warner-bros-discovery',
+        owner_type: 'public_company',
+        is_individual: false,
+        country: 'US',
+        wikidata_qid: 'Q3570967',
+        owner_source: 'manual',
+        owner_verified_at: '2026-01-01T00:00:00Z',
+      },
+    }
+    const builder = createMockQueryBuilder([row], 1)
+    const client = createMockClient(builder)
+
+    const result = await querySources(client, { page: 1, limit: 50 })
+    expect(result.data[0].owner?.name).toBe('Warner Bros. Discovery')
+  })
+
+  it('returns null owner when the source is unlinked', async () => {
+    const row = {
+      id: 'src-2',
+      name: 'Indie News',
+      bias: 'center',
+      owner: null,
+    }
+    const builder = createMockQueryBuilder([row], 1)
+    const client = createMockClient(builder)
+
+    const result = await querySources(client, { page: 1, limit: 50 })
+    expect(result.data[0].owner).toBeNull()
   })
 
   it('throws on error', async () => {

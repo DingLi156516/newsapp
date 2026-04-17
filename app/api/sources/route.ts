@@ -10,7 +10,7 @@ import { getSupabaseServerClient } from '@/lib/supabase/server'
 import { sourcesQuerySchema, parseSearchParams } from '@/lib/api/validation'
 import { querySources } from '@/lib/api/query-helpers'
 import { transformSource } from '@/lib/api/transformers'
-import type { DbSource } from '@/lib/supabase/types'
+import type { DbSource, DbMediaOwner } from '@/lib/supabase/types'
 
 export async function GET(request: NextRequest) {
   const parsed = parseSearchParams(
@@ -27,12 +27,15 @@ export async function GET(request: NextRequest) {
 
   try {
     const client = getSupabaseServerClient()
-    const { data: sources, count } = await querySources(
+    const { data: sources, count, ownershipUnavailable } = await querySources(
       client,
       parsed.data as Parameters<typeof querySources>[1]
     )
 
-    const transformed = sources.map((s) => transformSource(s as DbSource))
+    const transformed = sources.map((s) => {
+      const row = s as DbSource & { owner?: DbMediaOwner | null }
+      return transformSource(row, undefined, row.owner ?? undefined)
+    })
 
     return NextResponse.json({
       success: true,
@@ -41,6 +44,7 @@ export async function GET(request: NextRequest) {
         total: count,
         page: parsed.data.page as number,
         limit: parsed.data.limit as number,
+        ...(ownershipUnavailable ? { ownershipUnavailable: true } : {}),
       },
     })
   } catch (err) {

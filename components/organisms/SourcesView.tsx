@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState, useMemo } from 'react'
-import type { BiasCategory, FactualityLevel, OwnershipType, Region } from '@/lib/types'
+import type { BiasCategory, FactualityLevel, NewsSource, OwnershipType, Region } from '@/lib/types'
 import {
   ALL_REGIONS,
   BIAS_COLOR,
@@ -47,6 +47,7 @@ export function SourcesView() {
   const [selectedOwnerships, setSelectedOwnerships] = useState<Set<OwnershipType>>(new Set())
   const [selectedRegions, setSelectedRegions] = useState<Set<Region>>(new Set())
   const [sortMode, setSortMode] = useState<SortMode>('name')
+  const [groupByOwner, setGroupByOwner] = useState(false)
 
   function toggleBias(bias: BiasCategory) {
     setSelectedBiases((prev) => {
@@ -84,7 +85,22 @@ export function SourcesView() {
     })
   }
 
-  const { sources: allSources, isLoading } = useSources({ search: search.trim() || undefined })
+  // When "Group by owner" is on we need the full active-source set so owner
+  // buckets aren't built from just the first paginated page. 100 is the
+  // sourcesQuerySchema cap; a `groupingIncomplete` banner fires below if
+  // the directory ever grows past that.
+  const { sources: allSources, isLoading, total, ownershipUnavailable } = useSources({
+    search: search.trim() || undefined,
+    limit: groupByOwner ? 100 : undefined,
+  })
+  // Effective flag: ownershipUnavailable forces grouping off regardless of
+  // the user's prior toggle state. Without this, enabling grouping and then
+  // transitioning to a degraded backend would still enter the grouped render
+  // branch and bucket everything as "Unaffiliated", directly contradicting
+  // the "grouping disabled until it recovers" banner.
+  const effectiveGroupByOwner = groupByOwner && !ownershipUnavailable
+  const groupingIncomplete =
+    effectiveGroupByOwner && typeof total === 'number' && total > allSources.length
 
   const filtered = useMemo(() => {
     const list = allSources.filter((source) => {
@@ -114,6 +130,16 @@ export function SourcesView() {
       />
 
       <SourceDirectoryInsights sources={filtered} />
+
+      {ownershipUnavailable && (
+        <p
+          data-testid="sources-ownership-unavailable-banner"
+          className="text-[11px] text-amber-300/80 bg-amber-400/5 border border-amber-400/10 rounded-md px-3 py-2"
+        >
+          Ownership data temporarily unavailable — sources may appear without their parent
+          company. Grouping by owner is disabled until it recovers.
+        </p>
+      )}
 
       <div className="space-y-2">
         <p className="text-xs text-white/60 uppercase tracking-widest">Filter by Bias</p>
@@ -190,23 +216,36 @@ export function SourcesView() {
       </div>
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <p className="text-xs text-white/60">
             {isLoading ? 'Loading…' : `${filtered.length} source${filtered.length !== 1 ? 's' : ''}`}
           </p>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1.5 flex-wrap">
             {(['name', 'bias', 'factuality'] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setSortMode(mode)}
+                disabled={effectiveGroupByOwner}
                 className={`glass-pill px-2.5 py-1 text-xs transition-colors ${
-                  sortMode === mode ? 'text-white border-white/30' : 'text-white/50'
-                }`}
+                  sortMode === mode && !effectiveGroupByOwner ? 'text-white border-white/30' : 'text-white/50'
+                } ${effectiveGroupByOwner ? 'opacity-40 cursor-not-allowed' : ''}`}
                 aria-pressed={sortMode === mode}
               >
                 {mode === 'name' ? 'A–Z' : mode === 'bias' ? 'Bias' : 'Factuality'}
               </button>
             ))}
+            <button
+              onClick={() => setGroupByOwner((v) => !v)}
+              data-testid="group-by-owner-toggle"
+              disabled={ownershipUnavailable}
+              className={`glass-pill px-2.5 py-1 text-xs transition-colors ${
+                effectiveGroupByOwner ? 'text-white border-white/30' : 'text-white/50'
+              } ${ownershipUnavailable ? 'opacity-40 cursor-not-allowed' : ''}`}
+              aria-pressed={effectiveGroupByOwner}
+              title={ownershipUnavailable ? 'Ownership data temporarily unavailable' : undefined}
+            >
+              Group by owner
+            </button>
           </div>
         </div>
         {isLoading ? (
@@ -218,69 +257,180 @@ export function SourcesView() {
               </div>
             ))}
           </div>
+        ) : effectiveGroupByOwner ? (
+          <>
+            {groupingIncomplete && (
+              <p
+                data-testid="grouping-incomplete-banner"
+                className="text-[11px] text-amber-300/80 bg-amber-400/5 border border-amber-400/10 rounded-md px-3 py-2"
+              >
+                Showing {allSources.length} of {total} active sources. Owner groups may be
+                incomplete — server-side pagination for grouped view not yet implemented.
+              </p>
+            )}
+            <OwnerGroupedList sources={filtered} />
+          </>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {filtered.map((source) => (
-              <div
-                key={source.id}
-                className="glass-sm overflow-hidden flex"
-              >
-                <div
-                  className="w-[3px] flex-shrink-0"
-                  style={{ backgroundColor: BIAS_COLOR[source.bias] }}
-                />
-                <div className="flex-1 p-4 space-y-3">
-                  <div className="flex items-start gap-3">
-                    <SourceLogo domain={source.url} name={source.name} bias={source.bias} size={40} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-medium text-white text-sm truncate">{source.name}</span>
-                        <FactualityBar level={source.factuality} />
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        <span
-                          className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium text-white/90"
-                          style={{ backgroundColor: `${BIAS_COLOR[source.bias]}1A` }}
-                        >
-                          {BIAS_LABELS[source.bias]}
-                        </span>
-                        <span className="text-xs text-white/50">{OWNERSHIP_LABELS[source.ownership]}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/45">
-                    <span>{REGION_LABELS[source.region]}</span>
-                    {source.totalArticlesIngested != null && source.totalArticlesIngested > 0 && (
-                      <span>{source.totalArticlesIngested} articles</span>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    {source.slug && (
-                      <Link
-                        href={`/sources/${source.slug}`}
-                        className="text-xs text-white/70 hover:text-white transition-colors"
-                        aria-label={`View ${source.name} profile`}
-                      >
-                        View profile →
-                      </Link>
-                    )}
-                    {source.url && (
-                      <a
-                        href={`https://${source.url}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-white/50 hover:text-white/70 transition-colors"
-                      >
-                        {source.url} ↗
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <SourceCard key={source.id} source={source} />
             ))}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function SourceCard({ source }: { readonly source: NewsSource }) {
+  return (
+    <div className="glass-sm overflow-hidden flex">
+      <div
+        className="w-[3px] flex-shrink-0"
+        style={{ backgroundColor: BIAS_COLOR[source.bias] }}
+      />
+      <div className="flex-1 p-4 space-y-3">
+        <div className="flex items-start gap-3">
+          <SourceLogo domain={source.url} name={source.name} bias={source.bias} size={40} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <span className="font-medium text-white text-sm truncate">{source.name}</span>
+              <FactualityBar level={source.factuality} />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              <span
+                className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium text-white/90"
+                style={{ backgroundColor: `${BIAS_COLOR[source.bias]}1A` }}
+              >
+                {BIAS_LABELS[source.bias]}
+              </span>
+              <span className="text-xs text-white/50">{OWNERSHIP_LABELS[source.ownership]}</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/45">
+          <span>{REGION_LABELS[source.region]}</span>
+          {source.totalArticlesIngested != null && source.totalArticlesIngested > 0 && (
+            <span>{source.totalArticlesIngested} articles</span>
+          )}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          {source.slug && (
+            <Link
+              href={`/sources/${source.slug}`}
+              className="text-xs text-white/70 hover:text-white transition-colors"
+              aria-label={`View ${source.name} profile`}
+            >
+              View profile →
+            </Link>
+          )}
+          {source.url && (
+            <a
+              href={`https://${source.url}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-white/50 hover:text-white/70 transition-colors"
+            >
+              {source.url} ↗
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface OwnerBucket {
+  readonly ownerId: string
+  readonly ownerName: string
+  readonly country: string | null
+  readonly sources: NewsSource[]
+}
+
+function bucketByOwner(sources: readonly NewsSource[]): {
+  readonly buckets: readonly OwnerBucket[]
+  readonly unaffiliated: readonly NewsSource[]
+} {
+  const map = new Map<string, OwnerBucket>()
+  const unaffiliated: NewsSource[] = []
+  for (const source of sources) {
+    if (!source.owner) {
+      unaffiliated.push(source)
+      continue
+    }
+    const existing = map.get(source.owner.id)
+    if (existing) {
+      map.set(source.owner.id, { ...existing, sources: [...existing.sources, source] })
+    } else {
+      map.set(source.owner.id, {
+        ownerId: source.owner.id,
+        ownerName: source.owner.name,
+        country: source.owner.country,
+        sources: [source],
+      })
+    }
+  }
+  const buckets = [...map.values()].sort(
+    (a, b) =>
+      b.sources.length - a.sources.length || a.ownerName.localeCompare(b.ownerName)
+  )
+  return { buckets, unaffiliated }
+}
+
+function OwnerGroupedList({ sources }: { readonly sources: readonly NewsSource[] }) {
+  const { buckets, unaffiliated } = bucketByOwner(sources)
+  return (
+    <div className="space-y-3" data-testid="owner-grouped-list">
+      {buckets.map((bucket) => (
+        <details
+          key={bucket.ownerId}
+          open
+          className="glass-sm overflow-hidden"
+          data-testid={`owner-group-${bucket.ownerId}`}
+        >
+          <summary className="flex items-center justify-between gap-2 px-4 py-2.5 cursor-pointer hover:bg-white/5">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-sm font-medium text-white truncate">
+                {bucket.ownerName}
+              </span>
+              {bucket.country && (
+                <span className="text-[10px] uppercase tracking-wide text-white/40">
+                  {bucket.country}
+                </span>
+              )}
+            </div>
+            <span className="text-xs text-white/50">
+              {bucket.sources.length} source{bucket.sources.length !== 1 ? 's' : ''}
+            </span>
+          </summary>
+          <div className="grid gap-3 sm:grid-cols-2 p-3 pt-0">
+            {bucket.sources
+              .slice()
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((source) => (
+                <SourceCard key={source.id} source={source} />
+              ))}
+          </div>
+        </details>
+      ))}
+      {unaffiliated.length > 0 && (
+        <details className="glass-sm overflow-hidden" data-testid="owner-group-unaffiliated">
+          <summary className="flex items-center justify-between gap-2 px-4 py-2.5 cursor-pointer hover:bg-white/5">
+            <span className="text-sm font-medium text-white/70">Unaffiliated</span>
+            <span className="text-xs text-white/50">
+              {unaffiliated.length} source{unaffiliated.length !== 1 ? 's' : ''}
+            </span>
+          </summary>
+          <div className="grid gap-3 sm:grid-cols-2 p-3 pt-0">
+            {unaffiliated
+              .slice()
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((source) => (
+                <SourceCard key={source.id} source={source} />
+              ))}
+          </div>
+        </details>
+      )}
     </div>
   )
 }

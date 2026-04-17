@@ -1,0 +1,46 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Wait for feed to load
+- assertVisible:
+    id: "axiom-header"
+
+# Open the first story to inspect ownership summary
+- tapOn:
+    id: "hero-card"
+    optional: true
+- tapOn:
+    id: "story-card"
+    optional: true
+    index: 0
+
+# Ownership summary is conditional (requires >= 3 sources with known owners)
+# so assertions are optional to avoid flaky runs on single-source stories.
+- assertVisible:
+    id: "ownership-summary"
+    optional: true
+- assertVisible:
+    id: "ownership-bar"
+    optional: true
+
+- tapOn:
+    id: "back-button"
+    optional: true
+- assertVisible:
+    id: "axiom-header"

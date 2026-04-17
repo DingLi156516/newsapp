@@ -15,7 +15,7 @@ Component inventory for `apps/mobile/components/`. Organized by atomic design le
 | ShareButton | `@/components/atoms/ShareButton` | `url: string`, `title: string`, `size?: number` |
 | Skeleton | `@/components/atoms/Skeleton` | `style?: ViewStyle` |
 
-## Molecules (8)
+## Molecules (9)
 
 | Component | Import | Props |
 |-----------|--------|-------|
@@ -26,15 +26,17 @@ Component inventory for `apps/mobile/components/`. Organized by atomic design le
 | MetricsRow | `@/components/molecules/MetricsRow` | `impactScore?`, `articles24h?`, `sourceDiversity?` — trending-feed chips; returns null when all absent |
 | MonochromeSpectrumBar | `@/components/molecules/MonochromeSpectrumBar` | `segments: SpectrumSegment[]`, `height?: number` |
 | NetworkErrorView | `@/components/molecules/NetworkErrorView` | `onRetry: () => void` |
-| SourceList | `@/components/molecules/SourceList` | `sources: NewsSource[]` |
+| OwnershipBar | `@/components/molecules/OwnershipBar` | `distribution: OwnershipDistribution`, `totalSources: number`, `height?: number` — proportional owner-segmented bar |
+| SourceList | `@/components/molecules/SourceList` | `sources: NewsSource[]` — plus owner chips (2+ shared sources) |
 | SpectrumBar | `@/components/molecules/SpectrumBar` | `segments: SpectrumSegment[]`, `height?: number`, `showLabels?: boolean` |
 
-## Organisms (11)
+## Organisms (12)
 
 | Component | Import | Props |
 |-----------|--------|-------|
 | AISummaryTabs | `@/components/organisms/AISummaryTabs` | `summary: AISummary` |
 | CoverageIntelligence | `@/components/organisms/CoverageIntelligence` | `article: NewsArticle`, `timeline` |
+| OwnershipSummary | `@/components/organisms/OwnershipSummary` | `sources: NewsSource[]` — renders nothing when <3 sources or no known owners |
 | FeedTabs | `@/components/organisms/FeedTabs` | `value: FeedTab`, `onChange`, `savedCount?`, `blindspotCount?` |
 | HeroCard | `@/components/organisms/HeroCard` | `article`, `onClick`, `onSave`, `isSaved`, `isRead?`, `showMetrics?` |
 | NexusCard | `@/components/organisms/NexusCard` | `article`, `onClick`, `onSave`, `isSaved`, `isRead?`, `compact?`, `showMetrics?` |

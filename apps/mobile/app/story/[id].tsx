@@ -31,6 +31,7 @@ import { useTheme } from '@/lib/shared/theme'
 import { GlassView } from '@/components/ui/GlassView'
 import { SpectrumBar } from '@/components/molecules/SpectrumBar'
 import { SourceList } from '@/components/molecules/SourceList'
+import { OwnershipSummary } from '@/components/organisms/OwnershipSummary'
 import { CoverageCount } from '@/components/atoms/CoverageCount'
 import { BlindspotBadge } from '@/components/atoms/BlindspotBadge'
 import { FactualityBar } from '@/components/atoms/FactualityBar'
@@ -326,6 +327,12 @@ export default function StoryDetailScreen() {
               <StoryTimeline events={timeline.events} />
             </View>
           )}
+
+          {/* Ownership summary (Phase 2 — Ground News parity) */}
+          <OwnershipSummary
+            sources={story.sources}
+            ownershipUnavailable={story.ownershipUnavailable}
+          />
 
           {/* Sources */}
           <GlassView style={{ padding: 16 }}>

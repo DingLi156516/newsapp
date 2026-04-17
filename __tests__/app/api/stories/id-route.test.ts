@@ -73,7 +73,7 @@ describe('GET /api/stories/[id]', () => {
   it('returns 200 with transformed story on success', async () => {
     const mockStory = { id: VALID_UUID, title: 'Test Story' }
     const mockOwnerMap = new Map()
-    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap }
+    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap, ownershipUnavailable: false }
     const mockHeadlines = [{ title: 'Headline', sourceName: 'CNN', sourceBias: 'lean-left' }]
     const mockTags = [{ slug: 'iran', label: 'Iran', tag_type: 'location', story_count: 5 }]
     const mockTransformed = { id: VALID_UUID, title: 'Test Story', sources: [] }
@@ -97,13 +97,14 @@ describe('GET /api/stories/[id]', () => {
       mockTags,
       mockHeadlines,
       mockOwnerMap,
+      false,
     )
   })
 
   it('returns 200 with empty headlines when headline fetch throws', async () => {
     const mockStory = { id: VALID_UUID, title: 'Test Story' }
     const mockOwnerMap = new Map()
-    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap }
+    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap, ownershipUnavailable: false }
     const mockTags = [{ slug: 'iran', label: 'Iran', tag_type: 'location', story_count: 5 }]
     const mockTransformed = { id: VALID_UUID, title: 'Test Story', sources: [] }
 
@@ -128,6 +129,7 @@ describe('GET /api/stories/[id]', () => {
       mockTags,
       [],
       mockOwnerMap,
+      false,
     )
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining('Headline fetch failed'),
@@ -140,7 +142,7 @@ describe('GET /api/stories/[id]', () => {
   it('returns 200 with empty tags when tag fetch throws', async () => {
     const mockStory = { id: VALID_UUID, title: 'Test Story' }
     const mockOwnerMap = new Map()
-    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap }
+    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap, ownershipUnavailable: false }
     const mockHeadlines = [{ title: 'Headline', sourceName: 'CNN', sourceBias: 'lean-left' }]
     const mockTransformed = { id: VALID_UUID, title: 'Test Story', sources: [] }
 
@@ -165,6 +167,41 @@ describe('GET /api/stories/[id]', () => {
       [],
       mockHeadlines,
       mockOwnerMap,
+      false,
+    )
+  })
+
+  it('returns 200 with ownershipUnavailable=true when media_owners fetch fails', async () => {
+    const mockStory = { id: VALID_UUID, title: 'Test Story' }
+    const mockOwnerMap = new Map()
+    const mockSources = { sources: [{ id: 's1' }], articleUrlMap: new Map(), ownerMap: mockOwnerMap, ownershipUnavailable: true }
+    const mockHeadlines: never[] = []
+    const mockTags: never[] = []
+    const mockTransformed = { id: VALID_UUID, sources: [], ownershipUnavailable: true }
+
+    mockQueryStoryById.mockResolvedValue(mockStory as never)
+    mockQuerySourcesForStory.mockResolvedValue(mockSources as never)
+    mockQueryHeadlinesForStory.mockResolvedValue(mockHeadlines as never)
+    mockQueryTagsForStory.mockResolvedValue(mockTags as never)
+    mockTransformStory.mockReturnValue(mockTransformed as never)
+
+    const request = new NextRequest(new URL(`http://localhost/api/stories/${VALID_UUID}`))
+    const response = await GET(request, { params: makeParams(VALID_UUID) })
+    const body = await response.json()
+
+    // Core requirement: story still returns 200 even when owner hydration
+    // fails, and the flag is surfaced so the UI/monitoring can see it.
+    expect(response.status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.data.ownershipUnavailable).toBe(true)
+    expect(mockTransformStory).toHaveBeenCalledWith(
+      mockStory,
+      mockSources.sources,
+      mockSources.articleUrlMap,
+      mockTags,
+      mockHeadlines,
+      mockOwnerMap,
+      true,
     )
 
     vi.restoreAllMocks()

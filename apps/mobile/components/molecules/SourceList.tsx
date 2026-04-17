@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { View, Text, Pressable, Linking } from 'react-native'
 import type { NewsSource } from '@/lib/shared/types'
 import { BiasTag } from '@/components/atoms/BiasTag'
 import { FactualityBar } from '@/components/atoms/FactualityBar'
 import { SourceLogo } from '@/components/atoms/SourceLogo'
-import { ChevronDown, ChevronUp, ExternalLink } from 'lucide-react-native'
+import { Building2, ChevronDown, ChevronUp, ExternalLink, User } from 'lucide-react-native'
 import { useTheme } from '@/lib/shared/theme'
 
 interface SourceListProps {
@@ -16,6 +16,24 @@ export function SourceList({ sources, initialExpanded = false }: SourceListProps
   const [expanded, setExpanded] = useState(initialExpanded)
   const theme = useTheme()
   const visibleSources = expanded ? sources : sources.slice(0, 3)
+
+  const ownerGroups = useMemo(() => {
+    const groups = new Map<string, { name: string; isIndividual: boolean; count: number }>()
+    for (const source of sources) {
+      if (!source.owner) continue
+      const existing = groups.get(source.owner.id)
+      if (existing) {
+        groups.set(source.owner.id, { ...existing, count: existing.count + 1 })
+      } else {
+        groups.set(source.owner.id, {
+          name: source.owner.name,
+          isIndividual: source.owner.isIndividual,
+          count: 1,
+        })
+      }
+    }
+    return [...groups.values()].filter((g) => g.count >= 2)
+  }, [sources])
 
   return (
     <View>
@@ -50,6 +68,28 @@ export function SourceList({ sources, initialExpanded = false }: SourceListProps
           <ExternalLink size={14} color={theme.text.tertiary} />
         </Pressable>
       ))}
+      {ownerGroups.length > 0 && (
+        <View
+          testID="source-list-owner-chips"
+          style={{ paddingVertical: 8, gap: 4 }}
+        >
+          {ownerGroups.map((group) => (
+            <View
+              key={group.name}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+            >
+              {group.isIndividual ? (
+                <User size={12} color={theme.text.tertiary} />
+              ) : (
+                <Building2 size={12} color={theme.text.tertiary} />
+              )}
+              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>
+                {group.count} from {group.name}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
       {sources.length > 3 && (
         <Pressable
           onPress={() => setExpanded((prev) => !prev)}

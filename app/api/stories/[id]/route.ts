@@ -43,7 +43,8 @@ export async function GET(
       )
     }
 
-    const { sources: sourceRows, articleUrlMap, ownerMap } = await querySourcesForStory(client, id)
+    const { sources: sourceRows, articleUrlMap, ownerMap, ownershipUnavailable } =
+      await querySourcesForStory(client, id)
 
     let headlineRows: Array<{ title: string; sourceName: string; sourceBias: string }> = []
     try {
@@ -58,7 +59,15 @@ export async function GET(
     } catch (tagErr) {
       console.error(`[stories/${id}] Tag fetch failed:`, tagErr instanceof Error ? tagErr.message : String(tagErr))
     }
-    const transformed = transformStory(story, sourceRows as DbSource[], articleUrlMap, tagRows, headlineRows, ownerMap)
+    const transformed = transformStory(
+      story,
+      sourceRows as DbSource[],
+      articleUrlMap,
+      tagRows,
+      headlineRows,
+      ownerMap,
+      ownershipUnavailable
+    )
 
     return NextResponse.json({
       success: true,

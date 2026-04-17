@@ -320,6 +320,14 @@ export interface NewsArticle {
   keyQuotes?: KeyQuote[] | null
   keyClaims?: KeyClaim[] | null
   headlines?: HeadlineComparison[]
+  /**
+   * True when the `media_owners` enrichment lookup failed during this
+   * request. The story payload is still valid; `source.owner` will be
+   * absent for all sources even if some have `owner_id` in the DB. UI can
+   * render a small "ownership data temporarily unavailable" hint instead
+   * of misleading "no known owners" empty state.
+   */
+  ownershipUnavailable?: boolean
 }
 
 /** All tag types as an array, for iteration and validation. */

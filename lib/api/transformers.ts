@@ -240,7 +240,8 @@ export function transformStory(
   articleUrlMap?: Map<string, string>,
   tags?: readonly TagRow[],
   headlines?: ReadonlyArray<{ title: string; sourceName: string; sourceBias: string }>,
-  ownerMap?: Map<string, OwnerTransformInput>
+  ownerMap?: Map<string, OwnerTransformInput>,
+  ownershipUnavailable?: boolean
 ): NewsArticle {
   return {
     id: story.id,
@@ -268,6 +269,7 @@ export function transformStory(
     keyQuotes: parseKeyQuotes(story.key_quotes),
     keyClaims: parseKeyClaims(story.key_claims),
     ...(headlines && headlines.length > 0 ? { headlines: transformHeadlines(headlines) } : {}),
+    ...(ownershipUnavailable ? { ownershipUnavailable: true } : {}),
   }
 }
 

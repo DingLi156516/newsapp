@@ -50,6 +50,7 @@ import { KeyQuotes } from '@/components/organisms/KeyQuotes'
 import { ClaimsComparison } from '@/components/organisms/ClaimsComparison'
 import { UserMenu } from '@/components/organisms/UserMenu'
 import { CoverageIntelligence } from '@/components/organisms/CoverageIntelligence'
+import { OwnershipSummary } from '@/components/organisms/OwnershipSummary'
 import { StoryTagsRow } from '@/components/molecules/StoryTagsRow'
 import { StoryScores } from '@/components/molecules/StoryScores'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
@@ -254,6 +255,12 @@ export default function StoryPage({ params }: Props) {
         {article.sourceCount > 1 && (
           <CoverageIntelligence article={article} timeline={timeline} />
         )}
+
+        {/* Source ownership summary (Phase 2 — Ground News parity) */}
+        <OwnershipSummary
+          sources={article.sources}
+          ownershipUnavailable={article.ownershipUnavailable}
+        />
 
         {/* Coverage timeline (multi-source only) */}
         {article.sourceCount > 1 && (timelineLoading || (timeline && timeline.events.length > 0)) && (

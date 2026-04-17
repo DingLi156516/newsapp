@@ -237,6 +237,7 @@ lib/api/         — API utilities (18+ files)
                       forYouQuerySchema, parseSearchParams()
   auth-helpers.ts   — Server-side auth utilities; session validation, user extraction from cookies
   bias-calculator.ts    — Pure functions: computeDistribution(), identifyBlindspots(), computeBiasProfile()
+  ownership-aggregator.ts — Pure function: computeOwnershipDistribution() — sources[] → {groups[], unknownCount, concentrationIndex (HHI/10000), dominantOwner}
   bookmark-queries.ts   — queryBookmarks(), insertBookmark(), deleteBookmark()
   bookmark-validation.ts — Zod schema for bookmark storyId
   preferences-queries.ts — queryPreferences() (auto-creates defaults), updatePreferences()
@@ -300,6 +301,7 @@ lib/pipeline/    — Pipeline orchestration helpers (6 files)
   telemetry-utils.ts — Shared telemetry helpers (toPerMinute rate calculation)
 
 lib/story-intelligence.ts — Pure story-detail analysis helpers; derives coverage rollups, momentum, gap summaries, framing-delta copy, methodology text, and ownership mix from existing frontend data
+lib/wikidata/sparql-client.ts — Build-time Wikidata SPARQL wrapper (rate-limit, timeout, retry, UA) used by scripts/seed-ownership.ts. Not imported by runtime code.
 lib/source-profiles.ts — Pure source-profile helpers; builds topic mix, blindspot counts, and sample-data fallbacks for source detail pages
 lib/source-comparison.ts — Pure source-comparison helpers; computes shared/exclusive coverage, topic overlap, topic imbalance, and sample-data fallback comparisons
 

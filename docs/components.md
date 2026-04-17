@@ -29,6 +29,7 @@
 | `ReviewListItem` | `@/components/molecules/ReviewListItem` — Row in the review queue showing headline, status badge, topic, source count |
 | `ReviewDetail` | `@/components/molecules/ReviewDetail` — Expanded detail panel for reviewing AI summary, spectrum, and blindspot data |
 | `AdminSourceListItem` | `@/components/molecules/AdminSourceListItem` — Single row in admin source list showing name, bias badge, region, active status, and health indicators |
+| `OwnershipBar` | `@/components/molecules/OwnershipBar` — Horizontal segmented bar showing proportional source ownership for a story; colors segments by `OwnerType` and trails an unknown slice |
 
 ## Organisms (`components/organisms/`)
 
@@ -53,6 +54,7 @@
 | `SuggestionsList` | `@/components/organisms/SuggestionsList` |
 | `ReviewQueue` | `@/components/organisms/ReviewQueue` — Full review queue page component with status filter tabs, list, and detail panel |
 | `CoverageIntelligence` | `@/components/organisms/CoverageIntelligence` — Story detail analysis panel with coverage momentum, coverage gaps, framing delta, methodology, and ownership context |
+| `OwnershipSummary` | `@/components/organisms/OwnershipSummary` — Above-the-fold story-detail block announcing dominant owners and rendering `OwnershipBar`; returns null when <3 sources or no known owners |
 | `SourceDirectoryInsights` | `@/components/organisms/SourceDirectoryInsights` — Summary card for the current source-directory result set, including source count, leading ownership type, and represented regions |
 | `PipelineControls` | `@/components/organisms/PipelineControls` — Admin pipeline control panel with manual ingest/process triggers |
 | `PipelineRunHistory` | `@/components/organisms/PipelineRunHistory` — Inline run metrics with backlog deltas and per-stage skip/pass diagnostics |

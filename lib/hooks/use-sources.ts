@@ -50,6 +50,12 @@ interface SourcesApiResponse {
     readonly total: number
     readonly page: number
     readonly limit: number
+    /**
+     * Set by the route when the owner-enrichment join/read failed.
+     * Consumers should treat unaffiliated rows as "ownership data
+     * temporarily unavailable" rather than "no known owner".
+     */
+    readonly ownershipUnavailable?: boolean
   }
 }
 
@@ -89,6 +95,7 @@ export function useSources(params: SourcesParams = {}) {
     sources: data?.data ?? allSources,
     total: data?.meta?.total ?? 0,
     page: data?.meta?.page ?? 1,
+    ownershipUnavailable: data?.meta?.ownershipUnavailable ?? false,
     isLoading,
     isError: !!error,
     error,

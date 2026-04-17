@@ -36,6 +36,7 @@ Single source of truth for PRD implementation status. See `PRD_Axiom_News.md` fo
 | F-09 | Offline / PWA (service worker, cache API for saved stories) | §2 F-09 |
 | F-12 | Admin Source Management (CRUD, CSV bulk import, RSS auto-discovery) | §5 Phase 8A |
 | Ground-News Parity Phase 1 | Real Trending feed (`lib/api/trending-score.ts`) + inline `MetricsRow` on NexusCard/HeroCard. `sort=trending` re-ranks a 7-day / 200-candidate window on read via `impact × (1+log10(velocity)) × diversity × time_decay`. Web + mobile. | Ground News Parity Roadmap |
+| Ground-News Parity Phase 2 | Source Ownership Graph. `lib/api/ownership-aggregator.ts` + `OwnershipBar`/`OwnershipSummary` (web + mobile) on story detail. `SourcesView` "Group by owner" toggle. `querySources` owner join. `lib/wikidata/sparql-client.ts` + `scripts/seed-ownership.ts` dry-run CSV backfill (migration 051 hand-authored from CSV). | Ground News Parity Roadmap |
 
 ---
 
