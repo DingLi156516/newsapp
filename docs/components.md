@@ -24,6 +24,7 @@
 | `SourceList` | `@/components/molecules/SourceList` |
 | `BiasComparisonBar` | `@/components/molecules/BiasComparisonBar` |
 | `StatsRow` | `@/components/molecules/StatsRow` |
+| `MetricsRow` | `@/components/molecules/MetricsRow` — Compact inline chips for impact / 24h velocity / source diversity. Rendered by `NexusCard` and `HeroCard` when `showMetrics` is true (e.g. Trending feed). |
 | `ForYouCta` | `@/components/molecules/ForYouCta` |
 | `ReviewListItem` | `@/components/molecules/ReviewListItem` — Row in the review queue showing headline, status badge, topic, source count |
 | `ReviewDetail` | `@/components/molecules/ReviewDetail` — Expanded detail panel for reviewing AI summary, spectrum, and blindspot data |

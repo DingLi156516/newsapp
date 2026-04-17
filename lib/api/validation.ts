@@ -30,7 +30,7 @@ const DATE_PRESETS = ['24h', '7d', '30d', 'all'] as const
 
 export const TAG_TYPES = ['person', 'organization', 'location', 'event', 'topic'] as const
 
-const SORT_FIELDS = ['last_updated', 'source_count'] as const
+const SORT_FIELDS = ['last_updated', 'source_count', 'trending'] as const
 
 export const storiesQuerySchema = z.object({
   topic: z.enum(TOPICS).optional(),

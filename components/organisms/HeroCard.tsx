@@ -8,6 +8,7 @@ import { FactualityBar } from '@/components/atoms/FactualityBar'
 import { BookmarkButton } from '@/components/atoms/BookmarkButton'
 import { ShareButton } from '@/components/atoms/ShareButton'
 import { MonochromeSpectrumBar } from '@/components/molecules/MonochromeSpectrumBar'
+import { MetricsRow } from '@/components/molecules/MetricsRow'
 import { TOPIC_LABELS } from '@/lib/types'
 import type { NewsArticle } from '@/lib/types'
 
@@ -17,9 +18,10 @@ interface Props {
   readonly onSave: (id: string) => void
   readonly isSaved: boolean
   readonly isRead?: boolean
+  readonly showMetrics?: boolean
 }
 
-export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: Props) {
+export function HeroCard({ article, onClick, onSave, isSaved, isRead = false, showMetrics = false }: Props) {
   return (
     <motion.article
       data-testid="hero-card"
@@ -69,6 +71,16 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: 
             {article.headline}
           </h2>
         </a>
+
+        {showMetrics && (
+          <div className="mb-2">
+            <MetricsRow
+              impactScore={article.impactScore}
+              articles24h={article.storyVelocity?.articles_24h ?? null}
+              sourceDiversity={article.sourceDiversity}
+            />
+          </div>
+        )}
 
         <MonochromeSpectrumBar
           segments={article.spectrumSegments}

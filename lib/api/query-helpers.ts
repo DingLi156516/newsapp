@@ -12,6 +12,13 @@ import type { FactualityLevel, DatePreset, Topic, Region } from '@/lib/types'
 import { ALL_BIASES, FACTUALITY_RANK } from '@/lib/types'
 import { getSourceSlug, normalizeSourceSlug } from '@/lib/source-slugs'
 
+/**
+ * Recency window for the trending feed — candidates older than this are
+ * excluded from the SQL filter so stale stories can't resurface even if
+ * their stored `trending_score` is high.
+ */
+export const TRENDING_WINDOW_HOURS = 7 * 24
+
 interface StoryRow {
   id: string
   headline: string
@@ -31,6 +38,7 @@ interface StoryRow {
   impact_score: number | null
   source_diversity: number | null
   controversy_score: number | null
+  trending_score: number | null
   sentiment: unknown
   key_quotes: unknown
   key_claims: unknown
@@ -132,8 +140,12 @@ export async function queryStories(
   }
 
   const hasTagFilter = tagIds.length > 0
+  // `trending_score` is added only for sort=trending so non-trending queries
+  // don't depend on migration 050 — protects Latest/Saved/Blindspot against
+  // schema skew if the app is ever deployed ahead of the migration.
   const baseColumns = 'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, published_at, first_published, last_updated, story_velocity, impact_score, source_diversity, controversy_score, sentiment, key_quotes, key_claims'
-  const selectStr = hasTagFilter ? `${baseColumns}, story_tags!inner(tag_id)` : baseColumns
+  const columnsWithSort = sort === 'trending' ? `${baseColumns}, trending_score` : baseColumns
+  const selectStr = hasTagFilter ? `${columnsWithSort}, story_tags!inner(tag_id)` : columnsWithSort
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let query = (client.from('stories') as any)
@@ -178,18 +190,56 @@ export async function queryStories(
     query = query.gte('first_published', getDateThreshold(datePreset as Exclude<DatePreset, 'all'>))
   }
 
-  if (sort === 'source_count') {
+  if (sort === 'trending') {
+    // Trending uses the materialized `trending_score` column (migration 050).
+    // Scores are populated by the refresh cron (`/api/cron/refresh-trending`)
+    // and the migration's inline backfill. Newly-assembled stories with NULL
+    // scores remain eligible and sort to the bottom via `NULLS LAST` — they
+    // surface immediately in the feed, then move up when the next refresh
+    // tick (≤15 min) scores them. No `IS NOT NULL` filter: it would create a
+    // visible freshness gap that hides breaking news from Trending.
+    //
+    // biasRange is applied *in SQL* here (unlike other sorts which filter in
+    // memory post-fetch). If we paginated before bias filtering the current
+    // page could be entirely non-matching while valid stories sit outside it.
+    const trendingWindowIso = new Date(
+      Date.now() - TRENDING_WINDOW_HOURS * 3_600_000
+    ).toISOString()
+    query = query.gte('published_at', trendingWindowIso)
+
+    if (biasRange) {
+      const biases = biasRange
+        .split(',')
+        .filter((b) => (ALL_BIASES as readonly string[]).includes(b))
+      if (biases.length > 0 && biases.length < 7) {
+        // JSONB containment: `spectrum_segments @> '[{"bias":"left"}]'` is true
+        // when at least one segment object has `bias: left` (and optionally
+        // more keys). OR-joined across the selected biases mirrors the TS
+        // `segments.some(s => biases.includes(s.bias))` post-filter exactly.
+        const clauses = biases
+          .map((b) => `spectrum_segments.cs.[{"bias":"${b}"}]`)
+          .join(',')
+        query = query.or(clauses)
+      }
+    }
+
+    query = query
+      .order('trending_score', { ascending: false, nullsFirst: false })
+      .order('published_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, offset + limit - 1)
+  } else if (sort === 'source_count') {
     query = query
       .order('source_count', { ascending: false })
       .order('published_at', { ascending: false })
       .order('id', { ascending: false })
+      .range(offset, offset + limit - 1)
   } else {
     query = query
       .order('published_at', { ascending: false })
       .order('id', { ascending: false })
+      .range(offset, offset + limit - 1)
   }
-
-  query = query.range(offset, offset + limit - 1)
 
   const { data, count, error } = await query
 
@@ -216,6 +266,10 @@ export async function queryStories(
   }
 
   filteredStories = filteredStories.sort((a: StoryRow, b: StoryRow) => {
+    if (sort === 'trending') {
+      const scoreDiff = (b.trending_score ?? 0) - (a.trending_score ?? 0)
+      if (scoreDiff !== 0) return scoreDiff
+    }
     if (sort === 'source_count') {
       const countDiff = b.source_count - a.source_count
       if (countDiff !== 0) return countDiff
@@ -249,6 +303,8 @@ export async function queryStoryById(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (client.from('stories') as any)
     .select(
+      // trending_score is a ranking signal, not surfaced on story detail,
+      // so keep it out of this select to avoid coupling detail reads to migration 050.
       'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, published_at, first_published, last_updated, story_velocity, impact_score, source_diversity, controversy_score, sentiment, key_quotes, key_claims'
     )
     .eq('id', storyId)

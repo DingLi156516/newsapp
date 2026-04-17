@@ -51,6 +51,7 @@ interface StoriesParams {
   readonly datePreset?: DatePreset
   readonly tag?: string | null
   readonly tagType?: string | null
+  readonly sort?: 'last_updated' | 'source_count' | 'trending'
   readonly page?: number
   readonly limit?: number
 }
@@ -85,6 +86,7 @@ function buildStoriesUrl(params: StoriesParams): string {
   if (params.datePreset && params.datePreset !== 'all') searchParams.set('datePreset', params.datePreset)
   if (params.tag) searchParams.set('tag', params.tag)
   if (params.tagType) searchParams.set('tag_type', params.tagType)
+  if (params.sort) searchParams.set('sort', params.sort)
   if (params.page && params.page > 1) searchParams.set('page', String(params.page))
   if (params.limit) searchParams.set('limit', String(params.limit))
 

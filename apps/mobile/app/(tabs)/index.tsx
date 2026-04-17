@@ -2,7 +2,7 @@
  * Home Feed screen — Unified tab bar with feeds, topics, and promoted tags.
  */
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { View, Text, FlatList, RefreshControl, Pressable } from 'react-native'
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -119,6 +119,27 @@ export default function HomeFeedScreen() {
     'most-covered': 'source_count',
   }
 
+  // Trending tab ignores the sort preference — it uses the trending algorithm.
+  const isTrending = activeTab === 'trending'
+  const apiSort: 'last_updated' | 'source_count' | 'trending' =
+    isTrending ? 'trending' : FEED_SORT_TO_API[feedSort]
+
+  const filterKey = useMemo(
+    () => JSON.stringify([activeTab, selectedPromotedTag, debouncedSearch, biasRange, minFactuality, feedSort]),
+    [activeTab, selectedPromotedTag, debouncedSearch, biasRange, minFactuality, feedSort]
+  )
+
+  // Synchronous reset on filter change (React "reset state when key changes"
+  // pattern). Without this, switching from a scrolled Most-Covered feed to
+  // Trending first fetches `sort=trending&page=N` with the stale page before
+  // the effect catches up.
+  const [trackedFilterKey, setTrackedFilterKey] = useState(filterKey)
+  if (trackedFilterKey !== filterKey) {
+    setTrackedFilterKey(filterKey)
+    setPage(1)
+    setAccumulated([])
+  }
+
   const { stories, total, isLoading, isError, mutate } = useStories(
     isForYou ? null : {
       topic: selectedPromotedTag ? undefined : topicFilter,
@@ -128,28 +149,16 @@ export default function HomeFeedScreen() {
       blindspot: activeTab === 'blindspot',
       biasRange,
       minFactuality,
-      sort: FEED_SORT_TO_API[feedSort],
+      sort: apiSort,
       page,
     }
   )
 
-  // Accumulate stories and reset on filter changes
-  const filterKey = useMemo(
-    () => JSON.stringify([activeTab, selectedPromotedTag, debouncedSearch, biasRange, minFactuality, feedSort]),
-    [activeTab, selectedPromotedTag, debouncedSearch, biasRange, minFactuality, feedSort]
-  )
-  const prevFilterKeyRef = useRef(filterKey)
-
+  // Accumulator — only grows; reset happens synchronously above.
   useEffect(() => {
     if (isForYou || isLoading) return
 
-    const filtersChanged = filterKey !== prevFilterKeyRef.current
-    if (filtersChanged) {
-      prevFilterKeyRef.current = filterKey
-      setPage(1)
-    }
-
-    if (filtersChanged || page === 1) {
+    if (page === 1) {
       setAccumulated(stories)
     } else {
       setAccumulated(prev => {
@@ -158,7 +167,7 @@ export default function HomeFeedScreen() {
         return [...prev, ...newStories]
       })
     }
-  }, [stories, page, isLoading, filterKey, isForYou])
+  }, [stories, page, isLoading, isForYou])
 
   const { stories: forYouStories, isLoading: forYouLoading, isAuthenticated } = useForYou()
 
@@ -202,10 +211,11 @@ export default function HomeFeedScreen() {
           isSaved={isBookmarked(item.id)}
           isRead={isRead(item.id)}
           compact
+          showMetrics={isTrending}
         />
       </SwipeableCard>
     </Animated.View>
-  ), [router, toggleWithToast, isBookmarked, isRead])
+  ), [router, toggleWithToast, isBookmarked, isRead, isTrending])
 
   const isCurrentlyLoading = isForYou ? forYouLoading : isLoading
 
@@ -277,12 +287,13 @@ export default function HomeFeedScreen() {
               onSave={toggleWithToast}
               isSaved={isBookmarked(heroStory.id)}
               isRead={isRead(heroStory.id)}
+              showMetrics={isTrending}
             />
           </Animated.View>
         ) : null}
       </View>
     </View>
-  ), [search, activeTab, visibleTabs, promotedTags, selectedPromotedTag, filtered.length, isAuthenticated, isCurrentlyLoading, isForYou, heroStory, router, toggleWithToast, isBookmarked, isRead, handleTabChange, refreshing])
+  ), [search, activeTab, visibleTabs, promotedTags, selectedPromotedTag, filtered.length, isAuthenticated, isCurrentlyLoading, isForYou, heroStory, router, toggleWithToast, isBookmarked, isRead, handleTabChange, refreshing, isTrending])
 
   const ListEmpty = useMemo(() => {
     if (filtered.length > 0) return null

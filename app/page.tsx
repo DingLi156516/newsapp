@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { NewsArticle } from '@/lib/types'
 import { ALL_BIASES, PERSPECTIVE_BIASES } from '@/lib/types'
@@ -8,6 +8,7 @@ import { useStories } from '@/lib/hooks/use-stories'
 import { useDebounce } from '@/lib/hooks/use-debounce'
 import { useSources } from '@/lib/hooks/use-sources'
 import { useFilterParams } from '@/lib/hooks/use-filter-params'
+import { buildFeedFilterKey } from '@/lib/hooks/feed-filter-key'
 import { NexusCard } from '@/components/organisms/NexusCard'
 import { NexusCardSkeleton, NexusCardSkeletonList } from '@/components/organisms/NexusCardSkeleton'
 import { SearchBar } from '@/components/organisms/SearchBar'
@@ -83,6 +84,33 @@ function HomePageContent() {
 
   const selectedTag = tag ? { slug: tag, type: tagType ?? undefined } : null
 
+  const filterKey = useMemo(
+    () => buildFeedFilterKey({
+      topic,
+      tag,
+      tagType,
+      region,
+      search: debouncedSearch,
+      feedTab,
+      biasRange,
+      minFactuality,
+      datePreset,
+    }),
+    [topic, tag, tagType, region, debouncedSearch, feedTab, biasRange, minFactuality, datePreset]
+  )
+
+  // Synchronous reset when filters change mid-pagination. React's documented
+  // "reset state when key changes" pattern: the setState call during render
+  // discards the current render and re-runs with page=1 — so the SWR request
+  // below uses the new page, not the stale one. Without this, switching from
+  // Latest page 3 to Trending would first fetch page 3 of trending.
+  const [trackedFilterKey, setTrackedFilterKey] = useState(filterKey)
+  if (trackedFilterKey !== filterKey) {
+    setTrackedFilterKey(filterKey)
+    setPage(1)
+    setAccumulated([])
+  }
+
   const { stories, total, isLoading } = useStories({
     topic: selectedTag ? undefined : topic,
     tag: selectedTag?.slug,
@@ -93,26 +121,15 @@ function HomePageContent() {
     biasRange,
     minFactuality,
     datePreset,
+    sort: feedTab === 'trending' ? 'trending' : undefined,
     page,
   })
 
-  // Single unified effect: accumulate stories and reset on filter changes
-  const filterKey = useMemo(
-    () => JSON.stringify([topic, tag, tagType, region, debouncedSearch, feedTab === 'blindspot', biasRange, minFactuality, datePreset]),
-    [topic, tag, tagType, region, debouncedSearch, feedTab, biasRange, minFactuality, datePreset]
-  )
-  const prevFilterKeyRef = useRef(filterKey)
-
+  // Accumulator — only grows, never resets (reset happens synchronously above).
   useEffect(() => {
     if (isLoading) return
 
-    const filtersChanged = filterKey !== prevFilterKeyRef.current
-    if (filtersChanged) {
-      prevFilterKeyRef.current = filterKey
-      setPage(1)
-    }
-
-    if (filtersChanged || page === 1) {
+    if (page === 1) {
       setAccumulated(stories)
     } else {
       setAccumulated(prev => {
@@ -121,7 +138,7 @@ function HomePageContent() {
         return [...prev, ...newStories]
       })
     }
-  }, [stories, page, isLoading, filterKey])
+  }, [stories, page, isLoading])
 
   const { stories: forYouStories, isLoading: forYouLoading, isAuthenticated } = useForYou()
 
@@ -279,6 +296,7 @@ function HomePageContent() {
                       onSave={toggle}
                       isSaved={isBookmarked(heroStory.id)}
                       isRead={isRead(heroStory.id)}
+                      showMetrics={feedTab === 'trending'}
                     />
                   )}
                   {gridStories.length > 0 && (
@@ -292,6 +310,7 @@ function HomePageContent() {
                           isSaved={isBookmarked(article.id)}
                           isRead={isRead(article.id)}
                           compact
+                          showMetrics={feedTab === 'trending'}
                         />
                       ))}
                     </div>

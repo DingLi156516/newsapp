@@ -226,7 +226,10 @@ lib/auth/        — Authentication (3 files)
 lib/api/         — API utilities (18+ files)
   query-helpers.ts  — Supabase query builders; functions: queryStories(), queryStoryById(),
                       querySourceBySlug(), querySourcesForStory(), queryRecentStoriesForSource(),
-                      querySources()
+                      querySources(). queryStories() branches on sort=trending, filtering to the
+                      last 7 days and ordering by the materialized `stories.trending_score` column.
+  trending-score.ts — Pure function: computeTrendingScore(), shannonDiversityFactor(),
+                      rankByTrendingScore(). impact × (1 + log10(velocity)) × diversity × time_decay.
   transformers.ts   — DB row → frontend type converters; transformSource(), transformStory(),
                       transformStoryList()
   timeline-transformer.ts — Pure function: articles → timeline events (transformTimeline)
@@ -394,11 +397,12 @@ All responses follow `{ success: boolean, data: T, meta?: { total, page, limit }
 
 ### Query Parameters
 
-**GET /api/stories** — `topic`, `search`, `blindspot`, `biasRange`, `minFactuality`, `datePreset`, `region`, `ids` (comma-separated story IDs, max 2000 chars), `page` (default 1), `limit` (default 20, max 50)
+**GET /api/stories** — `topic`, `search`, `blindspot`, `biasRange`, `minFactuality`, `datePreset`, `region`, `tag`, `tag_type`, `sort`, `ids` (comma-separated story IDs, max 2000 chars), `page` (default 1), `limit` (default 20, max 50)
 - Uses full-text search (`tsvector` + `textSearch()`) on headline/summary instead of `ilike`
 - `biasRange` — comma-separated bias values (e.g., `'lean-left,center,lean-right'`)
 - `minFactuality` — minimum factuality threshold (e.g., `'high'` includes high + very-high)
 - `datePreset` — time range (default 'all'): `'24h'`, `'7d'`, `'30d'`, `'all'`
+- `sort` — `'last_updated'` (default, `published_at DESC`), `'source_count'` (most-covered first), or `'trending'`. Trending orders by the materialized `stories.trending_score` column (migration 050) within the last 7 days using normal SQL pagination, with `biasRange` applied in SQL via JSONB containment before `.range()`. The score is computed at story-assembly time via `lib/api/trending-score.ts` (`impact × (1 + log10(articles_24h)) × diversity × time_decay`); the dedicated cron `GET /api/cron/refresh-trending` calls `refresh_trending_scores()` on a schedule (recommended 15 min) to keep the stored time-decay component fresh and evict aged-out rows from the partial index.
 
 **GET /api/sources** — `bias`, `factuality`, `ownership`, `region`, `search`, `page` (default 1), `limit` (default 50, max 100)
 

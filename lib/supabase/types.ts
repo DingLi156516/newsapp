@@ -132,6 +132,7 @@ export interface DbStory {
   impact_score: number | null
   source_diversity: number | null
   controversy_score: number | null
+  trending_score: number | null
   sentiment: StorySentiment | null
   key_quotes: KeyQuote[] | null
   key_claims: KeyClaim[] | null
@@ -167,6 +168,7 @@ export interface DbStoryInsert {
   impact_score?: number | null
   source_diversity?: number | null
   controversy_score?: number | null
+  trending_score?: number | null
   sentiment?: StorySentiment | null
   key_quotes?: KeyQuote[] | null
   key_claims?: KeyClaim[] | null

@@ -14,6 +14,7 @@ import { BlindspotBadge } from '@/components/atoms/BlindspotBadge'
 import { BookmarkButton } from '@/components/atoms/BookmarkButton'
 import { ShareButton } from '@/components/atoms/ShareButton'
 import { SpectrumBar } from '@/components/molecules/SpectrumBar'
+import { MetricsRow } from '@/components/molecules/MetricsRow'
 import { GlassView } from '@/components/ui/GlassView'
 import { BADGE } from '@/lib/shared/design'
 import { useTheme } from '@/lib/shared/theme'
@@ -25,6 +26,7 @@ interface Props {
   readonly onClick: () => void
   readonly compact?: boolean
   readonly isRead?: boolean
+  readonly showMetrics?: boolean
 }
 
 function formatTimeAgo(timestamp: string): string {
@@ -36,7 +38,7 @@ function formatTimeAgo(timestamp: string): string {
   return `${days}d ago`
 }
 
-export function NexusCard({ article, onSave, isSaved, onClick, compact = false, isRead = false }: Props) {
+export function NexusCard({ article, onSave, isSaved, onClick, compact = false, isRead = false, showMetrics = false }: Props) {
   const theme = useTheme()
   const scale = useSharedValue(1)
   const animatedStyle = useAnimatedStyle(() => ({
@@ -139,6 +141,15 @@ export function NexusCard({ article, onSave, isSaved, onClick, compact = false, 
               </View>
             )}
           </View>
+
+          {/* Trending metrics — shown only when the tab sorts by trending */}
+          {showMetrics && (
+            <MetricsRow
+              impactScore={article.impactScore}
+              articles24h={article.storyVelocity?.articles_24h ?? null}
+              sourceDiversity={article.sourceDiversity}
+            />
+          )}
 
           {/* Spectrum bar */}
           <SpectrumBar segments={article.spectrumSegments} height={6} />

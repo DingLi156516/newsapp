@@ -25,6 +25,7 @@ function createMockQueryBuilder(data: unknown = [], count: number = 0, error: nu
     textSearch: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
     gte: vi.fn().mockReturnThis(),
+    or: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     range: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
@@ -65,6 +66,7 @@ const mockStory = {
   impact_score: null,
   source_diversity: null,
   controversy_score: null,
+  trending_score: null,
   sentiment: null,
   key_quotes: null,
   key_claims: null,
@@ -257,6 +259,126 @@ describe('queryStories', () => {
     const result = await queryStories(client, { tag: 'nonexistent', page: 1, limit: 20 })
 
     expect(result).toEqual({ data: [], count: 0 })
+  })
+
+  describe('sort=trending', () => {
+    it('orders by the materialized trending_score column in SQL', async () => {
+      const builder = createMockQueryBuilder([mockStory], 1)
+      const client = createMockClient(builder)
+
+      await queryStories(client, { sort: 'trending', page: 1, limit: 20 })
+
+      // Primary sort column is the pre-computed score; DB handles it so the
+      // read path stays bounded to `limit` rows, not the full 7-day window.
+      expect(builder.order).toHaveBeenCalledWith(
+        'trending_score',
+        expect.objectContaining({ ascending: false, nullsFirst: false })
+      )
+    })
+
+    it('restricts the candidate window to the last 7 days', async () => {
+      const builder = createMockQueryBuilder([mockStory], 1)
+      const client = createMockClient(builder)
+
+      await queryStories(client, { sort: 'trending', page: 1, limit: 20 })
+
+      // Older stories can't resurface even if their stored score is high.
+      expect(builder.gte).toHaveBeenCalledWith('published_at', expect.any(String))
+    })
+
+    it('does NOT filter null trending_score so freshly-assembled stories stay visible (codex finding)', async () => {
+      const builder = createMockQueryBuilder([mockStory], 1)
+      const client = createMockClient(builder)
+
+      await queryStories(client, { sort: 'trending', page: 1, limit: 20 })
+
+      // Stories are scored by the refresh cron (≤15-min cadence), not at
+      // assembly. A new breaking story must surface in Trending immediately
+      // (NULL score sorts to bottom via NULLS LAST), not wait for the next
+      // cron tick. The partial index covers `publication_status='published'`
+      // without a `trending_score IS NOT NULL` clause to support this.
+      expect(builder.not).not.toHaveBeenCalledWith('trending_score', 'is', null)
+      expect(builder.order).toHaveBeenCalledWith(
+        'trending_score',
+        expect.objectContaining({ ascending: false, nullsFirst: false })
+      )
+    })
+
+    it('applies biasRange in SQL before pagination (codex finding)', async () => {
+      const builder = createMockQueryBuilder([mockStory], 1)
+      const client = createMockClient(builder)
+
+      await queryStories(client, {
+        sort: 'trending',
+        biasRange: 'far-left,left',
+        page: 1,
+        limit: 20,
+      })
+
+      // JSONB contains OR'd across selected biases — the bias filter must
+      // run before `.range()` so pagination over the filtered set doesn't
+      // return empty pages while matching stories sit further down.
+      expect(builder.or).toHaveBeenCalledWith(
+        'spectrum_segments.cs.[{"bias":"far-left"}],spectrum_segments.cs.[{"bias":"left"}]'
+      )
+    })
+
+    it('does not apply biasRange OR filter when all 7 biases selected', async () => {
+      const builder = createMockQueryBuilder([mockStory], 1)
+      const client = createMockClient(builder)
+
+      await queryStories(client, {
+        sort: 'trending',
+        biasRange: 'far-left,left,lean-left,center,lean-right,right,far-right',
+        page: 1,
+        limit: 20,
+      })
+
+      // All-7 selection is a no-op; avoid filing an unnecessary OR clause.
+      expect(builder.or).not.toHaveBeenCalled()
+    })
+
+    it('uses normal SQL pagination (range), not in-memory slicing', async () => {
+      const builder = createMockQueryBuilder([mockStory], 1)
+      const client = createMockClient(builder)
+
+      await queryStories(client, { sort: 'trending', page: 2, limit: 20 })
+
+      // page=2, limit=20 → offset 20, end 39
+      expect(builder.range).toHaveBeenCalledWith(20, 39)
+    })
+
+    it('returns the trending_score DB count as meta.total', async () => {
+      const rows = [
+        { ...mockStory, id: 'a', trending_score: 90 },
+        { ...mockStory, id: 'b', trending_score: 10 },
+      ]
+      const builder = createMockQueryBuilder(rows, 2)
+      const client = createMockClient(builder)
+
+      const result = await queryStories(client, { sort: 'trending', page: 1, limit: 20 })
+
+      // The count comes from the indexed Supabase query — not a capped fetch —
+      // so infinite scroll sees the real total of matching stories.
+      expect(result.count).toBe(2)
+      expect(result.data.map((s) => s.id)).toEqual(['a', 'b'])
+    })
+
+    it('secondary-sorts by trending_score when multiple rows arrive out of order', async () => {
+      // The mock builder doesn't honor .order(), so we verify the in-memory
+      // tie-break sorts by trending_score DESC when sort=trending.
+      const rows = [
+        { ...mockStory, id: 'low', trending_score: 5 },
+        { ...mockStory, id: 'high', trending_score: 95 },
+        { ...mockStory, id: 'mid', trending_score: 50 },
+      ]
+      const builder = createMockQueryBuilder(rows, 3)
+      const client = createMockClient(builder)
+
+      const result = await queryStories(client, { sort: 'trending', page: 1, limit: 20 })
+
+      expect(result.data.map((s) => s.id)).toEqual(['high', 'mid', 'low'])
+    })
   })
 })
 

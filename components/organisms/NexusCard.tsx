@@ -11,6 +11,7 @@ import { BookmarkButton } from '@/components/atoms/BookmarkButton'
 import { ShareButton } from '@/components/atoms/ShareButton'
 import { MomentumBadge } from '@/components/atoms/MomentumBadge'
 import { MonochromeSpectrumBar } from '@/components/molecules/MonochromeSpectrumBar'
+import { MetricsRow } from '@/components/molecules/MetricsRow'
 
 interface Props {
   article: NewsArticle
@@ -19,6 +20,7 @@ interface Props {
   onClick: () => void
   compact?: boolean
   isRead?: boolean
+  showMetrics?: boolean
 }
 
 function formatTimeAgo(timestamp: string): string {
@@ -30,7 +32,7 @@ function formatTimeAgo(timestamp: string): string {
   return `${days}d ago`
 }
 
-export function NexusCard({ article, onSave, isSaved, onClick, compact = false, isRead = false }: Props) {
+export function NexusCard({ article, onSave, isSaved, onClick, compact = false, isRead = false, showMetrics = false }: Props) {
   const cardClass = compact
     ? 'glass-sm relative cursor-pointer overflow-hidden p-3.5'
     : 'glass relative overflow-hidden cursor-pointer'
@@ -122,6 +124,15 @@ export function NexusCard({ article, onSave, isSaved, onClick, compact = false, 
               {formatTimeAgo(article.timestamp)}
             </span>
           </div>
+
+          {/* Trending metrics — shown only when parent sorts by trending */}
+          {showMetrics && (
+            <MetricsRow
+              impactScore={article.impactScore}
+              articles24h={article.storyVelocity?.articles_24h ?? null}
+              sourceDiversity={article.sourceDiversity}
+            />
+          )}
 
           {/* Spectrum bar */}
           <MonochromeSpectrumBar segments={article.spectrumSegments} />

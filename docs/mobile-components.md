@@ -23,6 +23,7 @@ Component inventory for `apps/mobile/components/`. Organized by atomic design le
 | BiasLegend | `@/components/molecules/BiasLegend` | (none) |
 | EmptyStateView | `@/components/molecules/EmptyStateView` | `message: string` |
 | ForYouCta | `@/components/molecules/ForYouCta` | `onDismiss: () => void` |
+| MetricsRow | `@/components/molecules/MetricsRow` | `impactScore?`, `articles24h?`, `sourceDiversity?` — trending-feed chips; returns null when all absent |
 | MonochromeSpectrumBar | `@/components/molecules/MonochromeSpectrumBar` | `segments: SpectrumSegment[]`, `height?: number` |
 | NetworkErrorView | `@/components/molecules/NetworkErrorView` | `onRetry: () => void` |
 | SourceList | `@/components/molecules/SourceList` | `sources: NewsSource[]` |
@@ -35,8 +36,8 @@ Component inventory for `apps/mobile/components/`. Organized by atomic design le
 | AISummaryTabs | `@/components/organisms/AISummaryTabs` | `summary: AISummary` |
 | CoverageIntelligence | `@/components/organisms/CoverageIntelligence` | `article: NewsArticle`, `timeline` |
 | FeedTabs | `@/components/organisms/FeedTabs` | `value: FeedTab`, `onChange`, `savedCount?`, `blindspotCount?` |
-| HeroCard | `@/components/organisms/HeroCard` | `article`, `onClick`, `onSave`, `isSaved`, `isRead?` |
-| NexusCard | `@/components/organisms/NexusCard` | `article`, `onClick`, `onSave`, `isSaved`, `isRead?`, `compact?` |
+| HeroCard | `@/components/organisms/HeroCard` | `article`, `onClick`, `onSave`, `isSaved`, `isRead?`, `showMetrics?` |
+| NexusCard | `@/components/organisms/NexusCard` | `article`, `onClick`, `onSave`, `isSaved`, `isRead?`, `compact?`, `showMetrics?` |
 | NexusCardSkeleton | `@/components/organisms/NexusCardSkeleton` | `compact?: boolean` |
 | SearchBar | `@/components/organisms/SearchBar` | `value`, `onChange`, `onClear`, `placeholder?` |
 | SearchFilters | `@/components/organisms/SearchFilters` | Filter state + onChange callbacks |

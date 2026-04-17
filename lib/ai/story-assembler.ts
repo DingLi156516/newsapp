@@ -325,6 +325,14 @@ export async function assembleSingleStory(
   )
   const controversyScore = isSingleSource ? 0 : computeControversyScore(aiSummary)
 
+  // `trending_score` (migration 050) is deliberately NOT written here — it's
+  // populated exclusively by `refresh_trending_scores()` via the
+  // `/api/cron/refresh-trending` cron. Omitting it from the write payload
+  // keeps story publishing safe under schema skew (app deploys ahead of the
+  // migration, or rollback to a DB without the column). Newly-assembled
+  // stories land with NULL score and pick up their rank on the next cron
+  // tick — the read path ranks them below scored rows during that window.
+
   const publicationDecision = decideStoryPublication({
     articleCount: articles.length,
     sourceCount: sourceIds.length,

@@ -17,7 +17,7 @@ interface StoriesParams {
   readonly datePreset?: DatePreset
   readonly tag?: string | null
   readonly tagType?: string | null
-  readonly sort?: 'last_updated' | 'source_count'
+  readonly sort?: 'last_updated' | 'source_count' | 'trending'
   readonly ids?: string[]
   readonly page?: number
   readonly limit?: number

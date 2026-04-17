@@ -13,6 +13,7 @@ import { FactualityBar } from '@/components/atoms/FactualityBar'
 import { BookmarkButton } from '@/components/atoms/BookmarkButton'
 import { ShareButton } from '@/components/atoms/ShareButton'
 import { SpectrumBar } from '@/components/molecules/SpectrumBar'
+import { MetricsRow } from '@/components/molecules/MetricsRow'
 import { GlassView } from '@/components/ui/GlassView'
 import { BADGE } from '@/lib/shared/design'
 import { useTheme } from '@/lib/shared/theme'
@@ -23,9 +24,10 @@ interface Props {
   readonly onSave: (id: string) => void
   readonly isSaved: boolean
   readonly isRead?: boolean
+  readonly showMetrics?: boolean
 }
 
-export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: Props) {
+export function HeroCard({ article, onClick, onSave, isSaved, isRead = false, showMetrics = false }: Props) {
   const theme = useTheme()
   const scale = useSharedValue(1)
   const animatedStyle = useAnimatedStyle(() => ({
@@ -90,6 +92,15 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false }: 
             >
               {article.headline}
             </Text>
+
+            {/* Trending metrics — shown only when the tab sorts by trending */}
+            {showMetrics && (
+              <MetricsRow
+                impactScore={article.impactScore}
+                articles24h={article.storyVelocity?.articles_24h ?? null}
+                sourceDiversity={article.sourceDiversity}
+              />
+            )}
 
             {/* Spectrum bar */}
             <SpectrumBar segments={article.spectrumSegments} height={8} />
