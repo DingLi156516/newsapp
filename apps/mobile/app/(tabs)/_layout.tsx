@@ -1,12 +1,12 @@
 /**
- * Bottom tab navigator — Home, Sources, Profile.
+ * Bottom tab navigator — Home, Sources, Blindspot, Profile.
  * Glassmorphic blur background with active glow indicator + haptic feedback.
  */
 
 import { StyleSheet, View } from 'react-native'
 import { Tabs } from 'expo-router'
 import { BlurView } from 'expo-blur'
-import { Newspaper, Globe, User } from 'lucide-react-native'
+import { Newspaper, Globe, Eye, User } from 'lucide-react-native'
 import { hapticLight } from '@/lib/haptics'
 import { useTheme } from '@/lib/shared/theme'
 
@@ -86,6 +86,18 @@ export default function TabLayout() {
           tabBarAccessibilityLabel: 'Sources',
           tabBarIcon: ({ color, size, focused }) => (
             <TabIcon Icon={Globe} color={color} size={size} focused={focused} />
+          ),
+        }}
+        listeners={{ tabPress: () => hapticLight() }}
+      />
+      <Tabs.Screen
+        name="blindspot"
+        options={{
+          title: 'Blindspot',
+          tabBarButtonTestID: 'tab-blindspot',
+          tabBarAccessibilityLabel: 'Blindspot',
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon Icon={Eye} color={color} size={size} focused={focused} />
           ),
         }}
         listeners={{ tabPress: () => hapticLight() }}

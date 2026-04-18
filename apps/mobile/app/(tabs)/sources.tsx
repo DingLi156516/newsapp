@@ -4,8 +4,9 @@
  */
 
 import { useState, useCallback, useMemo, useRef } from 'react'
-import { View, Text, FlatList, Pressable, Linking, ScrollView } from 'react-native'
+import { View, Text, FlatList, Pressable, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
 import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet'
 import { useSources } from '@/lib/hooks/use-sources'
 import { useDebounce } from '@/lib/hooks/use-debounce'
@@ -46,6 +47,7 @@ const SHEET_SNAP_POINTS = ['70%', '95%']
 
 export default function SourcesScreen() {
   const theme = useTheme()
+  const router = useRouter()
   const [search, setSearch] = useState('')
   const [biasFilter, setBiasFilter] = useState<BiasCategory | null>(null)
   const [factualityFilter, setFactualityFilter] = useState<FactualityLevel | null>(null)
@@ -98,7 +100,9 @@ export default function SourcesScreen() {
     return (
       <Pressable
         testID="source-card"
-        onPress={() => { if (item.url) Linking.openURL(`https://${item.url}`) }}
+        onPress={() => {
+          if (item.slug) router.push(`/source/${item.slug}`)
+        }}
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
       >
         <GlassView variant="sm" style={{ padding: 14, marginHorizontal: 16, marginVertical: 4, borderLeftWidth: 3, borderLeftColor: color }}>

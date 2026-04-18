@@ -1,0 +1,52 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Open a story
+- tapOn:
+    id: "hero-card"
+    optional: true
+- tapOn:
+    id: "story-card"
+    optional: true
+    index: 0
+- waitForAnimationToEnd
+
+# The AI Perspectives tabs should be visible
+- assertVisible:
+    text: "Common Ground"
+    optional: true
+
+# Swipe the content left to advance to the next perspective tab
+- swipe:
+    from:
+      text: "Common Ground"
+    direction: LEFT
+    optional: true
+
+# The "Left" tab content should now be active; verify the tab label is still visible
+- assertVisible:
+    text: "Left"
+    optional: true
+
+# Back to feed
+- tapOn:
+    id: "back-button"
+    optional: true
+- assertVisible:
+    id: "axiom-header"

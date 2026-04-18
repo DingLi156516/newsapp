@@ -104,7 +104,8 @@ describe('HomeFeedScreen', () => {
     expect(screen.getByTestId('feed-tab-for-you')).toBeTruthy()
     expect(screen.getByTestId('feed-tab-trending')).toBeTruthy()
     expect(screen.getByTestId('feed-tab-latest')).toBeTruthy()
-    expect(screen.getByTestId('feed-tab-blindspot')).toBeTruthy()
+    // Blindspot is a dedicated bottom-nav tab now — no longer in the in-feed bar.
+    expect(screen.queryByTestId('feed-tab-blindspot')).toBeNull()
     expect(screen.getByTestId('feed-tab-politics')).toBeTruthy()
     expect(screen.getByTestId('feed-tab-technology')).toBeTruthy()
   })

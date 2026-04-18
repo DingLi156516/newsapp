@@ -1,0 +1,42 @@
+appId: host.exp.Exponent
+
+---
+
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Go to the Sources tab
+- tapOn:
+    id: "tab-sources"
+- waitForAnimationToEnd
+
+# Tap the first source card — should land on the source profile
+- tapOn:
+    id: "source-card"
+    index: 0
+
+# Verify profile elements
+- assertVisible:
+    id: "source-profile-name"
+- assertVisible:
+    id: "source-profile-bias"
+- assertVisible:
+    id: "source-profile-factuality"
+
+# Back to sources
+- tapOn:
+    id: "source-profile-back"
+- waitForAnimationToEnd
+- assertVisible:
+    text: "Sources"

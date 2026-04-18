@@ -79,6 +79,12 @@ export const FEED_TAB_LABELS: Record<FeedTab, string> = {
 
 export const ALL_FEED_TABS: readonly FeedTab[] = ['for-you', 'trending', 'latest', 'blindspot']
 
+/**
+ * Feeds allowed in the in-feed tab bar (the horizontal pill scroller).
+ * `blindspot` is intentionally excluded — it is promoted to a bottom-nav tab.
+ */
+export const IN_FEED_TABS: readonly FeedTab[] = ['for-you', 'trending', 'latest']
+
 export const ALL_TOPICS: readonly Topic[] = [
   'politics', 'world', 'technology', 'business',
   'science', 'health', 'culture', 'sports', 'environment',
@@ -158,6 +164,7 @@ export interface NewsSource {
   url?: string
   articleUrl?: string
   owner?: MediaOwner
+  slug?: string
 }
 
 // ---------------------------------------------------------------------------

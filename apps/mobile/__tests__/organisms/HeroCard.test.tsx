@@ -53,4 +53,38 @@ describe('HeroCard', () => {
     render(<HeroCard {...defaultProps} />)
     expect(screen.getByTestId('share-button')).toBeTruthy()
   })
+
+  describe('Hot badge', () => {
+    it('renders when velocity phase is "breaking"', () => {
+      const article: NewsArticle = {
+        ...mockArticle,
+        storyVelocity: { articles_24h: 40, articles_48h: 40, articles_7d: 40, phase: 'breaking' },
+      }
+      render(<HeroCard {...defaultProps} article={article} />)
+      expect(screen.getByTestId('hot-badge')).toBeTruthy()
+    })
+
+    it('does not render when phase is not "breaking"', () => {
+      const article: NewsArticle = {
+        ...mockArticle,
+        storyVelocity: { articles_24h: 5, articles_48h: 10, articles_7d: 20, phase: 'developing' },
+      }
+      render(<HeroCard {...defaultProps} article={article} />)
+      expect(screen.queryByTestId('hot-badge')).toBeNull()
+    })
+
+    it('does not render when story has no velocity data', () => {
+      render(<HeroCard {...defaultProps} />)
+      expect(screen.queryByTestId('hot-badge')).toBeNull()
+    })
+
+    it('does not render when suppressHotBadge is true', () => {
+      const article: NewsArticle = {
+        ...mockArticle,
+        storyVelocity: { articles_24h: 40, articles_48h: 40, articles_7d: 40, phase: 'breaking' },
+      }
+      render(<HeroCard {...defaultProps} article={article} suppressHotBadge />)
+      expect(screen.queryByTestId('hot-badge')).toBeNull()
+    })
+  })
 })

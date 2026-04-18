@@ -1,11 +1,24 @@
 /**
  * AISummaryTabs — Tabbed AI perspective summary panel with animated underline.
  * Common Ground | Left | Right
+ *
+ * Users can switch tabs by tapping, or by horizontal swipe. A one-time
+ * "← swipe →" affordance appears on first view and disappears after the
+ * user interacts (persisted via AsyncStorage).
  */
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { View, Text, Pressable, type LayoutChangeEvent } from 'react-native'
-import Animated, { FadeIn, FadeOut, useAnimatedStyle, withSpring, useSharedValue } from 'react-native-reanimated'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import Animated, {
+  FadeIn,
+  FadeOut,
+  useAnimatedStyle,
+  withSpring,
+  useSharedValue,
+  runOnJS,
+} from 'react-native-reanimated'
+import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { GlassView } from '@/components/ui/GlassView'
 import { SentimentPill } from '@/components/atoms/SentimentPill'
 import type { StorySentiment } from '@/lib/shared/types'
@@ -32,6 +45,9 @@ const SINGLE_SOURCE_TABS: { id: TabId; label: string }[] = [
 ]
 
 const SPRING_CONFIG = { stiffness: 300, damping: 30 }
+const SWIPE_THRESHOLD = 50
+const SWIPE_VELOCITY_THRESHOLD = 500
+const AFFORDANCE_STORAGE_KEY = '@axiom/ai-perspective-swipe-seen'
 
 function ContentBlock({ content }: { content: string }) {
   const theme = useTheme()
@@ -50,14 +66,40 @@ function ContentBlock({ content }: { content: string }) {
 export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentiment, sourceCount }: Props) {
   const theme = useTheme()
   const [activeTab, setActiveTab] = useState<TabId>('common')
+  const [affordanceSeen, setAffordanceSeen] = useState(true)
   const underlineX = useSharedValue(0)
   const underlineWidth = useSharedValue(0)
   const tabMeasurements = useRef<Record<string, { x: number; width: number }>>({})
+
+  const isSingleSource = sourceCount === 1
+  const tabs = isSingleSource ? SINGLE_SOURCE_TABS : MULTI_SOURCE_TABS
+
+  useEffect(() => {
+    if (isSingleSource) return
+    AsyncStorage.getItem(AFFORDANCE_STORAGE_KEY)
+      .then((seen) => setAffordanceSeen(seen === '1'))
+      .catch(() => setAffordanceSeen(true))
+  }, [isSingleSource])
+
+  const markAffordanceSeen = useCallback(() => {
+    setAffordanceSeen(true)
+    AsyncStorage.setItem(AFFORDANCE_STORAGE_KEY, '1').catch(() => {})
+  }, [])
 
   const underlineStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: underlineX.value }],
     width: underlineWidth.value,
   }))
+
+  const goToTab = useCallback((tabId: TabId) => {
+    const measurement = tabMeasurements.current[tabId]
+    if (measurement) {
+      underlineX.value = withSpring(measurement.x, SPRING_CONFIG)
+      underlineWidth.value = withSpring(measurement.width, SPRING_CONFIG)
+    }
+    setActiveTab(tabId)
+    markAffordanceSeen()
+  }, [underlineX, underlineWidth, markAffordanceSeen])
 
   const handleLayout = useCallback((tabId: TabId, event: LayoutChangeEvent) => {
     const { x, width } = event.nativeEvent.layout
@@ -69,16 +111,28 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentime
     }
   }, [activeTab, underlineX, underlineWidth])
 
-  const handlePress = useCallback((tabId: TabId) => {
-    const measurement = tabMeasurements.current[tabId]
-    if (measurement) {
-      underlineX.value = withSpring(measurement.x, SPRING_CONFIG)
-      underlineWidth.value = withSpring(measurement.width, SPRING_CONFIG)
-    }
-    setActiveTab(tabId)
-  }, [underlineX, underlineWidth])
+  const advanceTab = useCallback((direction: 1 | -1) => {
+    if (isSingleSource) return
+    const ids = tabs.map((t) => t.id)
+    const idx = ids.indexOf(activeTab)
+    const nextIdx = idx + direction
+    if (nextIdx < 0 || nextIdx >= ids.length) return
+    goToTab(ids[nextIdx])
+  }, [activeTab, tabs, goToTab, isSingleSource])
 
-  const tabs = sourceCount === 1 ? SINGLE_SOURCE_TABS : MULTI_SOURCE_TABS
+  const swipeGesture = Gesture.Pan()
+    .activeOffsetX([-12, 12])
+    .failOffsetY([-12, 12])
+    .enabled(!isSingleSource)
+    .onEnd((event) => {
+      const dx = event.translationX
+      const vx = event.velocityX
+      if (dx <= -SWIPE_THRESHOLD || vx <= -SWIPE_VELOCITY_THRESHOLD) {
+        runOnJS(advanceTab)(1)
+      } else if (dx >= SWIPE_THRESHOLD || vx >= SWIPE_VELOCITY_THRESHOLD) {
+        runOnJS(advanceTab)(-1)
+      }
+    })
 
   const content: Record<TabId, string> = {
     common: commonGround,
@@ -100,7 +154,7 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentime
           return (
             <Pressable
               key={tab.id}
-              onPress={() => handlePress(tab.id)}
+              onPress={() => goToTab(tab.id)}
               onLayout={(e) => handleLayout(tab.id, e)}
               accessibilityRole="tab"
               accessibilityState={{ selected: isActive }}
@@ -142,15 +196,32 @@ export function AISummaryTabs({ commonGround, leftFraming, rightFraming, sentime
         />
       </View>
 
-      {/* Tab content */}
-      <Animated.View
-        key={activeTab}
-        entering={FadeIn.duration(200)}
-        exiting={FadeOut.duration(100)}
-        style={{ padding: 20, minHeight: 120 }}
-      >
-        <ContentBlock content={content[activeTab]} />
-      </Animated.View>
+      {/* Tab content with swipe gesture */}
+      <GestureDetector gesture={swipeGesture}>
+        <Animated.View
+          key={activeTab}
+          entering={FadeIn.duration(200)}
+          exiting={FadeOut.duration(100)}
+          style={{ padding: 20, minHeight: 120 }}
+        >
+          <ContentBlock content={content[activeTab]} />
+          {!affordanceSeen && !isSingleSource && (
+            <Text
+              testID="ai-summary-swipe-affordance"
+              style={{
+                fontFamily: 'Inter',
+                fontSize: 10,
+                color: theme.text.muted,
+                textAlign: 'center',
+                marginTop: 12,
+                letterSpacing: 1,
+              }}
+            >
+              {'← swipe →'}
+            </Text>
+          )}
+        </Animated.View>
+      </GestureDetector>
     </GlassView>
   )
 }

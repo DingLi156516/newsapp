@@ -25,11 +25,49 @@ interface Props {
   readonly isSaved: boolean
   readonly isRead?: boolean
   readonly showMetrics?: boolean
+  /**
+   * When true, `MomentumBadge` is rendered elsewhere on this card, so we
+   * suppress the inline `Hot` micro-badge to avoid redundancy.
+   */
+  readonly suppressHotBadge?: boolean
 }
 
-export function HeroCard({ article, onClick, onSave, isSaved, isRead = false, showMetrics = false }: Props) {
+function HotBadge() {
+  return (
+    <View
+      testID="hot-badge"
+      accessibilityLabel="Hot story — high momentum"
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(249,115,22,0.15)',
+        borderWidth: 0.5,
+        borderColor: 'rgba(249,115,22,0.3)',
+        borderRadius: BADGE.borderRadius,
+        paddingHorizontal: BADGE.paddingH,
+        paddingVertical: BADGE.paddingV,
+      }}
+    >
+      <Text
+        style={{
+          fontFamily: 'Inter-SemiBold',
+          fontSize: 10,
+          color: 'rgb(253,186,116)',
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
+        }}
+      >
+        Hot
+      </Text>
+    </View>
+  )
+}
+
+export function HeroCard({ article, onClick, onSave, isSaved, isRead = false, showMetrics = false, suppressHotBadge = false }: Props) {
   const theme = useTheme()
   const scale = useSharedValue(1)
+  const isHot = !suppressHotBadge && article.storyVelocity?.phase === 'breaking'
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }))
@@ -60,6 +98,7 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false, sh
                 </Text>
               </View>
               <CoverageCount count={article.sourceCount} />
+              {isHot && <HotBadge />}
               {article.isBlindspot && <BlindspotBadge />}
               {isRead && (
                 <View style={{

@@ -1,110 +1,74 @@
-import { useMemo, useState } from 'react'
-import { View, Text, Pressable, Linking } from 'react-native'
-import type { NewsSource } from '@/lib/shared/types'
-import { BiasTag } from '@/components/atoms/BiasTag'
-import { FactualityBar } from '@/components/atoms/FactualityBar'
-import { SourceLogo } from '@/components/atoms/SourceLogo'
-import { Building2, ChevronDown, ChevronUp, ExternalLink, User } from 'lucide-react-native'
-import { useTheme } from '@/lib/shared/theme'
+/**
+ * SourceList — Buckets sources by political lean into three collapsible
+ * groups (Left / Center / Right) using the 7-tier bias taxonomy. The first
+ * non-empty group is expanded by default. Single-source stories render only
+ * the group containing that source.
+ */
+
+import { useMemo } from 'react'
+import { View } from 'react-native'
+import type { BiasCategory, NewsSource } from '@/lib/shared/types'
+import { FACTUALITY_RANK } from '@/lib/shared/types'
+import { SourceLeanGroup, type GroupLabel } from '@/components/molecules/SourceLeanGroup'
 
 interface SourceListProps {
-  readonly sources: NewsSource[]
-  readonly initialExpanded?: boolean
+  readonly sources: readonly NewsSource[]
 }
 
-export function SourceList({ sources, initialExpanded = false }: SourceListProps) {
-  const [expanded, setExpanded] = useState(initialExpanded)
-  const theme = useTheme()
-  const visibleSources = expanded ? sources : sources.slice(0, 3)
+const LEFT_BIASES: readonly BiasCategory[] = ['far-left', 'left', 'lean-left']
+const RIGHT_BIASES: readonly BiasCategory[] = ['lean-right', 'right', 'far-right']
 
-  const ownerGroups = useMemo(() => {
-    const groups = new Map<string, { name: string; isIndividual: boolean; count: number }>()
+function bucketOf(bias: BiasCategory): GroupLabel {
+  if (LEFT_BIASES.includes(bias)) return 'Left'
+  if (RIGHT_BIASES.includes(bias)) return 'Right'
+  return 'Center'
+}
+
+function sortSources(a: NewsSource, b: NewsSource): number {
+  const factA = FACTUALITY_RANK[a.factuality] ?? 0
+  const factB = FACTUALITY_RANK[b.factuality] ?? 0
+  if (factA !== factB) return factB - factA
+  return a.name.localeCompare(b.name)
+}
+
+export function SourceList({ sources }: SourceListProps) {
+  const buckets = useMemo(() => {
+    const groups: Record<GroupLabel, NewsSource[]> = { Left: [], Center: [], Right: [] }
     for (const source of sources) {
-      if (!source.owner) continue
-      const existing = groups.get(source.owner.id)
-      if (existing) {
-        groups.set(source.owner.id, { ...existing, count: existing.count + 1 })
-      } else {
-        groups.set(source.owner.id, {
-          name: source.owner.name,
-          isIndividual: source.owner.isIndividual,
-          count: 1,
-        })
-      }
+      groups[bucketOf(source.bias)].push(source)
     }
-    return [...groups.values()].filter((g) => g.count >= 2)
+    return {
+      Left: [...groups.Left].sort(sortSources),
+      Center: [...groups.Center].sort(sortSources),
+      Right: [...groups.Right].sort(sortSources),
+    }
   }, [sources])
+
+  const total = sources.length
+  const firstNonEmpty: GroupLabel | null = useMemo(() => {
+    const order: GroupLabel[] = ['Left', 'Center', 'Right']
+    return order.find((label) => buckets[label].length > 0) ?? null
+  }, [buckets])
+
+  const groupOrder: GroupLabel[] = ['Left', 'Center', 'Right']
 
   return (
     <View>
-      {visibleSources.map((source) => (
-        <Pressable
-          key={source.id}
-          onPress={() => {
-            if (source.articleUrl) Linking.openURL(source.articleUrl)
-            else if (source.url) Linking.openURL(`https://${source.url}`)
-          }}
-          style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            paddingVertical: 10,
-            paddingHorizontal: 4,
-            opacity: pressed ? 0.7 : 1,
-            borderBottomWidth: 0.5,
-            borderBottomColor: theme.surface.border,
-          })}
-        >
-          <View style={{ flex: 1, gap: 4 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <SourceLogo domain={source.url} name={source.name} bias={source.bias} size={24} />
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>
-                {source.name}
-              </Text>
-              <BiasTag bias={source.bias} compact />
-            </View>
-            <FactualityBar level={source.factuality} size="compact" />
-          </View>
-          <ExternalLink size={14} color={theme.text.tertiary} />
-        </Pressable>
-      ))}
-      {ownerGroups.length > 0 && (
-        <View
-          testID="source-list-owner-chips"
-          style={{ paddingVertical: 8, gap: 4 }}
-        >
-          {ownerGroups.map((group) => (
-            <View
-              key={group.name}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-            >
-              {group.isIndividual ? (
-                <User size={12} color={theme.text.tertiary} />
-              ) : (
-                <Building2 size={12} color={theme.text.tertiary} />
-              )}
-              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>
-                {group.count} from {group.name}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
-      {sources.length > 3 && (
-        <Pressable
-          onPress={() => setExpanded((prev) => !prev)}
-          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 10 }}
-        >
-          <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
-            {expanded ? 'Show less' : `Show all ${sources.length} sources`}
-          </Text>
-          {expanded ? (
-            <ChevronUp size={14} color={theme.text.tertiary} />
-          ) : (
-            <ChevronDown size={14} color={theme.text.tertiary} />
-          )}
-        </Pressable>
-      )}
+      {groupOrder.map((label) => {
+        const groupSources = buckets[label]
+        if (groupSources.length === 0) return null
+        const percentage = total > 0 ? Math.round((groupSources.length / total) * 100) : 0
+        return (
+          <SourceLeanGroup
+            key={label}
+            label={label}
+            count={groupSources.length}
+            percentage={percentage}
+            sources={groupSources}
+            defaultExpanded={label === firstNonEmpty}
+          />
+        )
+      })}
     </View>
   )
 }

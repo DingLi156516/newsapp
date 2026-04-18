@@ -10,7 +10,7 @@ import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom
 import type { FeedSort, UnifiedTab, StoryTag } from '@/lib/shared/types'
 import type { FeedConfig } from '@/lib/hooks/use-feed-config'
 import {
-  ALL_FEED_TABS, ALL_TOPICS, FEED_TAB_LABELS, TOPIC_LABELS,
+  IN_FEED_TABS, ALL_TOPICS, FEED_TAB_LABELS, TOPIC_LABELS,
   FEED_SORT_LABELS, TAG_TYPE_COLORS,
 } from '@/lib/shared/types'
 import { GlassView } from '@/components/ui/GlassView'
@@ -32,7 +32,12 @@ const SHEET_SNAP_POINTS = ['75%', '95%']
 export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hiddenPromotedTags, promotedTags, onUpdateConfig }: Props) {
   const theme = useTheme()
   const bottomSheetRef = useRef<BottomSheet>(null)
-  const visibleSet = new Set<string>(visibleFeeds)
+  // Legacy configs may persist `blindspot` (now a bottom-nav tab, not in the
+  // in-feed bar). Sanitize it out before computing counts so the last-tab
+  // guard reflects only tabs the modal actually renders.
+  const ALLOWED_FEEDS = new Set<string>([...IN_FEED_TABS, ...ALL_TOPICS])
+  const sanitizedFeeds = visibleFeeds.filter((t) => ALLOWED_FEEDS.has(t))
+  const visibleSet = new Set<string>(sanitizedFeeds)
   const enabledCount = visibleSet.size
   const hiddenSet = new Set<string>(hiddenPromotedTags)
 
@@ -51,8 +56,8 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hidden
     if (isEnabled && enabledCount <= 1) return
 
     const updated = isEnabled
-      ? visibleFeeds.filter((t) => t !== tab)
-      : [...visibleFeeds, tab]
+      ? sanitizedFeeds.filter((t) => t !== tab)
+      : [...sanitizedFeeds, tab]
     onUpdateConfig({ visibleFeeds: updated })
   }
 
@@ -111,7 +116,7 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hidden
         {/* Feeds section */}
         <GlassView style={{ padding: 16, gap: 12 }}>
           <Text style={sectionLabel}>FEEDS</Text>
-          {ALL_FEED_TABS.map((tab) => {
+          {IN_FEED_TABS.map((tab) => {
             const isEnabled = visibleSet.has(tab)
             return (
               <View key={tab} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>

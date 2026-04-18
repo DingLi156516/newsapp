@@ -1,0 +1,48 @@
+appId: host.exp.Exponent
+
+---
+
+# Reset to known state
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Tap the Blindspot bottom tab
+- tapOn:
+    id: "tab-blindspot"
+- waitForAnimationToEnd
+
+# Verify the Blindspot header renders
+- assertVisible:
+    id: "blindspot-header"
+- assertVisible:
+    text: "Stories under-covered on one side of the political spectrum."
+
+# Skew filters render
+- assertVisible:
+    id: "blindspot-filter-all"
+- assertVisible:
+    id: "blindspot-filter-right-skew"
+- assertVisible:
+    id: "blindspot-filter-left-skew"
+
+# Try a filter
+- tapOn:
+    id: "blindspot-filter-right-skew"
+- waitForAnimationToEnd
+
+# Back to home
+- tapOn:
+    id: "tab-home"
+- assertVisible:
+    id: "axiom-header"

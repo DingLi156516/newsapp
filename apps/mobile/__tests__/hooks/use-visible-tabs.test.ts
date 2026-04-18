@@ -25,4 +25,11 @@ describe('useVisibleTabs', () => {
     const { result } = renderHook(() => useVisibleTabs([]))
     expect(result.current.visibleTabs.length).toBeGreaterThan(0)
   })
+
+  it('excludes blindspot from the in-feed tab bar even when saved in config', () => {
+    const feeds: UnifiedTab[] = ['trending', 'blindspot', 'latest']
+    const { result } = renderHook(() => useVisibleTabs(feeds))
+    expect(result.current.visibleTabs).not.toContain('blindspot')
+    expect(result.current.visibleTabs).toEqual(['trending', 'latest'])
+  })
 })

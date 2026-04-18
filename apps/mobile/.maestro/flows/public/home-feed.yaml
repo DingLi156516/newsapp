@@ -27,17 +27,15 @@ appId: host.exp.Exponent
 - assertVisible:
     id: "search-input"
 
-# Verify feed tabs
+# Verify feed tabs (Blindspot is a dedicated bottom-nav tab now, not in this bar)
 - assertVisible:
     id: "feed-tab-trending"
 - assertVisible:
     id: "feed-tab-latest"
 - assertVisible:
-    id: "feed-tab-blindspot"
-- assertVisible:
-    id: "feed-tab-saved"
-- assertVisible:
     id: "feed-tab-for-you"
+- assertVisible:
+    id: "tab-blindspot"
 
 # Verify stats row
 - assertVisible:
@@ -63,8 +61,6 @@ appId: host.exp.Exponent
 # Switch tabs
 - tapOn:
     id: "feed-tab-latest"
-- tapOn:
-    id: "feed-tab-blindspot"
 - tapOn:
     id: "feed-tab-trending"
 

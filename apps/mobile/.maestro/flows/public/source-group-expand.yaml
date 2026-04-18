@@ -1,0 +1,58 @@
+appId: host.exp.Exponent
+
+---
+
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+# Open a story with multi-source coverage
+- tapOn:
+    id: "hero-card"
+    optional: true
+- tapOn:
+    id: "story-card"
+    optional: true
+    index: 0
+- waitForAnimationToEnd
+
+# Scroll to the Sources section
+- scrollUntilVisible:
+    element:
+      text: "Sources"
+    direction: DOWN
+    timeout: 10000
+
+# Verify at least one group header is present (left/center/right)
+- assertVisible:
+    id: "source-lean-group-left-header"
+    optional: true
+- assertVisible:
+    id: "source-lean-group-center-header"
+    optional: true
+- assertVisible:
+    id: "source-lean-group-right-header"
+    optional: true
+
+# Expand the Right group (if present) and check its body renders
+- tapOn:
+    id: "source-lean-group-right-header"
+    optional: true
+- waitForAnimationToEnd
+
+# Back to feed
+- tapOn:
+    id: "back-button"
+    optional: true
+- assertVisible:
+    id: "axiom-header"

@@ -57,7 +57,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 const SplashScreen = require('expo-splash-screen') as typeof import('expo-splash-screen')
 const hideAsyncSpy = jest
   .spyOn(SplashScreen, 'hideAsync')
-  .mockImplementation(() => Promise.resolve(true))
+  .mockImplementation(() => Promise.resolve())
 
 import { act, render, waitFor } from '@testing-library/react-native'
 import {
