@@ -1,6 +1,14 @@
 # Mobile Design System — "Editorial Glass"
 
-Design system spec for the Axiom News mobile app (`apps/mobile/`). This document is a **blueprint**: it defines tokens, primitives, and per-tab polish moves. No code under `apps/mobile/lib/ui/` has been written yet — this doc is what a future implementation session executes against.
+Design system reference for the Axiom News mobile app (`apps/mobile/`). Documents the tokens, primitives, and per-tab polish that make up the shipped UI kit at `apps/mobile/lib/ui/`.
+
+> **Status: shipped.** Migration landed across four commits on `main`:
+> - Tokens + primitives + Home/Sources adoption → `f584984a`
+> - Blindspot tab adoption → `80f1240e`
+> - Profile tab adoption → `56b38cf7`
+> - Retire `design.ts` back-compat shims → `50d16965`
+>
+> Source of truth for code is [`apps/mobile/lib/ui/`](../apps/mobile/lib/ui). This doc captures the *why* (aesthetic rationale, design decisions, per-tab polish moves) that the TypeScript interfaces don't express.
 
 > Scope: portable internal module at `apps/mobile/lib/ui/`. Zero leakage — tokens have no imports from `lib/shared/theme/`; primitives consume `useTheme()` for colors only and tokens for everything else. Copy-pasteable into another Expo app with a one-line theme-import swap.
 
@@ -515,86 +523,77 @@ Existing `components/molecules/CollapsibleSection.tsx` — relocated. Adopted on
 
 ---
 
-## 5. Per-tab polish brief
+## 5. Per-tab polish
 
-Each tab has two layers: **(a)** mechanical swaps — replace inline styles with primitives (low-risk, files shrink ~30–40%), **(b)** opinionated polish — specific hierarchy/UX moves aligned with Editorial Glass.
+Each tab landed two layers of change: **(a)** mechanical — replace inline styles with primitives (files shrank 30–40%), **(b)** opinionated — specific hierarchy/UX moves aligned with Editorial Glass.
 
 ### 5.1 Home — [`app/(tabs)/index.tsx`](../apps/mobile/app/(tabs)/index.tsx)
 
-**(a) Mechanical**
-- Header row (lines 228–255) → `<ScreenHeader title="Axiom" leading={<OfflineIndicator />} trailing={[guideIconButton, editFeedIconButton]} />`
-- Card entry (line 198) → `entering={ENTRY_PRESETS.staggered(index)}`
+**Mechanical — shipped**
+- [x] Header row → `<ScreenHeader title="Axiom" leading={<OfflineIndicator />} trailing={[guideIconButton, editFeedIconButton]} />`
+- [x] Card entry → `entering={ENTRY_PRESETS.staggered(index)}`
 
-**(b) Opinionated polish**
-- **Bold display title.** "Axiom" 24pt → 30pt DM Serif Display tracked -0.5 via `<Heading variant="display">`.
-- **Editorial hero.** Replace current `HeroCard` with new `EditorialHeroCard` component in `components/organisms/`: 2:3 aspect image (not 16:9), 32pt headline (`<Heading variant="hero">`), single-line byline (source logo · relative time · factuality dot), `SPACING.lg` breathing room above the grid.
-- **Tabs vs tags hierarchy.** `UnifiedTabBar` + promoted-tag row currently competes — two equal-weight pill rows. Proposal: keep tabs at current weight, drop promoted tags to `<Text variant="small" tone="tertiary">` with no pill bg and a subtle `INK_TINT.subtle` chip when active. Promoted tags read as *filters on the feed*, not *alternate navigation*.
-- **Guide icon relocation** (deferred to Phase 3): move `BookOpen` out of the header; render as a floating action button on first-run / empty states only.
+**Opinionated — shipped**
+- [x] "Axiom" 24pt → 30pt DM Serif Display tracked -0.5 via `<Heading variant="display">`.
+- [x] `EditorialHeroCard` organism replacing `HeroCard` on position 0: 2:3 aspect image, 32pt headline, single-line byline, `ENTRY_PRESETS.heroFade`.
+- [x] Tabs-vs-tags hierarchy rebalanced: `UnifiedTabBar` keeps its weight; promoted tags drop to 11pt with `INK_TINT.subtle` bg when active.
+- [ ] Guide icon relocation to first-run/empty state FAB — **deferred**, still in the header.
 
 ### 5.2 Sources — [`app/(tabs)/sources.tsx`](../apps/mobile/app/(tabs)/sources.tsx)
 
-**(a) Mechanical**
-- Header (lines 150–166) → `<ScreenHeader title="Sources" trailing={[<IconButton icon={SlidersHorizontal} badge={activeFilterCount} onPress={openFilters} accessibilityLabel="Filters" />]} />`
-- Sort-mode row (lines 176–201) → `<SegmentedControl value={sortMode} onChange={setSortMode} options={[{value:'name',label:'A–Z'},{value:'bias',label:'Bias'},{value:'factuality',label:'Factuality'}]} />`
-- Active filter chips (line 208–219) → `<Pill dismissible onPress={clear} />` (removes `ActiveChip` local component)
-- Filter-sheet pill rows (lines 316–360) → `<Pill active={selected === item} />` (removes `FilterPillRow` local component)
-- Source card (lines 108–126) → `<Surface variant="glassSm" accent={BIAS_COLOR[item.bias]} elevation="sm">`
+**Mechanical — shipped**
+- [x] Header → `<ScreenHeader title="Sources" trailing={[<IconButton icon={SlidersHorizontal} badge={activeFilterCount} ... />]} />`
+- [x] Sort-mode row → `<SegmentedControl value={sortMode} onChange={setSortMode} options=[A-Z / Bias / Factuality] />`
+- [x] Active filter chips → `<Pill dismissible />` (removed the local `ActiveChip`).
+- [x] Filter-sheet pill rows → `<Pill active />` (removed the local `FilterPillRow`).
+- [x] Source card → `<Surface variant="glassSm" accent={BIAS_COLOR[item.bias]} elevation="sm">`.
 
-**(b) Opinionated polish**
-- **Grouping when sort = Bias or Factuality.** Today sorting re-orders a flat list with no visual break. Add sticky `<Section label="FAR-LEFT">` headers between groups. A 50-source list becomes scannable.
-- **Source card hierarchy.** Current stack (name / bias+factuality / URL) has equal visual weight. Proposal: name at `<Text variant="heading">`, bias pill + factuality bar inline below, URL collapsed to bare host (`nytimes.com` not full URL) at `<Text variant="small" tone="muted">`. Logo 42→48 for better balance.
-- **Filter sheet warmer framing.** Add one-line subtitle under "Filters" heading: "Narrow down by bias, factuality, ownership, region." via `<Text variant="caption" tone="tertiary">`.
+**Opinionated — shipped**
+- [x] Grouping when sort = Bias or Factuality: sticky `<Section>` header rows inserted between groups via a `ListRow` union (`{kind:'header'} | {kind:'source'}`).
+- [x] Source card hierarchy: name at `<Text variant="heading">`, bias + factuality inline, URL collapsed to bare host via a `barehost` helper, logo 42 → 48.
+- [x] Filter-sheet warmer framing: one-line subtitle under the "Filters" heading.
 
-### 5.3 Blindspot — [`app/(tabs)/blindspot.tsx`](../apps/mobile/app/(tabs)/blindspot.tsx)
+### 5.3 Blindspot — [`app/(tabs)/blindspot.tsx`](../apps/mobile/app/(tabs)/blindspot.tsx) — canonical `ScreenHeader` reference
 
-Already closest to the target aesthetic — becomes the canonical `ScreenHeader` reference.
+**Mechanical — shipped**
+- [x] Header → `<ScreenHeader title="Blindspot" subtitle="..." leading={<Eye size={22} ... />} titleTestID="blindspot-header" />`
+- [x] Filter pills → `<Pill>` × 5.
 
-**(a) Mechanical**
-- Header (lines 193–206) → `<ScreenHeader title="Blindspot" subtitle="Stories under-covered on one side of the political spectrum." leading={<Eye size={22} color={theme.text.primary} />} />`
-- Filter pills (lines 209–234) → `<Pill>` × 5
+**Opinionated — shipped**
+- [x] "Under-covered" as a card footer band: `NexusCard` extended with `footerBand?: { label; tone: 'warning' | 'info' }`. Blindspot feeds `skewFooterBand(article)` into every card — warning tint for right-skew, info tint for left-skew.
+- [x] Filter taxonomy split with a vertical `<Divider />` between skew pills (All / Right-skew / Left-skew) and topic pills (Politics / Tech) — signals two independent filter dimensions.
 
-**(b) Opinionated polish**
-- **"Under-covered" as card footer band.** Today the skew copy renders as a caption below the card ([blindspot.tsx:180](../apps/mobile/app/(tabs)/blindspot.tsx)) — reads orphaned. Move inside the card as a thin colored-band footer: `theme.semantic.warning.bg` for right-skew, `theme.semantic.info.bg` for left-skew, with skew copy + arrow icon. Requires extending `NexusCard` with `footerBand?: { label: string; tone: 'warning' | 'info' }` — cross-tab benefit.
-- **Filter row taxonomy split.** Current row mixes skew (Right-skew/Left-skew) with topic (Politics/Tech) in one pill group. Insert a vertical `<Divider orientation="vertical" />` between skew and topic pills to signal two independent filter dimensions. Alternative (more structural): two stacked `<SegmentedControl>`s.
+### 5.4 Profile — [`app/(tabs)/profile.tsx`](../apps/mobile/app/(tabs)/profile.tsx) — dashboard refit
 
-### 5.4 Profile — [`app/(tabs)/profile.tsx`](../apps/mobile/app/(tabs)/profile.tsx)
+**Mechanical — shipped**
+- [x] Header → `<ScreenHeader title="Dashboard" subtitle={user?.email ?? 'Guest'} trailing={[<IconButton icon={Settings} ... />]} />`
+- [x] Every inline `sectionLabel` → `<Section label="…">`.
+- [x] Stat row → `<StatCard>` × 3. Blindspots card keeps its warning glow + accent when count > 0.
+- [x] Sign-out → `<Button variant="destructive" icon={LogOut} fullWidth>Sign Out</Button>`.
+- [x] Sign-in CTA → `<Surface>` containing `<Heading variant="title">` + `<Button variant="primary" icon={LogIn}>Sign In</Button>`.
 
-Longest polish opportunity — dashboard with 8+ stacked sections.
-
-**(a) Mechanical**
-- Header (lines 46–58) → `<ScreenHeader title="Dashboard" subtitle={user?.email ?? 'Guest'} trailing={[<IconButton icon={Settings} onPress={() => router.push('/settings')} accessibilityLabel="Settings" />]} />`
-- Each inline `sectionLabel` (line 38) → `<Section label="…">` wrapping the following block
-- Stat row (lines 111–124) → `<StatCard value={...} label="…" />` × 3
-- Sign-out button (lines 305–322) → `<Button variant="destructive" icon={LogOut}>Sign Out</Button>`
-- Sign-in CTA card (lines 326–361) → `<Surface><Heading variant="title">Unlock Bias Calibration</Heading><Button variant="primary" icon={LogIn}>Sign In</Button></Surface>`
-
-**(b) Opinionated polish**
-- **Quick-action differentiation.** Three identical glass pills (History / Saved / Guide) — give each a distinctive icon tone: History `tone="tertiary"`, Saved `tone="primary"`, Guide `tone="accent"` (semantic.info). Scannable.
-- **Extract `BiasDistributionList` molecule.** The 7-bar breakdown block ([profile.tsx:178–221](../apps/mobile/app/(tabs)/profile.tsx)) is ~100 lines inline. Pull into `components/molecules/BiasDistributionList.tsx` taking `userDistribution` + `overallDistribution` + `blindspots`. Cross-app benefit — the web app renders the same chart.
-- **Collapsible dense sections.** Wrap "Detailed Breakdown" (default open) and "Suggested For You" (default closed) in `<CollapsibleSection>`. Dashboard stays glanceable; details on tap.
-- **Visual rhythm.** Add `gap: SPACING.lg` between top-level blocks in the root `ScrollView`: banner → stats → chart → breakdown → blindspots → suggestions → sign-out. Small change, big readability win.
+**Opinionated — shipped**
+- [x] Quick-action differentiation — each destination keeps its own icon tone: History `text.tertiary`, Saved `text.primary`, Guide `semantic.info.color`.
+- [x] Extracted `BiasDistributionList` molecule (7-bar user-vs-overall breakdown with blindspot highlighting) to [`components/molecules/BiasDistributionList.tsx`](../apps/mobile/components/molecules/BiasDistributionList.tsx).
+- [x] Collapsibles: "Detailed Breakdown" wrapped in `<CollapsibleSection defaultExpanded>`; "Suggested For You" in a closed-by-default `<CollapsibleSection>` with a subtitle.
+- [x] Visual rhythm — top-level `gap: SPACING.lg` between blocks.
 
 ---
 
-## 6. Migration — from `design.ts` to primitives
+## 6. `design.ts` — final state after migration
 
-Current `lib/shared/design.ts` ([file](../apps/mobile/lib/shared/design.ts)) exports a mix of live and deprecated tokens:
+[`lib/shared/design.ts`](../apps/mobile/lib/shared/design.ts) is now a thin source-compat re-export plus the tokens that don't need a theme. The deprecated shims were removed in commit `50d16965`.
 
-| Current export | Migration target |
+| Export | Status |
 |---|---|
-| `SPACING` | → `lib/ui/tokens/spacing.ts` (same values, re-exported) |
-| `BORDER_RADIUS` | → `lib/ui/tokens/radius.ts` as `RADIUS` (rename + adds `xxl`) |
-| `FONT` | → folded into `lib/ui/tokens/typography.ts` `TEXT_STYLES` |
-| `BADGE` | → folded into `TEXT_STYLES.badge` + `RADIUS.pill` |
-| `FACTUALITY` | unchanged — stays in `lib/shared/types.ts` (domain data, theme-invariant) |
-| `ANIMATION` | → `lib/ui/tokens/motion.ts` (`SPRING`, `DURATION`) |
-| `TOUCH_TARGET` | → `lib/ui/tokens/touch.ts` |
-| `GLASS` (deprecated) | → remove. Use `useTheme().surface.*` directly. |
-| `SEMANTIC` (deprecated) | → remove. Use `useTheme().semantic.*` directly. |
-| `TEXT_OPACITY` (deprecated) | → replaced by `INK_TINT` + `useTheme().text.*` |
-| `ACCENT` (deprecated) | → remove. Use `useTheme().semantic.warning/error`. |
+| `SPACING` | Re-exported from `lib/ui/tokens/spacing.ts`. |
+| `BORDER_RADIUS` | Re-exported as `RADIUS` from `lib/ui/tokens/radius.ts` (adds `xxl`). |
+| `TOUCH_TARGET` | Re-exported from `lib/ui/tokens/touch.ts`. |
+| `FONT`, `BADGE`, `FACTUALITY`, `ANIMATION` | Kept — still have active consumers; not part of the Editorial Glass token set. |
+| `SITE_URL` | Kept — runtime config. |
+| `GLASS`, `SEMANTIC`, `TEXT_OPACITY`, `ACCENT` | **Removed.** Call sites consume `useTheme().surface/text/semantic.*` or `INK_TINT` directly. |
 
-**Strategy**: Phase 1 PR re-exports new tokens from old paths (non-breaking). Phase 3 PRs migrate each tab. Final PR deletes deprecated aliases.
+New code should import from `@/lib/ui` (primitives, composed, tokens) — not `@/lib/shared/design`.
 
 ---
 
@@ -622,40 +621,36 @@ Anything else (spacing, typography, radii, motion, elevation, ink-tint) is self-
 
 ---
 
-## 8. Open questions / decisions deferred to implementation
+## 8. Follow-ups / deferred
 
-1. **`EditorialHeroCard` — new component or `HeroCard` refactor?** Spec prefers new component so existing `HeroCard` remains available for non-feed contexts. Decide at Phase 3.
-2. **`NexusCard` `footerBand` prop.** Clean extension for Blindspot's under-covered band. Decide whether to generalize or scope to blindspot-only.
-3. **`Pill` vs `Chip` naming.** Using `Pill` for consistency with `glass-pill`. Some teams prefer `Chip` (Material convention). Team preference.
-4. **Paper-theme grain bump (0.10 → 0.18).** Aesthetic call — preview on device before committing.
-5. **Grouping in Sources.** Sticky section headers add visual weight. If they feel heavy on small screens, fall back to a subtle inline divider.
+- **Guide icon relocation** (Home §5.1) — not yet moved to an empty-state FAB; `BookOpen` still lives in the header.
+- **Paper-theme grain bump (0.10 → 0.18)** — not yet applied; tracked separately.
 
 ---
 
-## 9. Execution plan
+## 9. How the migration rolled out
 
-Seven PRs, each independently shippable, each ≤300 diff lines:
+Shipped over four commits on `main`:
 
-| PR | Scope | Breaking? |
-|----|-------|-----------|
-| 1 | `lib/ui/tokens/` + re-exports from `design.ts` | No |
-| 2 | `lib/ui/primitives/` + `lib/ui/composed/` + dev showcase screen (`app/_dev/ui.tsx`, `__DEV__` only) | No |
-| 3 | Home tab refactor (includes `EditorialHeroCard`) | Visual change |
-| 4 | Sources tab refactor (includes grouping when sort=Bias) | Visual change |
-| 5 | Blindspot tab refactor (includes card-footer band, `NexusCard` extension) | Visual change |
-| 6 | Profile tab refactor (extracts `BiasDistributionList`, adds collapsibles) | Visual change |
-| 7 | Remove deprecated `design.ts` aliases (`GLASS`, `SEMANTIC`, `TEXT_OPACITY`, `ACCENT`) | Clean-up |
+| Commit | Scope |
+|--------|-------|
+| `f584984a` | Tokens + primitives + Home + Sources adoption (was Phases 1–4). |
+| `80f1240e` | Blindspot tab + `NexusCard.footerBand` extension (was Phase 5). |
+| `56b38cf7` | Profile tab + `BiasDistributionList` extraction (was Phase 6). |
+| `50d16965` | Remove deprecated `design.ts` aliases (`GLASS`, `SEMANTIC`, `TEXT_OPACITY`, `ACCENT`) (was Phase 7). |
 
-Each PR gates on: `npm run lint`, `npm run typecheck`, `npm test` (≥80% coverage on new files), and Maestro E2E for the refactored tab. Visual regressions verified by manual screenshot diff and the dev showcase screen in both themes.
+Each commit passed `tsc --noEmit`, full Jest suite, and an independent Codex adversarial review (zero remaining P1/P2 findings).
 
 ---
 
 ## 10. References
 
-- [apps/mobile/lib/shared/design.ts](../apps/mobile/lib/shared/design.ts) — current token source
-- [apps/mobile/lib/shared/theme/types.ts](../apps/mobile/lib/shared/theme/types.ts) — theme contract (unchanged)
-- [apps/mobile/lib/shared/theme/paper.ts](../apps/mobile/lib/shared/theme/paper.ts) — paper theme (grain bump target)
-- [apps/mobile/components/ui/GlassView.tsx](../apps/mobile/components/ui/GlassView.tsx) — wrapped by `Surface`
-- [apps/mobile/components/atoms/AnimatedCounter.tsx](../apps/mobile/components/atoms/AnimatedCounter.tsx) — reused inside `StatCard`
-- [docs/mobile-components.md](mobile-components.md) — current component inventory (to be updated after Phase 2)
-- [docs/mobile-architecture.md](mobile-architecture.md) — architecture (to be updated after Phase 1)
+- [apps/mobile/lib/ui/](../apps/mobile/lib/ui) — canonical source for tokens, primitives, composed.
+- [apps/mobile/lib/shared/design.ts](../apps/mobile/lib/shared/design.ts) — source-compat re-exports + legacy FONT/BADGE/FACTUALITY/ANIMATION constants.
+- [apps/mobile/lib/shared/theme/types.ts](../apps/mobile/lib/shared/theme/types.ts) — theme contract consumed by `Surface` / `Text` / `Pill`.
+- [apps/mobile/lib/shared/theme/paper.ts](../apps/mobile/lib/shared/theme/paper.ts) — paper theme.
+- [apps/mobile/components/ui/GlassView.tsx](../apps/mobile/components/ui/GlassView.tsx) — wrapped by `Surface`.
+- [apps/mobile/components/atoms/AnimatedCounter.tsx](../apps/mobile/components/atoms/AnimatedCounter.tsx) — reused inside `StatCard`.
+- [apps/mobile/components/molecules/BiasDistributionList.tsx](../apps/mobile/components/molecules/BiasDistributionList.tsx) — extracted from Profile in commit `56b38cf7`.
+- [docs/mobile-components.md](mobile-components.md) — component inventory.
+- [docs/mobile-architecture.md](mobile-architecture.md) — mobile architecture.

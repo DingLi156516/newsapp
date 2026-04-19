@@ -33,6 +33,10 @@ coverage/
 .superpowers/
 docs/superpowers/
 
+# claude code per-session state
+.claude/plans/
+.claude/settings.local.json
+
 # typescript build cache
 *.tsbuildinfo
 

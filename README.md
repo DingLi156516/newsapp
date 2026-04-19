@@ -92,7 +92,7 @@ npm run android
 | `docs/mobile-architecture.md` | Screens, navigation, hooks, auth flow, API integration |
 | `docs/mobile-components.md` | Component inventory with props |
 | `docs/mobile-testing.md` | Jest + Maestro setup, testID conventions |
-| `docs/mobile-app-plan.md` | 5-phase development roadmap |
+| `docs/mobile-design-system.md` | Editorial Glass tokens, primitives, per-tab polish |
 
 ---
 
