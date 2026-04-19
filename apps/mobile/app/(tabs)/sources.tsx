@@ -4,7 +4,7 @@
  */
 
 import { useState, useCallback, useMemo, useRef } from 'react'
-import { View, Text, FlatList, Pressable, ScrollView } from 'react-native'
+import { View, FlatList, Pressable, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet'
@@ -25,13 +25,25 @@ import {
 import { SearchBar } from '@/components/organisms/SearchBar'
 import { SourceLogo } from '@/components/atoms/SourceLogo'
 import { FactualityBar } from '@/components/atoms/FactualityBar'
-import { GlassView } from '@/components/ui/GlassView'
 import { SlidersHorizontal, X } from 'lucide-react-native'
 import { NetworkErrorView } from '@/components/molecules/NetworkErrorView'
 import { EmptyStateView } from '@/components/molecules/EmptyStateView'
-import { hapticLight } from '@/lib/haptics'
-import { TOUCH_TARGET } from '@/lib/shared/design'
 import { useTheme } from '@/lib/shared/theme'
+import {
+  Text,
+  Heading,
+  Pill,
+  Button,
+  IconButton,
+  Surface,
+  ScreenHeader,
+  Section,
+  SegmentedControl,
+  INK_TINT,
+  RADIUS,
+  SPACING,
+  TOUCH_TARGET,
+} from '@/lib/ui'
 
 type SortMode = 'name' | 'bias' | 'factuality'
 
@@ -80,12 +92,24 @@ export default function SourcesScreen() {
   }, [sources, sortMode])
 
   const openFilters = useCallback(() => {
-    hapticLight()
     bottomSheetRef.current?.snapToIndex(0)
   }, [])
 
   const closeFilters = useCallback(() => {
     bottomSheetRef.current?.close()
+  }, [])
+
+  const clearAllFilters = useCallback(() => {
+    setBiasFilter(null)
+    setFactualityFilter(null)
+    setOwnershipFilter(null)
+    setRegionFilter(null)
+  }, [])
+
+  const barehost = useCallback((url: string) => {
+    const stripped = url.replace(/^https?:\/\//, '').replace(/^www\./, '')
+    const slashIndex = stripped.indexOf('/')
+    return slashIndex >= 0 ? stripped.slice(0, slashIndex) : stripped
   }, [])
 
   const renderBackdrop = useCallback(
@@ -105,40 +129,100 @@ export default function SourcesScreen() {
         }}
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
       >
-        <GlassView variant="sm" style={{ padding: 14, marginHorizontal: 16, marginVertical: 4, borderLeftWidth: 3, borderLeftColor: color }}>
-          <View style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
-            <SourceLogo domain={item.url} name={item.name} bias={item.bias} size={42} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: theme.text.primary, marginBottom: 3 }}>
-                {item.name}
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
-                <View style={{ backgroundColor: `${color}33`, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 99 }}>
-                  <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 10, color }}>{BIAS_LABELS[item.bias]}</Text>
+        <Surface
+          variant="glassSm"
+          elevation="sm"
+          accent={color}
+          style={{
+            padding: SPACING.md + 2,
+            marginHorizontal: SPACING.lg,
+            marginVertical: SPACING.xs,
+          }}
+        >
+          <View style={{ flexDirection: 'row', gap: SPACING.md, alignItems: 'flex-start' }}>
+            <SourceLogo domain={item.url} name={item.name} bias={item.bias} size={48} />
+            <View style={{ flex: 1, gap: SPACING.xs }}>
+              <Text variant="heading">{item.name}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, flexWrap: 'wrap' }}>
+                <View
+                  style={{
+                    backgroundColor: `${color}33`,
+                    paddingHorizontal: SPACING.sm,
+                    paddingVertical: 2,
+                    borderRadius: RADIUS.pill,
+                  }}
+                >
+                  <Text variant="badge" style={{ color }}>
+                    {BIAS_LABELS[item.bias]}
+                  </Text>
                 </View>
                 <FactualityBar level={item.factuality} size="compact" showLabel />
               </View>
-              <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.muted }}>
-                {item.url}
-              </Text>
+              {item.url && (
+                <Text variant="small" tone="muted">
+                  {barehost(item.url)}
+                </Text>
+              )}
             </View>
           </View>
-        </GlassView>
+        </Surface>
       </Pressable>
     )
-  }, [theme])
+  }, [router, barehost])
+
+  type ListRow =
+    | { readonly kind: 'header'; readonly label: string }
+    | { readonly kind: 'source'; readonly source: NewsSource }
+
+  const listData = useMemo<readonly ListRow[]>(() => {
+    if (sortMode === 'name') {
+      return sorted.map((source) => ({ kind: 'source' as const, source }))
+    }
+    const rows: ListRow[] = []
+    let lastGroup: string | null = null
+    for (const source of sorted) {
+      const group = sortMode === 'bias' ? BIAS_LABELS[source.bias] : FACTUALITY_LABELS[source.factuality]
+      if (group !== lastGroup) {
+        rows.push({ kind: 'header', label: group })
+        lastGroup = group
+      }
+      rows.push({ kind: 'source', source })
+    }
+    return rows
+  }, [sortMode, sorted])
+
+  const renderRow = useCallback(
+    ({ item }: { item: ListRow }) => {
+      if (item.kind === 'header') {
+        return (
+          <View style={{ paddingHorizontal: SPACING.lg, paddingTop: SPACING.md, paddingBottom: SPACING.xs }}>
+            <Text variant="overline" tone="muted">
+              {item.label}
+            </Text>
+          </View>
+        )
+      }
+      return renderSource({ item: item.source })
+    },
+    [renderSource],
+  )
 
   const SkeletonCards = useMemo(() => (
-    <View style={{ paddingHorizontal: 16, gap: 8 }}>
+    <View style={{ paddingHorizontal: SPACING.lg, gap: SPACING.sm }}>
       {Array.from({ length: 5 }, (_, i) => (
-        <GlassView key={i} variant="sm" style={{ padding: 14, flexDirection: 'row', gap: 12 }}>
-          <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: theme.semantic.muted.bg }} />
-          <View style={{ flex: 1, gap: 6 }}>
+        <Surface
+          key={i}
+          variant="glassSm"
+          elevation="sm"
+          style={{ padding: SPACING.md + 2, flexDirection: 'row', gap: SPACING.md }}
+        >
+          <View style={{ width: 48, height: 48, borderRadius: RADIUS.md, backgroundColor: theme.semantic.muted.bg }} />
+          <View style={{ flex: 1, gap: SPACING.xs + 2 }}>
             <View style={{ height: 12, borderRadius: 6, backgroundColor: theme.semantic.muted.bg, width: '60%' }} />
-            <View style={{ height: 10, borderRadius: 5, backgroundColor: `rgba(${theme.inkRgb}, 0.03)`, width: '40%' }} />
-            <View style={{ height: 10, borderRadius: 5, backgroundColor: `rgba(${theme.inkRgb}, 0.03)`, width: '70%' }} />
+            <View style={{ height: 10, borderRadius: 5, backgroundColor: `rgba(${theme.inkRgb}, ${INK_TINT.whisper})`, width: '40%' }} />
+            <View style={{ height: 10, borderRadius: 5, backgroundColor: `rgba(${theme.inkRgb}, ${INK_TINT.whisper})`, width: '70%' }} />
           </View>
-        </GlassView>
+        </Surface>
       ))}
     </View>
   ), [theme])
@@ -146,91 +230,75 @@ export default function SourcesScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background }} edges={['top']}>
       {/* Sticky header */}
-      <View style={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, gap: 10 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: theme.text.primary }}>Sources</Text>
-          <Pressable
-            onPress={openFilters}
-            hitSlop={TOUCH_TARGET.hitSlop}
-            accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: theme.surface.glassPill, borderWidth: 0.5, borderColor: theme.surface.borderPill, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 }}
-          >
-            <SlidersHorizontal size={14} color={theme.text.secondary} />
-            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.secondary }}>Filters</Text>
-            {activeFilterCount > 0 && (
-              <View style={{ backgroundColor: `rgba(${theme.inkRgb}, 0.15)`, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 99 }}>
-                <Text style={{ fontFamily: 'Inter-Bold', fontSize: 10, color: theme.text.primary }}>{activeFilterCount}</Text>
-              </View>
-            )}
-          </Pressable>
-        </View>
-
-        <SearchBar
-          value={search}
-          onChange={setSearch}
-          onClear={() => setSearch('')}
-          placeholder="Search sources..."
+      <View style={{ paddingTop: SPACING.sm, paddingBottom: SPACING.sm, gap: SPACING.sm + 2 }}>
+        <ScreenHeader
+          title="Sources"
+          trailing={[
+            <IconButton
+              key="filters"
+              icon={SlidersHorizontal}
+              onPress={openFilters}
+              accessibilityLabel={`Filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+              badge={activeFilterCount > 0 ? activeFilterCount : undefined}
+            />,
+          ]}
         />
 
-        {/* Sort pills */}
-        <View testID="sort-row" style={{ flexDirection: 'row', gap: 6 }}>
-          {(['name', 'bias', 'factuality'] as const).map((mode) => {
-            const isActive = sortMode === mode
-            const label = mode === 'name' ? 'A-Z' : mode === 'bias' ? 'Bias' : 'Factuality'
-            return (
-              <Pressable
-                key={mode}
-                testID={`sort-${mode}`}
-                onPress={() => { hapticLight(); setSortMode(mode) }}
-              >
-                <View style={{
-                  backgroundColor: isActive ? `rgba(${theme.inkRgb}, 0.1)` : 'transparent',
-                  borderWidth: 0.5,
-                  borderColor: isActive ? theme.surface.borderPill : theme.surface.border,
-                  borderRadius: 99,
-                  paddingHorizontal: 14,
-                  paddingVertical: 5,
-                }}>
-                  <Text style={{ fontFamily: 'Inter', fontSize: 12, color: isActive ? theme.text.primary : theme.text.tertiary }}>
-                    {label}
-                  </Text>
-                </View>
-              </Pressable>
-            )
-          })}
+        <View style={{ paddingHorizontal: SPACING.lg }}>
+          <SearchBar
+            value={search}
+            onChange={setSearch}
+            onClear={() => setSearch('')}
+            placeholder="Search sources..."
+          />
+        </View>
+
+        <View style={{ paddingHorizontal: SPACING.lg }}>
+          <SegmentedControl
+            testID="sort"
+            value={sortMode}
+            onChange={setSortMode}
+            options={[
+              { value: 'name', label: 'A-Z' },
+              { value: 'bias', label: 'Bias' },
+              { value: 'factuality', label: 'Factuality' },
+            ]}
+          />
         </View>
 
         {/* Active filter chips + source count */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.xs + 2, flexWrap: 'wrap', paddingHorizontal: SPACING.lg }}>
+          <Text variant="caption" tone="tertiary">
             {sorted.length} source{sorted.length !== 1 ? 's' : ''}
           </Text>
           {biasFilter && (
-            <ActiveChip label={BIAS_LABELS[biasFilter]} onDismiss={() => setBiasFilter(null)} />
+            <Pill label={BIAS_LABELS[biasFilter]} dismissible onPress={() => setBiasFilter(null)} />
           )}
           {factualityFilter && (
-            <ActiveChip label={FACTUALITY_LABELS[factualityFilter]} onDismiss={() => setFactualityFilter(null)} />
+            <Pill label={FACTUALITY_LABELS[factualityFilter]} dismissible onPress={() => setFactualityFilter(null)} />
           )}
           {ownershipFilter && (
-            <ActiveChip label={OWNERSHIP_LABELS[ownershipFilter]} onDismiss={() => setOwnershipFilter(null)} />
+            <Pill label={OWNERSHIP_LABELS[ownershipFilter]} dismissible onPress={() => setOwnershipFilter(null)} />
           )}
           {regionFilter && (
-            <ActiveChip label={REGION_LABELS[regionFilter]} onDismiss={() => setRegionFilter(null)} />
+            <Pill label={REGION_LABELS[regionFilter]} dismissible onPress={() => setRegionFilter(null)} />
           )}
         </View>
       </View>
 
       {/* Source list */}
       <FlatList
-        data={sorted}
-        renderItem={renderSource}
-        keyExtractor={(item) => item.id}
+        data={listData}
+        renderItem={renderRow}
+        keyExtractor={(item) =>
+          item.kind === 'header' ? `h:${item.label}` : item.source.id
+        }
         ListEmptyComponent={
           isError
             ? <NetworkErrorView onRetry={() => mutate()} />
             : isLoading
               ? SkeletonCards
-              : <EmptyStateView icon="search" title="No Matches" message="No sources match your current filters." actionLabel="Clear Filters" onAction={() => { setBiasFilter(null); setFactualityFilter(null); setOwnershipFilter(null); setRegionFilter(null); setSearch('') }} />
+              : <EmptyStateView icon="search" title="No Matches" message="No sources match your current filters." actionLabel="Clear Filters" onAction={() => { clearAllFilters(); setSearch('') }} />
         }
         contentContainerStyle={{ paddingBottom: 20 }}
         showsVerticalScrollIndicator={false}
@@ -246,40 +314,67 @@ export default function SourcesScreen() {
         backgroundStyle={{ backgroundColor: theme.surface.background }}
         handleIndicatorStyle={{ backgroundColor: theme.surface.borderPill, width: 36 }}
       >
-        <BottomSheetScrollView contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 40 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 22, color: theme.text.primary }}>Filters</Text>
-            <Pressable onPress={closeFilters} hitSlop={TOUCH_TARGET.hitSlop}>
+        <BottomSheetScrollView contentContainerStyle={{ padding: SPACING.xl, gap: SPACING.lg + 4, paddingBottom: 40 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: SPACING.md }}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <Heading variant="title">Filters</Heading>
+              <Text variant="caption" tone="tertiary">
+                Narrow down by bias, factuality, ownership, region.
+              </Text>
+            </View>
+            <Pressable onPress={closeFilters} hitSlop={TOUCH_TARGET.hitSlop} accessibilityLabel="Close filters">
               <X size={20} color={theme.text.tertiary} />
             </Pressable>
           </View>
 
-          <FilterSection label="BIAS">
-            <FilterPillRow items={ALL_BIASES} labels={BIAS_LABELS} selected={biasFilter} onSelect={(v) => setBiasFilter(biasFilter === v ? null : v)} onSelectAll={() => setBiasFilter(null)} allSelected={biasFilter === null} />
-          </FilterSection>
-          <FilterSection label="FACTUALITY">
-            <FilterPillRow items={ALL_FACTUALITIES} labels={FACTUALITY_LABELS} selected={factualityFilter} onSelect={(v) => setFactualityFilter(factualityFilter === v ? null : v)} onSelectAll={() => setFactualityFilter(null)} allSelected={factualityFilter === null} />
-          </FilterSection>
-          <FilterSection label="OWNERSHIP">
-            <FilterPillRow items={ALL_OWNERSHIPS} labels={OWNERSHIP_LABELS} selected={ownershipFilter} onSelect={(v) => setOwnershipFilter(ownershipFilter === v ? null : v)} onSelectAll={() => setOwnershipFilter(null)} allSelected={ownershipFilter === null} />
-          </FilterSection>
-          <FilterSection label="REGION">
-            <FilterPillRow items={ALL_REGIONS} labels={REGION_LABELS} selected={regionFilter} onSelect={(v) => setRegionFilter(regionFilter === v ? null : v)} onSelectAll={() => setRegionFilter(null)} allSelected={regionFilter === null} />
-          </FilterSection>
+          <Section label="BIAS">
+            <FilterPillRow
+              items={ALL_BIASES}
+              labels={BIAS_LABELS}
+              selected={biasFilter}
+              onSelect={(v) => setBiasFilter(biasFilter === v ? null : v)}
+              onSelectAll={() => setBiasFilter(null)}
+            />
+          </Section>
+          <Section label="FACTUALITY">
+            <FilterPillRow
+              items={ALL_FACTUALITIES}
+              labels={FACTUALITY_LABELS}
+              selected={factualityFilter}
+              onSelect={(v) => setFactualityFilter(factualityFilter === v ? null : v)}
+              onSelectAll={() => setFactualityFilter(null)}
+            />
+          </Section>
+          <Section label="OWNERSHIP">
+            <FilterPillRow
+              items={ALL_OWNERSHIPS}
+              labels={OWNERSHIP_LABELS}
+              selected={ownershipFilter}
+              onSelect={(v) => setOwnershipFilter(ownershipFilter === v ? null : v)}
+              onSelectAll={() => setOwnershipFilter(null)}
+            />
+          </Section>
+          <Section label="REGION">
+            <FilterPillRow
+              items={ALL_REGIONS}
+              labels={REGION_LABELS}
+              selected={regionFilter}
+              onSelect={(v) => setRegionFilter(regionFilter === v ? null : v)}
+              onSelectAll={() => setRegionFilter(null)}
+            />
+          </Section>
 
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <Pressable
-              onPress={() => { setBiasFilter(null); setFactualityFilter(null); setOwnershipFilter(null); setRegionFilter(null) }}
-              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: theme.semantic.muted.bg, alignItems: 'center' }}
-            >
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: theme.text.secondary }}>Clear All</Text>
-            </Pressable>
-            <Pressable
-              onPress={closeFilters}
-              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: theme.text.primary, alignItems: 'center' }}
-            >
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: theme.surface.background }}>Done</Text>
-            </Pressable>
+          <View style={{ flexDirection: 'row', gap: SPACING.md }}>
+            <View style={{ flex: 1 }}>
+              <Button variant="secondary" fullWidth onPress={clearAllFilters}>
+                Clear All
+              </Button>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button variant="primary" fullWidth onPress={closeFilters}>
+                Done
+              </Button>
+            </View>
           </View>
         </BottomSheetScrollView>
       </BottomSheet>
@@ -291,70 +386,21 @@ export default function SourcesScreen() {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function ActiveChip({ label, onDismiss }: { readonly label: string; readonly onDismiss: () => void }) {
-  const theme = useTheme()
-  return (
-    <Pressable onPress={onDismiss} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: theme.semantic.muted.bg, borderWidth: 0.5, borderColor: theme.surface.borderPill, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 }}>
-      <Text style={{ fontFamily: 'Inter', fontSize: 10, color: theme.text.secondary }}>{label}</Text>
-      <Text style={{ fontSize: 8, color: theme.text.tertiary }}>✕</Text>
-    </Pressable>
-  )
-}
-
-function FilterSection({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
-  const theme = useTheme()
-  return (
-    <View style={{ gap: 6 }}>
-      <Text style={{ fontFamily: 'Inter-Medium', fontSize: 10, color: theme.text.muted, textTransform: 'uppercase', letterSpacing: 1 }}>
-        {label}
-      </Text>
-      {children}
-    </View>
-  )
-}
-
 function FilterPillRow<T extends string>({
-  items, labels, selected, onSelect, onSelectAll, allSelected,
+  items, labels, selected, onSelect, onSelectAll,
 }: {
   readonly items: readonly T[]
   readonly labels: Record<T, string>
   readonly selected: T | null
   readonly onSelect: (v: T) => void
   readonly onSelectAll: () => void
-  readonly allSelected: boolean
 }) {
-  const theme = useTheme()
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-      <Pressable onPress={() => { hapticLight(); onSelectAll() }}>
-        <View style={{
-          backgroundColor: allSelected ? `rgba(${theme.inkRgb}, 0.1)` : 'transparent',
-          borderWidth: 0.5,
-          borderColor: allSelected ? theme.surface.borderPill : theme.surface.border,
-          borderRadius: 9999,
-          paddingHorizontal: 14,
-          paddingVertical: 6,
-        }}>
-          <Text style={{ fontFamily: 'Inter', fontSize: 13, color: allSelected ? theme.text.primary : theme.text.tertiary }}>All</Text>
-        </View>
-      </Pressable>
-      {items.map((item) => {
-        const isActive = selected === item
-        return (
-          <Pressable key={item} onPress={() => { hapticLight(); onSelect(item) }}>
-            <View style={{
-              backgroundColor: isActive ? `rgba(${theme.inkRgb}, 0.1)` : 'transparent',
-              borderWidth: 0.5,
-              borderColor: isActive ? theme.surface.borderPill : theme.surface.border,
-              borderRadius: 9999,
-              paddingHorizontal: 14,
-              paddingVertical: 6,
-            }}>
-              <Text style={{ fontFamily: 'Inter', fontSize: 13, color: isActive ? theme.text.primary : theme.text.tertiary }}>{labels[item]}</Text>
-            </View>
-          </Pressable>
-        )
-      })}
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: SPACING.xs + 2 }}>
+      <Pill label="All" active={selected === null} onPress={onSelectAll} />
+      {items.map((item) => (
+        <Pill key={item} label={labels[item]} active={selected === item} onPress={() => onSelect(item)} />
+      ))}
     </ScrollView>
   )
 }

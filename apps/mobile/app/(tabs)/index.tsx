@@ -3,8 +3,8 @@
  */
 
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { View, Text, FlatList, RefreshControl, Pressable } from 'react-native'
-import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated'
+import { View, FlatList, RefreshControl } from 'react-native'
+import Animated from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import type { NewsArticle, UnifiedTab, FeedSort, SelectedPromotedTag } from '@/lib/shared/types'
@@ -19,7 +19,7 @@ import { usePromotedTags } from '@/lib/hooks/use-promoted-tags'
 import { NexusCard } from '@/components/organisms/NexusCard'
 import { SwipeableCard } from '@/components/molecules/SwipeableCard'
 import { NexusCardSkeleton, NexusCardSkeletonList } from '@/components/organisms/NexusCardSkeleton'
-import { HeroCard } from '@/components/organisms/HeroCard'
+import { EditorialHeroCard } from '@/components/organisms/EditorialHeroCard'
 import { UnifiedTabBar } from '@/components/organisms/UnifiedTabBar'
 import { EditFeedModal } from '@/components/organisms/EditFeedModal'
 import { SearchBar } from '@/components/organisms/SearchBar'
@@ -30,11 +30,11 @@ import { PullToRefreshIndicator } from '@/components/molecules/PullToRefreshIndi
 import { OfflineIndicator } from '@/components/atoms/OfflineIndicator'
 import { Settings2, BookOpen } from 'lucide-react-native'
 import { hapticMedium } from '@/lib/haptics'
-import { TOUCH_TARGET } from '@/lib/shared/design'
 import { useToast } from '@/lib/hooks/use-toast'
 import { usePreferences } from '@/lib/hooks/use-preferences'
 import { useFeedConfig } from '@/lib/hooks/use-feed-config'
 import { useTheme } from '@/lib/shared/theme'
+import { ScreenHeader, IconButton, ENTRY_PRESETS, SPACING } from '@/lib/ui'
 
 export default function HomeFeedScreen() {
   const router = useRouter()
@@ -195,8 +195,8 @@ export default function HomeFeedScreen() {
 
   const renderItem = useCallback(({ item, index }: { item: NewsArticle; index: number }) => (
     <Animated.View
-      entering={FadeInDown.delay(Math.min(index, 8) * 60).springify().damping(18)}
-      style={{ paddingHorizontal: 16, paddingVertical: 6 }}
+      entering={ENTRY_PRESETS.staggered(index)}
+      style={{ paddingHorizontal: SPACING.lg, paddingVertical: 6 }}
     >
       <SwipeableCard
         storyId={item.id}
@@ -224,35 +224,29 @@ export default function HomeFeedScreen() {
       {/* Custom pull-to-refresh indicator */}
       {refreshing && <PullToRefreshIndicator progress={1} refreshing={refreshing} />}
 
-      {/* Header */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 16 }}>
-        <Text testID="axiom-header" style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: theme.text.primary }}>
-          Axiom
-        </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          <OfflineIndicator />
-          <Pressable
+      <ScreenHeader
+        title="Axiom"
+        titleTestID="axiom-header"
+        leading={<OfflineIndicator />}
+        trailing={[
+          <IconButton
+            key="guide"
             testID="guide-button"
+            icon={BookOpen}
+            tone="tertiary"
             onPress={() => router.push('/guide')}
-            hitSlop={TOUCH_TARGET.hitSlop}
             accessibilityLabel="Guide"
-            accessibilityRole="button"
-            style={{ minWidth: TOUCH_TARGET.min, minHeight: TOUCH_TARGET.min, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <BookOpen size={20} color={theme.text.tertiary} />
-          </Pressable>
-          <Pressable
+          />,
+          <IconButton
+            key="edit-feed"
             testID="edit-feed-button"
+            icon={Settings2}
+            tone="tertiary"
             onPress={() => setShowEditModal(true)}
-            hitSlop={TOUCH_TARGET.hitSlop}
             accessibilityLabel="Edit feed"
-            accessibilityRole="button"
-            style={{ minWidth: TOUCH_TARGET.min, minHeight: TOUCH_TARGET.min, alignItems: 'center', justifyContent: 'center' }}
-          >
-            <Settings2 size={20} color={theme.text.tertiary} />
-          </Pressable>
-        </View>
-      </View>
+          />,
+        ]}
+      />
 
       {/* Search bar — always visible */}
       <View style={{ paddingHorizontal: 16 }}>
@@ -273,15 +267,15 @@ export default function HomeFeedScreen() {
         onPromotedTagChange={setSelectedPromotedTag}
       />
 
-      {/* For You CTA or Hero card */}
-      <View style={{ paddingHorizontal: 16 }}>
+      {/* For You CTA or editorial hero */}
+      <View style={{ paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xs }}>
         {isForYou && !isAuthenticated ? (
           <ForYouCta onDismiss={() => setActiveTab('trending')} />
         ) : isCurrentlyLoading ? (
           <NexusCardSkeleton />
         ) : heroStory ? (
-          <Animated.View entering={FadeIn.duration(300)}>
-            <HeroCard
+          <Animated.View entering={ENTRY_PRESETS.heroFade}>
+            <EditorialHeroCard
               article={heroStory}
               onClick={() => router.push(`/story/${heroStory.id}`)}
               onSave={toggleWithToast}

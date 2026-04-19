@@ -10,6 +10,7 @@ import type { UnifiedTab, StoryTag, SelectedPromotedTag } from '@/lib/shared/typ
 import { getUnifiedTabLabel, TAG_TYPE_COLORS } from '@/lib/shared/types'
 import { hapticLight } from '@/lib/haptics'
 import { useTheme } from '@/lib/shared/theme'
+import { INK_TINT, RADIUS } from '@/lib/ui/tokens'
 
 interface Props {
   readonly value: UnifiedTab
@@ -151,23 +152,30 @@ export function UnifiedTabBar({ value, onChange, visibleTabs, promotedTags, sele
                     onPress={() => handlePromotedTagPress(tag)}
                     onLayout={(e) => handleLayout(key, e)}
                     style={{
-                      paddingVertical: 12,
-                      paddingHorizontal: 14,
+                      paddingVertical: 10,
+                      paddingHorizontal: 10,
+                      marginVertical: 2,
+                      marginHorizontal: 2,
                       flexDirection: 'row',
                       alignItems: 'center',
                       gap: 5,
+                      borderRadius: RADIUS.pill,
+                      backgroundColor: isActive
+                        ? `rgba(${theme.inkRgb}, ${INK_TINT.subtle})`
+                        : 'transparent',
                     }}
                   >
                     <View style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 3,
+                      width: 5,
+                      height: 5,
+                      borderRadius: 2.5,
                       backgroundColor: dotColor,
                     }} />
                     <Text
                       style={{
                         fontFamily: 'Inter',
-                        fontSize: 13,
+                        fontSize: 11,
+                        letterSpacing: 0.2,
                         color: isActive ? theme.text.primary : theme.text.tertiary,
                       }}
                     >

@@ -38,6 +38,7 @@ npm run test:e2e       # Playwright E2E tests
 | `docs/mobile-architecture.md` | Mobile app screens, navigation, hooks, auth flow, API integration |
 | `docs/mobile-components.md` | Mobile component inventory — atoms, molecules, organisms with props |
 | `docs/mobile-testing.md` | Mobile Jest + Maestro E2E setup, test files, testID conventions |
+| `docs/mobile-design-system.md` | Mobile design system spec — "Editorial Glass" tokens, primitives, per-tab polish brief |
 | `TRACKER.md` | Feature & phase implementation status tracker |
 
 ## Critical Rules (always in context)
