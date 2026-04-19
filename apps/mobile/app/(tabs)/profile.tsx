@@ -1,28 +1,63 @@
 /**
  * Profile / Dashboard screen — Bias calibration dashboard.
  * Matches web app/dashboard/page.tsx layout and sections.
- * Quick actions (History, Saved) available to all users.
+ * Quick actions (History, Saved, Guide) available to all users.
  * Bias profile, suggestions, and sign out only for authenticated users.
  */
 
 import { View, Text, ScrollView, Pressable } from 'react-native'
-import Animated, { FadeInDown } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Settings, Clock, LogOut, LogIn, BarChart3, Bookmark, BookOpen } from 'lucide-react-native'
+import type { LucideProps } from 'lucide-react-native'
 import { useAuth } from '@/lib/hooks/use-auth'
 import { useBiasProfile } from '@/lib/hooks/use-bias-profile'
 import { useSuggestions } from '@/lib/hooks/use-suggestions'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
-import { GlassView } from '@/components/ui/GlassView'
 import { BiasComparisonBar } from '@/components/molecules/BiasComparisonBar'
+import { BiasDistributionList } from '@/components/molecules/BiasDistributionList'
 import { NexusCard } from '@/components/organisms/NexusCard'
-import { BIAS_LABELS, BIAS_OPACITY } from '@/lib/shared/types'
 import { Skeleton } from '@/components/atoms/Skeleton'
 import { BiasDonutChart } from '@/components/molecules/BiasDonutChart'
-import { AnimatedCounter } from '@/components/atoms/AnimatedCounter'
+import { BIAS_LABELS } from '@/lib/shared/types'
 import { useTheme } from '@/lib/shared/theme'
+import { Heading, Text as UiText } from '@/lib/ui/primitives'
+import { Button } from '@/lib/ui/primitives/Button'
+import { IconButton } from '@/lib/ui/primitives/IconButton'
+import { Surface } from '@/lib/ui/primitives/Surface'
+import { ScreenHeader } from '@/lib/ui/composed/ScreenHeader'
+import { Section } from '@/lib/ui/composed/Section'
+import { StatCard } from '@/lib/ui/composed/StatCard'
+import { CollapsibleSection } from '@/lib/ui/composed/CollapsibleSection'
+import { SPACING } from '@/lib/ui/tokens'
+
+interface QuickActionProps {
+  readonly icon: React.ComponentType<LucideProps>
+  readonly label: string
+  readonly iconColor: string
+  readonly onPress: () => void
+}
+
+function QuickAction({ icon: Icon, label, iconColor, onPress }: QuickActionProps) {
+  return (
+    <Pressable onPress={onPress} style={{ flex: 1 }}>
+      <Surface
+        variant="glassSm"
+        style={{
+          padding: SPACING.lg,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: SPACING.xs + 2,
+        }}
+      >
+        <Icon size={16} color={iconColor} />
+        <UiText variant="headingSm">{label}</UiText>
+      </Surface>
+    </Pressable>
+  )
+}
 
 export default function ProfileScreen() {
   const router = useRouter()
@@ -33,58 +68,54 @@ export default function ProfileScreen() {
   const { toggle, isBookmarked } = useBookmarks()
   const { readCount } = useReadingHistory()
 
-  const blindspotSet = new Set(profile?.blindspots ?? [])
-
-  const sectionLabel = { fontFamily: 'Inter-Medium', fontSize: 10, color: theme.text.tertiary, textTransform: 'uppercase' as const, letterSpacing: 1.5 }
-  const error = theme.semantic.error
   const warn = theme.semantic.warning
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface.background }} edges={['top']}>
-      <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <View style={{ gap: 2 }}>
-            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: theme.text.primary }}>
-              Dashboard
-            </Text>
-            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
-              {user?.email ?? 'Guest'}
-            </Text>
-          </View>
-          <Pressable onPress={() => router.push('/settings')} hitSlop={8}>
-            <Settings size={20} color={theme.text.secondary} />
-          </Pressable>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 40, gap: SPACING.lg }}
+        showsVerticalScrollIndicator={false}
+      >
+        <ScreenHeader
+          title="Dashboard"
+          subtitle={user?.email ?? 'Guest'}
+          trailing={[
+            <IconButton
+              key="settings"
+              icon={Settings}
+              onPress={() => router.push('/settings')}
+              accessibilityLabel="Open settings"
+              tone="secondary"
+              size="sm"
+            />,
+          ]}
+        />
+
+        <View style={{ flexDirection: 'row', gap: SPACING.sm, paddingHorizontal: SPACING.lg }}>
+          <QuickAction
+            icon={Clock}
+            label="History"
+            iconColor={theme.text.tertiary}
+            onPress={() => router.push('/history')}
+          />
+          <QuickAction
+            icon={Bookmark}
+            label="Saved"
+            iconColor={theme.text.primary}
+            onPress={() => router.push('/saved')}
+          />
+          <QuickAction
+            icon={BookOpen}
+            label="Guide"
+            iconColor={theme.semantic.info.color}
+            onPress={() => router.push('/guide')}
+          />
         </View>
 
-        {/* Quick actions */}
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Pressable onPress={() => router.push('/history')} style={{ flex: 1 }}>
-            <GlassView variant="sm" style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-              <Clock size={16} color={theme.text.secondary} />
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>History</Text>
-            </GlassView>
-          </Pressable>
-          <Pressable onPress={() => router.push('/saved')} style={{ flex: 1 }}>
-            <GlassView variant="sm" style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-              <Bookmark size={16} color={theme.text.secondary} />
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>Saved</Text>
-            </GlassView>
-          </Pressable>
-          <Pressable onPress={() => router.push('/guide')} style={{ flex: 1 }}>
-            <GlassView variant="sm" style={{ padding: 16, flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-              <BookOpen size={16} color={theme.text.secondary} />
-              <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>Guide</Text>
-            </GlassView>
-          </Pressable>
-        </View>
-
-        {/* Authenticated-only sections */}
         {user ? (
-          <>
-            {/* Banner — matches web dashboard banner */}
-            <GlassView testID="bias-banner" style={{ padding: 20, gap: 12 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <View style={{ gap: SPACING.lg, paddingHorizontal: SPACING.lg }}>
+            <Surface testID="bias-banner" style={{ padding: SPACING.xl, gap: SPACING.md }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.sm + 2 }}>
                 <View style={{
                   width: 32,
                   height: 32,
@@ -97,68 +128,52 @@ export default function ProfileScreen() {
                 }}>
                   <BarChart3 size={16} color={theme.text.primary} />
                 </View>
-                <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 20, color: theme.text.primary }}>
-                  Bias Calibration
-                </Text>
+                <Heading variant="title">Bias Calibration</Heading>
               </View>
-              <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.secondary, lineHeight: 20 }}>
-                Your reading habits shape your worldview. This dashboard shows which perspectives you consume most — and which you're missing.
-              </Text>
-            </GlassView>
+              <UiText variant="bodySm" tone="secondary">
+                Your reading habits shape your worldview. This dashboard shows which perspectives you consume most — and which you&apos;re missing.
+              </UiText>
+            </Surface>
 
-            {/* Stat cards with animated counters */}
             {profile && (
-              <Animated.View entering={FadeInDown.delay(100).springify()} style={{ flexDirection: 'row', gap: 8 }}>
-                <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
-                  <AnimatedCounter value={profile.totalStoriesRead} style={{ fontSize: 22 }} />
-                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>Stories Read</Text>
-                </GlassView>
-                <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }}>
-                  <AnimatedCounter value={readCount} style={{ fontSize: 22 }} />
-                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>This Session</Text>
-                </GlassView>
-                <GlassView variant="sm" style={{ flex: 1, padding: 16, alignItems: 'center', gap: 4 }} glow={profile.blindspots.length > 0 ? warn.color : undefined}>
-                  <AnimatedCounter value={profile.blindspots.length} style={{ fontSize: 22, color: profile.blindspots.length > 0 ? warn.color : theme.text.primary }} />
-                  <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>Blindspots</Text>
-                </GlassView>
-              </Animated.View>
+              <View style={{ flexDirection: 'row', gap: SPACING.sm }}>
+                <StatCard value={profile.totalStoriesRead} label="Stories Read" />
+                <StatCard value={readCount} label="This Session" />
+                <StatCard
+                  value={profile.blindspots.length}
+                  label="Blindspots"
+                  glow={profile.blindspots.length > 0 ? warn.color : undefined}
+                  accent={profile.blindspots.length > 0 ? warn.color : undefined}
+                />
+              </View>
             )}
 
-            {/* Bias Profile */}
             {profileLoading ? (
-              <View style={{ gap: 12 }}>
+              <View style={{ gap: SPACING.md }}>
                 <Skeleton style={{ height: 20, width: 160 }} />
                 <Skeleton style={{ height: 200, borderRadius: 24 }} />
               </View>
             ) : profile ? (
               <>
-                {/* Donut Chart Overview */}
                 {(profile.userDistribution ?? []).length > 0 && (
-                  <Animated.View entering={FadeInDown.delay(200).springify()} style={{ gap: 8 }}>
-                    <Text style={sectionLabel}>Your Reading Spectrum</Text>
-                    <GlassView style={{ padding: 20, alignItems: 'center' }}>
+                  <Section label="Your Reading Spectrum">
+                    <Surface style={{ padding: SPACING.xl, alignItems: 'center' }}>
                       <BiasDonutChart distribution={profile.userDistribution ?? []} />
-                    </GlassView>
-                  </Animated.View>
+                    </Surface>
+                  </Section>
                 )}
 
-                {/* Spectrum Comparison */}
-                <View style={{ gap: 8 }}>
-                  <Text style={sectionLabel}>Spectrum Comparison</Text>
+                <Section label="Spectrum Comparison">
                   <BiasComparisonBar
                     userDistribution={profile.userDistribution ?? []}
                     overallDistribution={profile.overallDistribution ?? []}
                   />
-                </View>
+                </Section>
 
-                {/* Detailed Breakdown */}
-                <View style={{ gap: 8 }}>
-                  <Text style={sectionLabel}>Detailed Breakdown</Text>
-                  <GlassView style={{ padding: 16, gap: 16 }}>
+                <CollapsibleSection title="Detailed Breakdown" defaultExpanded>
+                  <View style={{ padding: SPACING.lg, gap: SPACING.lg }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ fontFamily: 'Inter-Medium', fontSize: 13, color: theme.text.primary }}>
-                        Bias Distribution
-                      </Text>
+                      <UiText variant="headingSm">Bias Distribution</UiText>
                       {profile.dominantBias && (
                         <View style={{
                           backgroundColor: theme.surface.glassPill,
@@ -174,191 +189,122 @@ export default function ProfileScreen() {
                         </View>
                       )}
                     </View>
+                    <BiasDistributionList
+                      userDistribution={profile.userDistribution ?? []}
+                      overallDistribution={profile.overallDistribution ?? []}
+                      blindspots={profile.blindspots}
+                    />
+                  </View>
+                </CollapsibleSection>
 
-                    {(profile.userDistribution ?? []).map((item) => {
-                      const overall = (profile.overallDistribution ?? []).find((o) => o.bias === item.bias)
-                      const isBlindspot = blindspotSet.has(item.bias)
-
-                      return (
-                        <View key={item.bias} style={{ gap: 4 }}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            <Text style={{
-                              fontFamily: 'Inter',
-                              fontSize: 12,
-                              color: isBlindspot ? warn.color : theme.text.secondary,
-                            }}>
-                              {BIAS_LABELS[item.bias]}
-                              {isBlindspot ? ' (blindspot)' : ''}
-                            </Text>
-                            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
-                              {item.percentage}% / {overall?.percentage ?? 0}%
-                            </Text>
-                          </View>
-                          <View style={{ height: 8, borderRadius: 4, backgroundColor: `rgba(${theme.inkRgb}, 0.05)`, position: 'relative', overflow: 'hidden' }}>
-                            {/* Overall (background) */}
-                            <View style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              height: 8,
-                              borderRadius: 4,
-                              width: `${overall?.percentage ?? 0}%`,
-                              backgroundColor: `rgba(${theme.inkRgb}, 0.1)`,
-                            }} />
-                            {/* User (foreground) */}
-                            <View style={{
-                              position: 'absolute',
-                              top: 0,
-                              left: 0,
-                              height: 8,
-                              borderRadius: 4,
-                              width: `${item.percentage}%`,
-                              backgroundColor: `rgba(${theme.inkRgb}, ${BIAS_OPACITY[item.bias]})`,
-                            }} />
-                          </View>
-                        </View>
-                      )
-                    })}
-
-                    {/* Legend */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingTop: 4 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: `rgba(${theme.inkRgb}, 0.3)` }} />
-                        <Text style={{ fontFamily: 'Inter', fontSize: 10, color: theme.text.tertiary }}>Your reading</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: `rgba(${theme.inkRgb}, 0.1)` }} />
-                        <Text style={{ fontFamily: 'Inter', fontSize: 10, color: theme.text.tertiary }}>All stories</Text>
-                      </View>
-                    </View>
-                  </GlassView>
-                </View>
-
-                {/* Blindspots */}
                 {profile.blindspots.length > 0 && (
-                  <View testID="blindspot-section" style={{ gap: 8 }}>
-                    <Text style={sectionLabel}>Your Blindspots</Text>
-                    <GlassView style={{ padding: 16, gap: 10 }}>
-                      <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.secondary, lineHeight: 20 }}>
-                        You read significantly less from these perspectives compared to the overall distribution:
-                      </Text>
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                        {profile.blindspots.map((bias) => (
-                          <View key={bias} style={{
-                            backgroundColor: warn.bg,
-                            borderRadius: 9999,
-                            paddingHorizontal: 12,
-                            paddingVertical: 6,
-                            borderWidth: 0.5,
-                            borderColor: warn.border,
-                          }}>
-                            <Text style={{ fontFamily: 'Inter', fontSize: 12, color: warn.color }}>
-                              {BIAS_LABELS[bias]}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-                    </GlassView>
+                  <View testID="blindspot-section">
+                    <Section label="Your Blindspots">
+                      <Surface style={{ padding: SPACING.lg, gap: SPACING.sm + 2 }}>
+                        <UiText variant="bodySm" tone="secondary">
+                          You read significantly less from these perspectives compared to the overall distribution:
+                        </UiText>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm }}>
+                          {profile.blindspots.map((bias) => (
+                            <View key={bias} style={{
+                              backgroundColor: warn.bg,
+                              borderRadius: 9999,
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              borderWidth: 0.5,
+                              borderColor: warn.border,
+                            }}>
+                              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: warn.color }}>
+                                {BIAS_LABELS[bias]}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </Surface>
+                    </Section>
                   </View>
                 )}
               </>
             ) : (
-              <GlassView style={{ padding: 32, alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontFamily: 'Inter', fontSize: 14, color: theme.text.tertiary, textAlign: 'center' }}>
+              <Surface style={{ padding: SPACING.xxl + 8, alignItems: 'center', justifyContent: 'center' }}>
+                <UiText variant="body" tone="tertiary" style={{ textAlign: 'center' }}>
                   Start reading stories to build your bias profile!
-                </Text>
-              </GlassView>
+                </UiText>
+              </Surface>
             )}
 
-            {/* Suggestions */}
-            <View style={{ gap: 8 }}>
-              <Text style={sectionLabel}>Suggested For You</Text>
-              <Text style={{ fontFamily: 'Inter', fontSize: 12, color: theme.text.tertiary }}>
-                Stories from perspectives you read less often.
-              </Text>
+            <CollapsibleSection
+              title="Suggested For You"
+              subtitle="Stories from perspectives you read less often."
+            >
               {suggestionsLoading ? (
-                <View style={{ gap: 8 }}>
+                <View style={{ padding: SPACING.lg, gap: SPACING.sm }}>
                   <Skeleton style={{ height: 80, borderRadius: 12 }} />
                   <Skeleton style={{ height: 80, borderRadius: 12 }} />
                 </View>
               ) : suggestions.length > 0 ? (
-                suggestions.slice(0, 3).map((article) => (
-                  <NexusCard
-                    key={article.id}
-                    article={article}
-                    onClick={() => router.push(`/story/${article.id}`)}
-                    onSave={toggle}
-                    isSaved={isBookmarked(article.id)}
-                    compact
-                  />
-                ))
+                <View style={{ padding: SPACING.lg, gap: SPACING.sm }}>
+                  {suggestions.slice(0, 3).map((article) => (
+                    <NexusCard
+                      key={article.id}
+                      article={article}
+                      onClick={() => router.push(`/story/${article.id}`)}
+                      onSave={toggle}
+                      isSaved={isBookmarked(article.id)}
+                      compact
+                    />
+                  ))}
+                </View>
               ) : (
-                <GlassView style={{ padding: 24, alignItems: 'center' }}>
-                  <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.tertiary }}>
+                <View style={{ padding: SPACING.xl, alignItems: 'center' }}>
+                  <UiText variant="bodySm" tone="tertiary">
                     No suggestions yet — keep reading to get personalized picks.
-                  </Text>
-                </GlassView>
+                  </UiText>
+                </View>
               )}
-            </View>
+            </CollapsibleSection>
 
-            {/* Sign out */}
-            <Pressable
+            <Button
               testID="sign-out-button"
               onPress={signOut}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
+              variant="destructive"
+              icon={LogOut}
+              fullWidth
+            >
+              Sign Out
+            </Button>
+          </View>
+        ) : (
+          <View style={{ paddingHorizontal: SPACING.lg }}>
+            <Surface testID="sign-in-cta" style={{ padding: SPACING.xxl, gap: SPACING.md, alignItems: 'center' }}>
+              <View style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: theme.surface.glassPill,
+                borderWidth: 0.5,
+                borderColor: theme.surface.borderPill,
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: 8,
-                padding: 14,
-                borderRadius: 12,
-                borderWidth: 0.5,
-                borderColor: error.border,
-                backgroundColor: pressed ? error.bg : 'transparent',
-              })}
-            >
-              <LogOut size={16} color={error.color} />
-              <Text style={{ fontFamily: 'Inter', fontSize: 14, color: error.color }}>Sign Out</Text>
-            </Pressable>
-          </>
-        ) : (
-          /* Sign-in CTA card for unauthenticated users */
-          <GlassView testID="sign-in-cta" style={{ padding: 24, gap: 16, alignItems: 'center' }}>
-            <View style={{
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: theme.surface.glassPill,
-              borderWidth: 0.5,
-              borderColor: theme.surface.borderPill,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <BarChart3 size={20} color={theme.text.primary} />
-            </View>
-            <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 18, color: theme.text.primary, textAlign: 'center' }}>
-              Unlock Bias Calibration
-            </Text>
-            <Text style={{ fontFamily: 'Inter', fontSize: 13, color: theme.text.tertiary, textAlign: 'center', lineHeight: 20 }}>
-              Sign in to see your bias profile, reading stats, and personalized suggestions.
-            </Text>
-            <Pressable
-              testID="sign-in-button"
-              onPress={() => router.push('/(auth)/login')}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 8,
-                backgroundColor: pressed ? theme.text.secondary : theme.text.primary,
-                borderRadius: 12,
-                paddingHorizontal: 24,
-                paddingVertical: 12,
-              })}
-            >
-              <LogIn size={18} color={theme.surface.background} />
-              <Text style={{ fontFamily: 'Inter-SemiBold', fontSize: 15, color: theme.surface.background }}>Sign In</Text>
-            </Pressable>
-          </GlassView>
+              }}>
+                <BarChart3 size={20} color={theme.text.primary} />
+              </View>
+              <Heading variant="title" style={{ textAlign: 'center' }}>
+                Unlock Bias Calibration
+              </Heading>
+              <UiText variant="bodySm" tone="tertiary" style={{ textAlign: 'center' }}>
+                Sign in to see your bias profile, reading stats, and personalized suggestions.
+              </UiText>
+              <Button
+                testID="sign-in-button"
+                onPress={() => router.push('/(auth)/login')}
+                variant="primary"
+                icon={LogIn}
+              >
+                Sign In
+              </Button>
+            </Surface>
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>
