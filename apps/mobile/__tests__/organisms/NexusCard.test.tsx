@@ -65,4 +65,20 @@ describe('NexusCard', () => {
 
     expect(onSave).toHaveBeenCalledWith('story-1')
   })
+
+  it('renders the footer band when provided', () => {
+    render(
+      <NexusCard
+        {...defaultProps}
+        footerBand={{ label: 'Under-covered by right-leaning outlets', tone: 'info' }}
+      />,
+    )
+    expect(screen.getByTestId('nexus-card-footer-band')).toBeTruthy()
+    expect(screen.getByText('Under-covered by right-leaning outlets')).toBeTruthy()
+  })
+
+  it('omits the footer band when not provided', () => {
+    render(<NexusCard {...defaultProps} />)
+    expect(screen.queryByTestId('nexus-card-footer-band')).toBeNull()
+  })
 })

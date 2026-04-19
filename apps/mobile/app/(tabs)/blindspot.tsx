@@ -4,8 +4,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { View, Text, FlatList, RefreshControl } from 'react-native'
-import Animated, { FadeInDown } from 'react-native-reanimated'
+import { View, FlatList, RefreshControl } from 'react-native'
+import Animated from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Eye } from 'lucide-react-native'
@@ -15,14 +15,18 @@ import { useStories } from '@/lib/hooks/use-stories'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
 import { useToast } from '@/lib/hooks/use-toast'
-import { NexusCard } from '@/components/organisms/NexusCard'
+import { NexusCard, type FooterBand } from '@/components/organisms/NexusCard'
 import { SwipeableCard } from '@/components/molecules/SwipeableCard'
 import { NexusCardSkeletonList } from '@/components/organisms/NexusCardSkeleton'
 import { EmptyStateView } from '@/components/molecules/EmptyStateView'
 import { NetworkErrorView } from '@/components/molecules/NetworkErrorView'
 import { PullToRefreshIndicator } from '@/components/molecules/PullToRefreshIndicator'
-import { hapticLight, hapticMedium } from '@/lib/haptics'
+import { hapticMedium } from '@/lib/haptics'
 import { useTheme } from '@/lib/shared/theme'
+import { ScreenHeader } from '@/lib/ui/composed/ScreenHeader'
+import { Pill } from '@/lib/ui/primitives/Pill'
+import { Divider } from '@/lib/ui/primitives/Divider'
+import { SPACING, ENTRY_PRESETS } from '@/lib/ui/tokens'
 
 type BlindspotSkew = 'all' | 'right-skew' | 'left-skew'
 
@@ -31,13 +35,21 @@ interface FilterPill {
   readonly label: string
 }
 
-const FILTER_PILLS: readonly FilterPill[] = [
+// Visually split into two taxonomies: skew (all/right-skew/left-skew) and
+// topic (politics/technology). They share one filter state — selecting any
+// pill clears the others — but the divider signals independent dimensions.
+const SKEW_PILLS: readonly FilterPill[] = [
   { id: 'all', label: 'All' },
   { id: 'right-skew', label: 'Right-skew' },
   { id: 'left-skew', label: 'Left-skew' },
+]
+
+const TOPIC_PILLS: readonly FilterPill[] = [
   { id: 'politics', label: 'Politics' },
   { id: 'technology', label: 'Tech' },
 ]
+
+const ALL_FILTERS: readonly FilterPill[] = [...SKEW_PILLS, ...TOPIC_PILLS]
 
 const LEFT_BIASES: readonly BiasCategory[] = ['far-left', 'left', 'lean-left']
 const RIGHT_BIASES: readonly BiasCategory[] = ['lean-right', 'right', 'far-right']
@@ -54,11 +66,15 @@ function computeSkew(article: NewsArticle): 'left' | 'right' | 'center' {
   return 'center'
 }
 
-function skewCopy(article: NewsArticle): string {
+function skewFooterBand(article: NewsArticle): FooterBand {
   const skew = computeSkew(article)
-  if (skew === 'left') return 'Under-covered by right-leaning outlets'
-  if (skew === 'right') return 'Under-covered by left-leaning outlets'
-  return 'Sparse coverage across the spectrum'
+  if (skew === 'left') {
+    return { label: 'Under-covered by right-leaning outlets', tone: 'info' }
+  }
+  if (skew === 'right') {
+    return { label: 'Under-covered by left-leaning outlets', tone: 'warning' }
+  }
+  return { label: 'Sparse coverage across the spectrum', tone: 'info' }
 }
 
 export default function BlindspotTabScreen() {
@@ -160,7 +176,7 @@ export default function BlindspotTabScreen() {
 
   const renderItem = useCallback(({ item, index }: { item: NewsArticle; index: number }) => (
     <Animated.View
-      entering={FadeInDown.delay(Math.min(index, 8) * 60).springify().damping(18)}
+      entering={ENTRY_PRESETS.staggered(index)}
       style={{ paddingHorizontal: 16, paddingVertical: 6 }}
     >
       <SwipeableCard
@@ -176,65 +192,57 @@ export default function BlindspotTabScreen() {
           isSaved={isBookmarked(item.id)}
           isRead={isRead(item.id)}
           compact
+          footerBand={skewFooterBand(item)}
         />
-        <View style={{ paddingHorizontal: 4, paddingTop: 6 }}>
-          <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.tertiary }}>
-            {skewCopy(item)}
-          </Text>
-        </View>
       </SwipeableCard>
     </Animated.View>
-  ), [router, toggleWithToast, isBookmarked, isRead, theme.text.tertiary])
+  ), [router, toggleWithToast, isBookmarked, isRead])
 
   const ListHeader = useMemo(() => (
-    <View style={{ gap: 10, paddingBottom: 8 }}>
+    <View style={{ gap: SPACING.sm, paddingBottom: SPACING.sm }}>
       {refreshing && <PullToRefreshIndicator progress={1} refreshing={refreshing} />}
 
-      <View style={{ paddingHorizontal: 16, paddingTop: 4, gap: 6 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Eye size={22} color={theme.text.primary} />
-          <Text
-            testID="blindspot-header"
-            style={{ fontFamily: 'DMSerifDisplay', fontSize: 30, color: theme.text.primary }}
-          >
-            Blindspot
-          </Text>
-        </View>
-        <Text style={{ fontFamily: 'Inter', fontSize: 13, lineHeight: 19, color: theme.text.tertiary }}>
-          Stories under-covered on one side of the political spectrum.
-        </Text>
-      </View>
+      <ScreenHeader
+        title="Blindspot"
+        subtitle="Stories under-covered on one side of the political spectrum."
+        leading={<Eye size={22} color={theme.text.primary} />}
+        titleTestID="blindspot-header"
+      />
 
-      <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: 16, flexWrap: 'wrap' }}>
-        {FILTER_PILLS.map((pill) => {
-          const isActive = filter === pill.id
-          return (
-            <Text
-              key={pill.id}
-              testID={`blindspot-filter-${pill.id}`}
-              onPress={() => { hapticLight(); setFilter(pill.id) }}
-              accessibilityRole="button"
-              accessibilityState={{ selected: isActive }}
-              style={{
-                fontFamily: 'Inter',
-                fontSize: 13,
-                color: isActive ? theme.text.primary : theme.text.tertiary,
-                backgroundColor: isActive ? `rgba(${theme.inkRgb}, 0.1)` : 'transparent',
-                borderWidth: 0.5,
-                borderColor: isActive ? theme.surface.borderPill : theme.surface.border,
-                borderRadius: 9999,
-                paddingHorizontal: 14,
-                paddingVertical: 6,
-                overflow: 'hidden',
-              }}
-            >
-              {pill.label}
-            </Text>
-          )
-        })}
+      <View
+        style={{
+          flexDirection: 'row',
+          gap: SPACING.xs,
+          paddingHorizontal: SPACING.lg,
+          alignItems: 'center',
+          flexWrap: 'wrap',
+        }}
+      >
+        {SKEW_PILLS.map((pill) => (
+          <Pill
+            key={pill.id}
+            label={pill.label}
+            active={filter === pill.id}
+            onPress={() => setFilter(pill.id)}
+            testID={`blindspot-filter-${pill.id}`}
+          />
+        ))}
+        <Divider
+          orientation="vertical"
+          style={{ height: 20, marginHorizontal: SPACING.xs / 2 }}
+        />
+        {TOPIC_PILLS.map((pill) => (
+          <Pill
+            key={pill.id}
+            label={pill.label}
+            active={filter === pill.id}
+            onPress={() => setFilter(pill.id)}
+            testID={`blindspot-filter-${pill.id}`}
+          />
+        ))}
       </View>
     </View>
-  ), [refreshing, filter, theme])
+  ), [refreshing, filter, theme.text.primary])
 
   const ListEmpty = useMemo(() => {
     if (filtered.length > 0) return null
@@ -244,7 +252,7 @@ export default function BlindspotTabScreen() {
     // page doesn't mean the filter is truly empty — more pages may contain
     // matches. Keep showing a skeleton while pagination is still fetching.
     if (isSkewFilter && hasMorePages) return <NexusCardSkeletonList count={3} />
-    const activeLabel = FILTER_PILLS.find((p) => p.id === filter)?.label ?? ''
+    const activeLabel = ALL_FILTERS.find((p) => p.id === filter)?.label ?? ''
     return (
       <EmptyStateView
         icon="search"

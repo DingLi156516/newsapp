@@ -6,6 +6,7 @@
 import { View, Text, Pressable } from 'react-native'
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
 import { Image } from 'expo-image'
+import { ArrowRight } from 'lucide-react-native'
 import type { NewsArticle } from '@/lib/shared/types'
 import { TOPIC_LABELS } from '@/lib/shared/types'
 import { FactualityBar } from '@/components/atoms/FactualityBar'
@@ -18,6 +19,12 @@ import { MetricsRow } from '@/components/molecules/MetricsRow'
 import { GlassView } from '@/components/ui/GlassView'
 import { BADGE } from '@/lib/shared/design'
 import { useTheme } from '@/lib/shared/theme'
+import { SPACING } from '@/lib/ui/tokens'
+
+export interface FooterBand {
+  readonly label: string
+  readonly tone: 'warning' | 'info'
+}
 
 interface Props {
   readonly article: NewsArticle
@@ -27,6 +34,7 @@ interface Props {
   readonly compact?: boolean
   readonly isRead?: boolean
   readonly showMetrics?: boolean
+  readonly footerBand?: FooterBand
 }
 
 function formatTimeAgo(timestamp: string): string {
@@ -38,7 +46,7 @@ function formatTimeAgo(timestamp: string): string {
   return `${days}d ago`
 }
 
-export function NexusCard({ article, onSave, isSaved, onClick, compact = false, isRead = false, showMetrics = false }: Props) {
+export function NexusCard({ article, onSave, isSaved, onClick, compact = false, isRead = false, showMetrics = false, footerBand }: Props) {
   const theme = useTheme()
   const scale = useSharedValue(1)
   const animatedStyle = useAnimatedStyle(() => ({
@@ -154,6 +162,50 @@ export function NexusCard({ article, onSave, isSaved, onClick, compact = false, 
           {/* Spectrum bar */}
           <SpectrumBar segments={article.spectrumSegments} height={6} />
         </View>
+
+        {footerBand && (
+          <View
+            testID="nexus-card-footer-band"
+            style={{
+              paddingHorizontal: compact ? 14 : 20,
+              paddingVertical: SPACING.xs + 2,
+              backgroundColor:
+                footerBand.tone === 'warning'
+                  ? theme.semantic.warning.bg
+                  : theme.semantic.info.bg,
+              borderTopWidth: 0.5,
+              borderTopColor:
+                footerBand.tone === 'warning'
+                  ? theme.semantic.warning.border
+                  : theme.semantic.info.border,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <ArrowRight
+              size={12}
+              color={
+                footerBand.tone === 'warning'
+                  ? theme.semantic.warning.color
+                  : theme.semantic.info.color
+              }
+            />
+            <Text
+              style={{
+                fontFamily: 'Inter',
+                fontSize: 11,
+                lineHeight: 16,
+                color:
+                  footerBand.tone === 'warning'
+                    ? theme.semantic.warning.color
+                    : theme.semantic.info.color,
+              }}
+            >
+              {footerBand.label}
+            </Text>
+          </View>
+        )}
       </GlassView>
       </Animated.View>
     </Pressable>
