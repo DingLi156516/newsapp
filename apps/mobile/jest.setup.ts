@@ -51,6 +51,21 @@ jest.mock('expo-blur', () => {
   }
 })
 
+// Mock react-native-safe-area-context
+jest.mock('react-native-safe-area-context', () => {
+  const React = require('react')
+  const { View } = require('react-native')
+  const insets = { top: 0, right: 0, bottom: 0, left: 0 }
+  const frame = { x: 0, y: 0, width: 0, height: 0 }
+  return {
+    SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children,
+    SafeAreaView: View,
+    SafeAreaInsetsContext: React.createContext(insets),
+    useSafeAreaInsets: () => insets,
+    useSafeAreaFrame: () => frame,
+  }
+})
+
 // Mock Supabase client (avoids supabaseUrl required error)
 jest.mock('@/lib/supabase/client', () => ({
   supabase: {

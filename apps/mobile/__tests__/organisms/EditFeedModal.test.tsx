@@ -13,24 +13,37 @@ const defaultProps = {
   onUpdateConfig: jest.fn(),
 }
 
+const expand = (label: string) => {
+  fireEvent.press(screen.getByText(label))
+}
+
 describe('EditFeedModal', () => {
   beforeEach(() => {
     jest.clearAllMocks()
   })
 
-  it('renders feed and topic toggles when visible', () => {
+  it('renders section headers when visible, collapsed by default', () => {
     render(<EditFeedModal {...defaultProps} />)
     expect(screen.getByText('FEEDS')).toBeTruthy()
     expect(screen.getByText('TOPICS')).toBeTruthy()
+    expect(screen.getByText('SORT ORDER')).toBeTruthy()
+    expect(screen.queryByTestId('edit-feed-toggle-for-you')).toBeNull()
+    expect(screen.queryByTestId('edit-feed-sort-most-covered')).toBeNull()
+  })
+
+  it('reveals feed and topic toggles after expanding sections', () => {
+    render(<EditFeedModal {...defaultProps} />)
+    expand('FEEDS')
+    expand('TOPICS')
     expect(screen.getByTestId('edit-feed-toggle-for-you')).toBeTruthy()
     expect(screen.getByTestId('edit-feed-toggle-trending')).toBeTruthy()
     expect(screen.getByTestId('edit-feed-toggle-politics')).toBeTruthy()
     expect(screen.getByTestId('edit-feed-toggle-technology')).toBeTruthy()
   })
 
-  it('renders sort section', () => {
+  it('reveals sort pills after expanding SORT ORDER', () => {
     render(<EditFeedModal {...defaultProps} />)
-    expect(screen.getByText('SORT ORDER')).toBeTruthy()
+    expand('SORT ORDER')
     expect(screen.getByTestId('edit-feed-sort-most-covered')).toBeTruthy()
     expect(screen.getByTestId('edit-feed-sort-most-recent')).toBeTruthy()
   })
@@ -45,6 +58,7 @@ describe('EditFeedModal', () => {
   it('calls onUpdateConfig when toggling a topic on', () => {
     const onUpdateConfig = jest.fn()
     render(<EditFeedModal {...defaultProps} onUpdateConfig={onUpdateConfig} />)
+    expand('TOPICS')
     fireEvent(screen.getByTestId('edit-feed-toggle-technology'), 'valueChange', true)
     expect(onUpdateConfig).toHaveBeenCalledWith({
       visibleFeeds: expect.arrayContaining(['technology']),
@@ -54,6 +68,7 @@ describe('EditFeedModal', () => {
   it('calls onUpdateConfig when toggling a feed off', () => {
     const onUpdateConfig = jest.fn()
     render(<EditFeedModal {...defaultProps} onUpdateConfig={onUpdateConfig} />)
+    expand('TOPICS')
     fireEvent(screen.getByTestId('edit-feed-toggle-politics'), 'valueChange', false)
     expect(onUpdateConfig).toHaveBeenCalledWith({
       visibleFeeds: expect.not.arrayContaining(['politics']),
@@ -63,6 +78,7 @@ describe('EditFeedModal', () => {
   it('calls onUpdateConfig when changing sort order', () => {
     const onUpdateConfig = jest.fn()
     render(<EditFeedModal {...defaultProps} onUpdateConfig={onUpdateConfig} />)
+    expand('SORT ORDER')
     fireEvent.press(screen.getByTestId('edit-feed-sort-most-recent'))
     expect(onUpdateConfig).toHaveBeenCalledWith({ feedSort: 'most-recent' })
   })

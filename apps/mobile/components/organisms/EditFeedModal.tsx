@@ -4,9 +4,12 @@
  * Converted from Modal to @gorhom/bottom-sheet for native-feeling interaction.
  */
 
-import { useCallback, useRef, useEffect } from 'react'
+import { useCallback, useRef, useEffect, useState, type ReactNode } from 'react'
 import { View, Text, Pressable, Switch } from 'react-native'
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated'
 import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { ChevronDown } from 'lucide-react-native'
 import type { FeedSort, UnifiedTab, StoryTag } from '@/lib/shared/types'
 import type { FeedConfig } from '@/lib/hooks/use-feed-config'
 import {
@@ -15,6 +18,60 @@ import {
 } from '@/lib/shared/types'
 import { GlassView } from '@/components/ui/GlassView'
 import { useTheme } from '@/lib/shared/theme'
+import { hapticLight } from '@/lib/haptics'
+
+const TAB_BAR_HEIGHT = 49
+
+interface CollapsibleSectionProps {
+  readonly label: string
+  readonly accessory?: ReactNode
+  readonly children: ReactNode
+}
+
+function CollapsibleSection({ label, accessory, children }: CollapsibleSectionProps) {
+  const theme = useTheme()
+  const [expanded, setExpanded] = useState(false)
+  const rotation = useSharedValue(0)
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }))
+
+  const toggle = () => {
+    const next = !expanded
+    setExpanded(next)
+    rotation.value = withTiming(next ? 180 : 0, { duration: 180 })
+    hapticLight()
+  }
+
+  const sectionLabel = {
+    fontFamily: 'Inter-SemiBold',
+    fontSize: 14,
+    color: theme.text.tertiary,
+    letterSpacing: 1,
+  } as const
+
+  return (
+    <GlassView style={{ padding: 16, gap: expanded ? 12 : 0 }}>
+      <Pressable
+        onPress={toggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        accessibilityLabel={`${label} section, ${expanded ? 'expanded' : 'collapsed'}`}
+        hitSlop={8}
+        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flex: 1 }}>
+          <Text style={sectionLabel}>{label}</Text>
+          {accessory}
+        </View>
+        <Animated.View style={chevronStyle}>
+          <ChevronDown size={18} color={theme.text.tertiary} />
+        </Animated.View>
+      </Pressable>
+      {expanded && <View style={{ gap: 12 }}>{children}</View>}
+    </GlassView>
+  )
+}
 
 interface Props {
   readonly visible: boolean
@@ -31,6 +88,7 @@ const SHEET_SNAP_POINTS = ['75%', '95%']
 
 export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hiddenPromotedTags, promotedTags, onUpdateConfig }: Props) {
   const theme = useTheme()
+  const insets = useSafeAreaInsets()
   const bottomSheetRef = useRef<BottomSheet>(null)
   // Legacy configs may persist `blindspot` (now a bottom-nav tab, not in the
   // in-feed bar). Sanitize it out before computing counts so the last-tab
@@ -87,20 +145,27 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hidden
 
   const trackOff = `rgba(${theme.inkRgb}, 0.1)`
   const trackOn = `rgba(${theme.inkRgb}, 0.3)`
-  const sectionLabel = { fontFamily: 'Inter-SemiBold', fontSize: 14, color: theme.text.tertiary, letterSpacing: 1 } as const
 
   return (
     <BottomSheet
       ref={bottomSheetRef}
       index={-1}
       snapPoints={SHEET_SNAP_POINTS}
+      enableDynamicSizing={false}
       enablePanDownToClose
       onChange={handleSheetChange}
       backdropComponent={renderBackdrop}
       backgroundStyle={{ backgroundColor: theme.surface.background }}
       handleIndicatorStyle={{ backgroundColor: theme.surface.borderPill, width: 36 }}
     >
-      <BottomSheetScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <BottomSheetScrollView
+        contentContainerStyle={{
+          padding: 16,
+          gap: 16,
+          paddingBottom: TAB_BAR_HEIGHT + insets.bottom + 24,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Header */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <Text style={{ fontFamily: 'DMSerifDisplay', fontSize: 24, color: theme.text.primary }}>
@@ -114,8 +179,7 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hidden
         </View>
 
         {/* Feeds section */}
-        <GlassView style={{ padding: 16, gap: 12 }}>
-          <Text style={sectionLabel}>FEEDS</Text>
+        <CollapsibleSection label="FEEDS">
           {IN_FEED_TABS.map((tab) => {
             const isEnabled = visibleSet.has(tab)
             return (
@@ -134,11 +198,10 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hidden
               </View>
             )
           })}
-        </GlassView>
+        </CollapsibleSection>
 
         {/* Topics section */}
-        <GlassView style={{ padding: 16, gap: 12 }}>
-          <Text style={sectionLabel}>TOPICS</Text>
+        <CollapsibleSection label="TOPICS">
           {ALL_TOPICS.map((topic) => {
             const isEnabled = visibleSet.has(topic)
             return (
@@ -157,17 +220,18 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hidden
               </View>
             )
           })}
-        </GlassView>
+        </CollapsibleSection>
 
         {/* Trending topics section */}
         {promotedTags && promotedTags.length > 0 && (
-          <GlassView style={{ padding: 16, gap: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' }}>
-              <Text style={sectionLabel}>TRENDING TOPICS</Text>
+          <CollapsibleSection
+            label="TRENDING TOPICS"
+            accessory={
               <Text style={{ fontFamily: 'Inter', fontSize: 11, color: theme.text.muted }}>
                 auto-detected
               </Text>
-            </View>
+            }
+          >
             {promotedTags.map((tag) => {
               const isEnabled = !hiddenSet.has(tagKey(tag.slug, tag.type))
               const dotColor = TAG_TYPE_COLORS[tag.type]
@@ -192,12 +256,11 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hidden
                 </View>
               )
             })}
-          </GlassView>
+          </CollapsibleSection>
         )}
 
         {/* Sort section */}
-        <GlassView style={{ padding: 16, gap: 12 }}>
-          <Text style={sectionLabel}>SORT ORDER</Text>
+        <CollapsibleSection label="SORT ORDER">
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {SORT_OPTIONS.map((sort) => {
               const isActive = feedSort === sort
@@ -223,7 +286,7 @@ export function EditFeedModal({ visible, onClose, visibleFeeds, feedSort, hidden
               )
             })}
           </View>
-        </GlassView>
+        </CollapsibleSection>
       </BottomSheetScrollView>
     </BottomSheet>
   )

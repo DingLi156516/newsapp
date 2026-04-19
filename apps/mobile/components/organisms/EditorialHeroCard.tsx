@@ -69,7 +69,7 @@ export function EditorialHeroCard({
           style={{ overflow: 'hidden', borderRadius: RADIUS.xxl }}
         >
           {article.imageUrl && (
-            <View style={{ width: '100%', aspectRatio: 2 / 3, overflow: 'hidden' }}>
+            <View style={{ width: '100%', aspectRatio: 16 / 9, overflow: 'hidden' }}>
               <Image
                 source={{ uri: article.imageUrl }}
                 style={{ width: '100%', height: '100%' }}
