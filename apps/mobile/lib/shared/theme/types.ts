@@ -30,28 +30,28 @@ export interface Theme {
   readonly name: ThemeName
 
   readonly surface: {
-    /** App background — was '#0A0A0A' */
+    /** App background. */
     readonly background: string
-    /** Default glass surface — was GLASS.bg */
+    /** Default glass surface. */
     readonly glass: string
-    /** Small glass surface — was GLASS.bgSm */
+    /** Small glass surface. */
     readonly glassSm: string
-    /** Pill-shaped glass surface — was GLASS.bgPill */
+    /** Pill-shaped glass surface. */
     readonly glassPill: string
-    /** Glass border — was GLASS.border */
+    /** Glass border. */
     readonly border: string
-    /** Pill border — was GLASS.borderPill */
+    /** Pill border. */
     readonly borderPill: string
   }
 
   readonly text: {
-    /** Primary text — was 'white' / '#fff' */
+    /** Primary text. */
     readonly primary: string
-    /** Secondary text (0.6 opacity on dark) */
+    /** Secondary text (0.6 opacity on dark). */
     readonly secondary: string
-    /** Tertiary text (0.4 opacity on dark) */
+    /** Tertiary text (0.4 opacity on dark). */
     readonly tertiary: string
-    /** Muted text (0.35 opacity on dark) */
+    /** Muted text (0.35 opacity on dark). */
     readonly muted: string
   }
 

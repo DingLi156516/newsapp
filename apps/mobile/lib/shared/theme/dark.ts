@@ -1,9 +1,6 @@
 /**
- * Dark theme — current production values.
- *
- * Extracted 1:1 from the previous static tokens in `@/lib/shared/design`
- * (GLASS, SEMANTIC) and hardcoded text colors used across components. These
- * values are the visual baseline; any change here will shift the dark UI.
+ * Dark theme — current production values. These values are the visual
+ * baseline; any change here will shift the dark UI.
  */
 
 import type { Theme } from './types'

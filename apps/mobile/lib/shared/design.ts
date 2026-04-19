@@ -1,67 +1,17 @@
 /**
  * Shared design tokens for mobile UI.
  *
- * Phase 1 migration: SPACING, BORDER_RADIUS, and TOUCH_TARGET now live in
- * `@/lib/ui/tokens` and are re-exported here so existing call sites keep
- * working unchanged. New code should import directly from `@/lib/ui`.
+ * SPACING, BORDER_RADIUS, and TOUCH_TARGET are re-exported from
+ * `@/lib/ui/tokens` for source-compat during the migration; new code should
+ * import directly from `@/lib/ui`.
  *
  * Theme-aware color tokens (surface, text, semantic) live in
- * `@/lib/shared/theme`; use `useTheme()` in components. `GLASS`, `SEMANTIC`,
- * `TEXT_OPACITY`, and `ACCENT` remain as deprecated re-exports sourced from
- * the dark theme so non-migrated components continue to render identically.
- * Migrate to `useTheme()` when you touch one of these for other reasons —
- * see `apps/mobile/lib/shared/theme/README.md`.
+ * `@/lib/shared/theme`; consume them with `useTheme()` at render time.
  */
 
-import { darkTheme } from './theme/dark'
 import { RADIUS, SPACING as UI_SPACING, TOUCH_TARGET as UI_TOUCH_TARGET } from '@/lib/ui/tokens'
 
 export const SPACING = UI_SPACING
-
-/**
- * Numeric opacity levels for `rgba(255,255,255, X)` composition.
- *
- * @deprecated Prefer `useTheme().text.*` for full color strings, or
- *   `INK_TINT` from `@/lib/ui/tokens` for opacity composition.
- */
-export const TEXT_OPACITY = {
-  primary: 1,
-  secondary: 0.6,
-  tertiary: 0.4,
-  muted: 0.35,
-} as const
-
-/**
- * Glass surface colors.
- *
- * @deprecated Use `useTheme().surface.*` instead. Re-exported from `darkTheme`
- *   for back-compat during the theme migration.
- */
-export const GLASS = {
-  bg: darkTheme.surface.glass,
-  bgSm: darkTheme.surface.glassSm,
-  bgPill: darkTheme.surface.glassPill,
-  border: darkTheme.surface.border,
-  borderPill: darkTheme.surface.borderPill,
-} as const
-
-/**
- * Semantic status colors.
- *
- * @deprecated Use `useTheme().semantic.*` instead. Re-exported from `darkTheme`
- *   for back-compat during the theme migration.
- */
-export const SEMANTIC = darkTheme.semantic
-
-export type SemanticRole = keyof typeof SEMANTIC
-
-/** @deprecated Use SEMANTIC.warning / SEMANTIC.error instead */
-export const ACCENT = {
-  amber: SEMANTIC.warning.color,
-  amberBg: SEMANTIC.warning.bg,
-  amberBorder: SEMANTIC.warning.border,
-  red: SEMANTIC.error.color,
-} as const
 
 export const BADGE = {
   paddingH: 10,
