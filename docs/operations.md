@@ -25,6 +25,9 @@ npm run test:coverage # Coverage report (target ≥80%)
 | `CLUSTERING_CANDIDATE_COUNT` | No | pgvector RPC candidate count (default 15) |
 | `CLUSTERING_PGVECTOR_BATCH_SIZE` | No | Articles per RPC batch in clustering Pass 1 (default 25) |
 | `EMBED_BATCH_SIZE` | No | Gemini embedding texts per API call (default 100) |
+| `PIPELINE_ASSEMBLY_MODE` | No | Override for tiered routing. Unset (default) = tiered: rich multi-bias clusters use Gemini synthesis, single-source uses the cheap summary path, thin clusters stay deterministic. `deterministic` = force every story through the no-Gemini path. `gemini` = force rich/single Gemini paths (pre-tiered behavior, ignores bucket threshold). |
+| `PIPELINE_RICH_CLUSTER_MIN_SOURCES` | No | Minimum source count for a cluster to qualify for the rich Gemini path (default 3) |
+| `PIPELINE_RICH_CLUSTER_MIN_BUCKETS` | No | Minimum distinct L/C/R bias buckets for a cluster to qualify for the rich Gemini path (default 2) |
 | `PIPELINE_CONCURRENT_STAGES` | No | Run embed+cluster in parallel when `true` (default `false`) |
 | `PIPELINE_INGEST_MAX_PER_SOURCE` | No | Max articles per source per ingest run (default 30) |
 | `PIPELINE_ASSEMBLY_CONCURRENCY` | No | Assembly concurrency limit (default 12) |
@@ -69,7 +72,7 @@ Article identity rules:
 **Process** (`/api/cron/process`): Orchestrates three bounded stages in freshness-first order and returns backlog counts before and after the run:
 1. **Embed** — claims a limited batch of unembedded articles and generates Gemini vector embeddings
 2. **Cluster** — claims a limited batch of embedded, unassigned articles and groups them into story clusters by cosine similarity
-3. **Assemble** — claims a limited batch of pending stories and generates headline, summary, spectrum, topic, region, blindspot flag, and entity tags
+3. **Assemble** — claims a limited batch of pending stories and writes headline, summary, spectrum, topic, region, blindspot flag, and entity tags. Default routing is tiered: rich multi-bias clusters (≥`PIPELINE_RICH_CLUSTER_MIN_SOURCES` sources spanning ≥`PIPELINE_RICH_CLUSTER_MIN_BUCKETS` L/C/R buckets) go through full Gemini synthesis; single-source clusters use the cheap Gemini summary path; thin clusters (below either threshold) use the deterministic extractive path. Set `PIPELINE_ASSEMBLY_MODE=deterministic` to force the no-Gemini path, or `PIPELINE_ASSEMBLY_MODE=gemini` to force the rich/single Gemini paths for every cluster.
 
 The process runner is backlog-aware, multi-pass, and freshness-first:
 - embed target per invocation defaults to `1500` articles
@@ -126,7 +129,18 @@ npx tsx scripts/backfill-tags.ts
 npx tsx scripts/backfill-tags.ts --batch-size 10
 ```
 
-The script queries published stories with zero `story_tags` rows, runs `extractEntities` on their articles, and calls `upsertStoryTags`. A `.backfill-empty-ids` skip file tracks stories that yielded no entities so repeated runs skip them.
+The script queries published stories with zero `story_tags` rows, runs local deterministic `extractEntities` on their articles, and calls `upsertStoryTags`. A `.backfill-empty-ids` skip file tracks stories that yielded no entities so repeated runs skip them.
+
+### Audit Deterministic Assembly
+
+Before or after switching assembly behavior, compare stored story fields against deterministic output without writing to the database:
+
+```bash
+npm run audit:deterministic-assembly -- --limit 100
+npm run audit:deterministic-assembly -- --limit 100 --multi-only
+```
+
+The audit prints changed-field counts and up to 10 examples. It is read-only and requires `NEXT_PUBLIC_SUPABASE_URL` plus `SUPABASE_SERVICE_ROLE_KEY`.
 
 ### Backfill Single-Source Stories
 
@@ -415,7 +429,7 @@ Click the oldest warn/error row (events are sorted newest-first; scroll to the b
 | `embedding_write_failed` | embed | error | `bulkWriteEmbeddings` upsert failed. `payload.batchSize` tells you how many rows were affected. |
 | `retry_count_read_failed` | cluster | warn | Couldn't read `clustering_retry_count` before scheduling a failure retry; the run continues with retry count = 0 for affected rows. Non-fatal. |
 | `cleanup_fallback_failed` | cluster | error | The cleanup phase could not release claims after a primary failure. `payload.articleIds` lists the stranded rows. Check for `apply_clustering_failure` RPC / migration 043. |
-| `tag_extraction_failed` | assemble | warn | `extractEntities` rejected; the story still publishes, it just has no tags. Usually a Gemini API error. |
+| `tag_extraction_failed` | assemble | warn | `extractEntities` or `upsertStoryTags` rejected; the story still publishes, it just has no tags. |
 
 ### 4. Query the table directly (for ad-hoc investigations)
 
@@ -968,7 +982,7 @@ See `docs/architecture.md` for full parameter and response shapes.
 |-------|---------|
 | `sources` | News sources with bias, factuality, ownership metadata |
 | `articles` | Individual articles fetched from RSS feeds |
-| `stories` | Clustered story groups with AI-generated summaries and explicit publication state — migration 010 |
+| `stories` | Clustered story groups with deterministic or AI-generated summaries and explicit publication state — migration 010 |
 | `bookmarks` | User bookmarks (user_id, story_id) — migration 003 |
 | `reading_history` | User reading history (user_id, story_id, read_at, is_read) — migration 003 |
 | `user_preferences` | User preferences (topics, region, perspective, factuality, digest flag) — migrations 004, 009 |

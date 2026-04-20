@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { Region, Topic } from '@/lib/types'
 
 vi.mock('@/lib/ai/story-classifier', () => ({
@@ -32,6 +32,7 @@ import { generateAISummary } from '@/lib/ai/summary-generator'
 
 const mockClassifyStory = vi.mocked(classifyStory)
 const mockSummary = vi.mocked(generateAISummary)
+const ORIGINAL_ASSEMBLY_MODE = process.env.PIPELINE_ASSEMBLY_MODE
 
 function classificationResult(headline: string, topic: Topic = 'politics', region: Region = 'us') {
   return { 
@@ -156,8 +157,17 @@ function createMockClient() {
 describe('assembleStories concurrency', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    process.env.PIPELINE_ASSEMBLY_MODE = 'gemini'
     mockSummary.mockResolvedValue({ aiSummary: { commonGround: 'cg', leftFraming: 'lf', rightFraming: 'rf' }, sentiment: null, keyQuotes: null, keyClaims: null })
     mockClassifyStory.mockResolvedValue(classificationResult('Generated Headline', 'politics', 'us'))
+  })
+
+  afterEach(() => {
+    if (ORIGINAL_ASSEMBLY_MODE === undefined) {
+      delete process.env.PIPELINE_ASSEMBLY_MODE
+    } else {
+      process.env.PIPELINE_ASSEMBLY_MODE = ORIGINAL_ASSEMBLY_MODE
+    }
   })
 
   it('starts multiple story assemblies before the first classification resolves', async () => {

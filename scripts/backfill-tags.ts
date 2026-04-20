@@ -146,12 +146,13 @@ async function main() {
 
         const entities = await extractEntities(titles, descriptions)
 
-        if (entities === null) {
-          console.log(`  [skip] ${story.id} — extraction failed`)
-          continue
-        }
-
-        if (entities.length === 0) {
+        // The deterministic extractor returns `null` when non-empty input
+        // produced no candidates. For the main pipeline that means
+        // "preserve existing tags" — but backfill only processes stories
+        // that already have zero tags, so null is indistinguishable from
+        // [] here and we should still cache the story as known-empty so
+        // subsequent runs skip it instead of retrying indefinitely.
+        if (entities === null || entities.length === 0) {
           totalSkippedEmpty++
           knownEmptyIds.add(story.id)
           console.log(`  [empty] ${story.id} — no entities extracted`)

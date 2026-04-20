@@ -78,7 +78,7 @@ Single source of truth for PRD implementation status. See `PRD_Axiom_News.md` fo
 
 - [x] Spectrum distribution calculation per story (live data)
 - [x] Blindspot detection algorithm (>80% one-side threshold)
-- [x] Cross-spectrum AI summary generation (Gemini, 3 perspectives)
+- [x] Deterministic story assembly by default; legacy Gemini summaries available via `PIPELINE_ASSEMBLY_MODE=gemini`
 - [x] Story timeline feature
 - [x] Offline bookmarks (PWA cache)
 
@@ -89,7 +89,7 @@ Single source of truth for PRD implementation status. See `PRD_Axiom_News.md` fo
 - [x] Custom topic feeds + personalized "For You" tab
 - [x] Weekly Blindspot digest email (Resend)
 - [ ] Subscription tiers (Free / Pro / Premium) via Stripe
-- [x] Content-based region classification (AI-classified during story assembly)
+- [x] Content-based region classification (deterministic by default during story assembly)
 - [x] React Native mobile app (iOS + Android) — `apps/mobile/` Phase 1-5 substantially complete
 
 ### Phase 5 — Personalisation (added post-PRD)

@@ -46,6 +46,22 @@ const mockSpectrum = vi.mocked(calculateSpectrum)
 const mockBlindspot = vi.mocked(isBlindspot)
 const mockExtractEntities = vi.mocked(extractEntities)
 const mockUpsertStoryTags = vi.mocked(upsertStoryTags)
+const ORIGINAL_ASSEMBLY_MODE = process.env.PIPELINE_ASSEMBLY_MODE
+
+// The pipeline default is the deterministic assembly path; these tests opt
+// into the legacy Gemini path explicitly. One integration test below deletes
+// this env var to exercise the deterministic-by-default behavior.
+beforeEach(() => {
+  process.env.PIPELINE_ASSEMBLY_MODE = 'gemini'
+})
+
+afterEach(() => {
+  if (ORIGINAL_ASSEMBLY_MODE === undefined) {
+    delete process.env.PIPELINE_ASSEMBLY_MODE
+  } else {
+    process.env.PIPELINE_ASSEMBLY_MODE = ORIGINAL_ASSEMBLY_MODE
+  }
+})
 
 function classificationResult(headline: string, topic: Topic = 'politics', region: Region = 'us') {
   return { 
@@ -443,6 +459,187 @@ describe('assembleSingleStory', () => {
         source_count: 1,
       })
     )
+  })
+
+  it('uses deterministic assembly for thin clusters (2 sources below rich threshold)', async () => {
+    delete process.env.PIPELINE_ASSEMBLY_MODE
+    const articles = [
+      {
+        id: 'a1',
+        title: 'Senate passes climate bill after marathon vote',
+        description: 'The bill expands clean energy tax credits.',
+        source_id: 's1',
+        image_url: null,
+        published_at: '2026-03-22T10:00:00Z',
+      },
+      {
+        id: 'a2',
+        title: 'Climate bill clears Senate with new spending',
+        description: 'Republicans criticized the package as costly.',
+        source_id: 's2',
+        image_url: null,
+        published_at: '2026-03-22T11:00:00Z',
+      },
+    ]
+    const sources = [
+      { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
+      { id: 's2', bias: 'right', factuality: 'high', ownership: 'independent' },
+    ]
+
+    mockSpectrum.mockReturnValue([
+      { bias: 'left', percentage: 50 },
+      { bias: 'right', percentage: 50 },
+    ])
+    mockBlindspot.mockReturnValue(false)
+    mockExtractEntities.mockResolvedValue([])
+    mockUpsertStoryTags.mockResolvedValue(undefined)
+
+    const client = createMockClient({
+      articles: { data: articles, error: null },
+      sources: { data: sources, error: null },
+    })
+
+    const result = await assembleSingleStory(client as never, 'story-1')
+
+    expect(result.cheapModelTasks).toBe(0)
+    expect(result.cheapModelFallbacks).toBe(0)
+    expect(result.summaryFallback).toBe(false)
+    expect(mockClassifyStory).not.toHaveBeenCalled()
+    expect(mockSummary).not.toHaveBeenCalled()
+    expect(mockSingleSourceSummary).not.toHaveBeenCalled()
+    expect(client._updateFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headline: 'Climate bill clears Senate with new spending',
+        topic: 'environment',
+        region: 'us',
+        ai_summary: expect.objectContaining({
+          commonGround: expect.stringContaining('• Climate bill clears Senate with new spending'),
+          leftFraming: expect.stringContaining('• Senate passes climate bill after marathon vote'),
+          rightFraming: expect.stringContaining('• Climate bill clears Senate with new spending'),
+        }),
+        sentiment: null,
+        key_quotes: null,
+        key_claims: expect.arrayContaining([
+          expect.objectContaining({
+            claim: 'Climate bill clears Senate with new spending',
+            side: 'both',
+            disputed: false,
+          }),
+        ]),
+      })
+    )
+  })
+
+  it('uses rich Gemini path for 3-source L/C/R clusters with unset mode', async () => {
+    delete process.env.PIPELINE_ASSEMBLY_MODE
+    const articles = [
+      { id: 'a1', title: 'Left take on policy', description: 'Desc L', source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
+      { id: 'a2', title: 'Centrist analysis of policy', description: 'Desc C', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
+      { id: 'a3', title: 'Right rebuttal of policy', description: 'Desc R', source_id: 's3', image_url: null, published_at: '2026-03-22T12:00:00Z' },
+    ]
+    const sources = [
+      { id: 's1', bias: 'left', factuality: 'high', ownership: 'corporate' },
+      { id: 's2', bias: 'center', factuality: 'high', ownership: 'independent' },
+      { id: 's3', bias: 'right', factuality: 'high', ownership: 'corporate' },
+    ]
+
+    mockClassifyStory.mockResolvedValue(classificationResult('Rich headline', 'politics', 'us'))
+    mockSummary.mockResolvedValue({
+      aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
+      sentiment: { left: 'hopeful', right: 'critical' },
+      keyQuotes: [{ text: 'q', sourceName: 'Source A', sourceBias: 'left' }],
+      keyClaims: [{ claim: 'c', side: 'both', disputed: false }],
+    })
+    mockSpectrum.mockReturnValue([
+      { bias: 'left', percentage: 33 },
+      { bias: 'center', percentage: 34 },
+      { bias: 'right', percentage: 33 },
+    ])
+    mockBlindspot.mockReturnValue(false)
+    mockExtractEntities.mockResolvedValue([])
+    mockUpsertStoryTags.mockResolvedValue(undefined)
+
+    const client = createMockClient({
+      articles: { data: articles, error: null },
+      sources: { data: sources, error: null },
+    })
+
+    await assembleSingleStory(client as never, 'story-1')
+
+    expect(mockClassifyStory).toHaveBeenCalledOnce()
+    expect(mockSummary).toHaveBeenCalledOnce()
+    expect(mockSingleSourceSummary).not.toHaveBeenCalled()
+    expect(client._updateFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headline: 'Rich headline',
+        source_count: 3,
+        sentiment: { left: 'hopeful', right: 'critical' },
+        key_quotes: [{ text: 'q', sourceName: 'Source A', sourceBias: 'left' }],
+      })
+    )
+  })
+
+  it('zeros controversy_score for thin clusters missing one framing side', async () => {
+    delete process.env.PIPELINE_ASSEMBLY_MODE
+    const articles = [
+      { id: 'a1', title: 'Progressive outlet covers bill details', description: 'Desc 1', source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
+      { id: 'a2', title: 'Left-leaning analysis of the bill', description: 'Desc 2', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
+    ]
+    const sources = [
+      { id: 's1', bias: 'far-left', factuality: 'high', ownership: 'corporate' },
+      { id: 's2', bias: 'left', factuality: 'high', ownership: 'independent' },
+    ]
+
+    mockSpectrum.mockReturnValue([{ bias: 'left', percentage: 100 }])
+    mockBlindspot.mockReturnValue(true)
+    mockExtractEntities.mockResolvedValue([])
+    mockUpsertStoryTags.mockResolvedValue(undefined)
+
+    const client = createMockClient({
+      articles: { data: articles, error: null },
+      sources: { data: sources, error: null },
+    })
+
+    await assembleSingleStory(client as never, 'story-1')
+
+    // Deterministic path leaves rightFraming='' for an all-left cluster. We
+    // must NOT treat that as maximum divergence — consumers would render a
+    // false HIGH DISAGREEMENT badge over what is really missing coverage.
+    expect(client._updateFn).toHaveBeenCalledWith(
+      expect.objectContaining({ controversy_score: 0 }),
+    )
+  })
+
+  it('uses deterministic path when 3 sources all share one bias bucket (thin-by-bucket)', async () => {
+    delete process.env.PIPELINE_ASSEMBLY_MODE
+    const articles = [
+      { id: 'a1', title: 'Progressive outlet covers bill', description: 'Desc 1', source_id: 's1', image_url: null, published_at: '2026-03-22T10:00:00Z' },
+      { id: 'a2', title: 'Left-leaning analysis of bill', description: 'Desc 2', source_id: 's2', image_url: null, published_at: '2026-03-22T11:00:00Z' },
+      { id: 'a3', title: 'Progressive commentary on bill details', description: 'Desc 3', source_id: 's3', image_url: null, published_at: '2026-03-22T12:00:00Z' },
+    ]
+    const sources = [
+      { id: 's1', bias: 'far-left', factuality: 'high', ownership: 'corporate' },
+      { id: 's2', bias: 'left', factuality: 'high', ownership: 'independent' },
+      { id: 's3', bias: 'lean-left', factuality: 'high', ownership: 'corporate' },
+    ]
+
+    mockSpectrum.mockReturnValue([{ bias: 'left', percentage: 100 }])
+    mockBlindspot.mockReturnValue(true)
+    mockExtractEntities.mockResolvedValue([])
+    mockUpsertStoryTags.mockResolvedValue(undefined)
+
+    const client = createMockClient({
+      articles: { data: articles, error: null },
+      sources: { data: sources, error: null },
+    })
+
+    const result = await assembleSingleStory(client as never, 'story-1')
+
+    expect(mockClassifyStory).not.toHaveBeenCalled()
+    expect(mockSummary).not.toHaveBeenCalled()
+    expect(mockSingleSourceSummary).not.toHaveBeenCalled()
+    expect(result.cheapModelTasks).toBe(0)
+    expect(result.summaryFallback).toBe(false)
   })
 
   it('throws when no articles found', async () => {

@@ -12,6 +12,12 @@ import type { BiasCategory, FactualityLevel, OwnershipType } from '@/lib/types'
 import { classifyStory } from '@/lib/ai/story-classifier'
 import { generateAISummary, generateSingleSourceSummary, isFallbackSummary, type ExpandedSummaryResult } from '@/lib/ai/summary-generator'
 import {
+  buildDeterministicStoryAssembly,
+  LEFT_BIASES,
+  RIGHT_BIASES,
+} from '@/lib/ai/deterministic-assembly'
+import { chooseAssemblyPath } from '@/lib/ai/assembly-routing'
+import {
   computeStoryVelocity,
   computeSourceDiversity,
   computeImpactScore,
@@ -268,14 +274,45 @@ export async function assembleSingleStory(
   const sourceDiversity = computeSourceDiversity(ownerships)
 
   const isSingleSource = sourceIds.length === 1
-  const modelStartedAt = Date.now()
+  const assemblyPath = chooseAssemblyPath({ sourceCount: sourceIds.length, biases })
 
   let normalizedHeadline: { headline: string; usedCheapModel: boolean; usedFallback: boolean }
   let normalizedTopic: { topic: string; usedCheapModel: boolean; usedFallback: boolean }
   let normalizedRegion: { region: string; usedCheapModel: boolean; usedFallback: boolean }
   let summaryResult: ExpandedSummaryResult
 
-  if (isSingleSource) {
+  if (assemblyPath === 'thin') {
+    const deterministic = buildDeterministicStoryAssembly(
+      articles.map((article) => ({
+        title: article.title,
+        description: article.description,
+        bias: sourceMap.get(article.source_id)?.bias ?? 'center',
+      })),
+      { isSingleSource }
+    )
+    normalizedHeadline = {
+      headline: deterministic.headline,
+      usedCheapModel: false,
+      usedFallback: false,
+    }
+    normalizedTopic = {
+      topic: deterministic.topic,
+      usedCheapModel: false,
+      usedFallback: false,
+    }
+    normalizedRegion = {
+      region: deterministic.region,
+      usedCheapModel: false,
+      usedFallback: false,
+    }
+    summaryResult = {
+      aiSummary: deterministic.aiSummary,
+      sentiment: deterministic.sentiment,
+      keyQuotes: deterministic.keyQuotes,
+      keyClaims: deterministic.keyClaims,
+    }
+  } else if (assemblyPath === 'single') {
+    const modelStartedAt = Date.now()
     const article = articles[0]
     const [classificationRes, singleSummary] = await Promise.all([
       classifyStory(titles),
@@ -289,7 +326,10 @@ export async function assembleSingleStory(
     normalizedTopic = { topic: classificationRes.topic, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.topicFallback }
     normalizedRegion = { region: classificationRes.region, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.regionFallback }
     summaryResult = singleSummary
+    modelTimeMs += Date.now() - modelStartedAt
   } else {
+    // rich
+    const modelStartedAt = Date.now()
     const [classificationRes, fullSummary] = await Promise.all([
       classifyStory(titles),
       generateAISummary(
@@ -304,9 +344,8 @@ export async function assembleSingleStory(
     normalizedTopic = { topic: classificationRes.topic, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.topicFallback }
     normalizedRegion = { region: classificationRes.region, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.regionFallback }
     summaryResult = fullSummary
+    modelTimeMs += Date.now() - modelStartedAt
   }
-
-  modelTimeMs += Date.now() - modelStartedAt
 
   const { aiSummary, sentiment, keyQuotes, keyClaims } = summaryResult
 
@@ -323,7 +362,17 @@ export async function assembleSingleStory(
     coverageDuration,
     sourceDiversity
   )
-  const controversyScore = isSingleSource ? 0 : computeControversyScore(aiSummary)
+  // Controversy is only meaningful when the cluster actually contains both
+  // left- and right-leaning sources. Single-sided thin clusters (all-left,
+  // all-right, L+C only) emit a placeholder on the missing side which would
+  // otherwise show up as maximum divergence — a false "high disagreement"
+  // signal over what is really one-sided coverage.
+  const hasLeftSource = biases.some((bias) => LEFT_BIASES.has(bias))
+  const hasRightSource = biases.some((bias) => RIGHT_BIASES.has(bias))
+  const controversyScore =
+    isSingleSource || !(hasLeftSource && hasRightSource)
+      ? 0
+      : computeControversyScore(aiSummary)
 
   // `trending_score` (migration 050) is deliberately NOT written here — it's
   // populated exclusively by `refresh_trending_scores()` via the
@@ -457,7 +506,7 @@ export async function assembleSingleStory(
       (normalizedHeadline.usedFallback ? 1 : 0)
       + (normalizedTopic.usedFallback ? 1 : 0)
       + (normalizedRegion.usedFallback ? 1 : 0),
-    summaryFallback: isFallbackSummary(summaryResult),
+    summaryFallback: assemblyPath === 'thin' ? false : isFallbackSummary(summaryResult),
     tagPromise,
   }
 }

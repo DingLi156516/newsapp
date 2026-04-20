@@ -89,6 +89,7 @@ __tests__/
       spectrum-calculator.test.ts  story-classifier.test.ts
       summary-generator.test.ts
       blindspot-detector.test.ts
+      deterministic-assembly.test.ts  entity-extractor.test.ts
       story-assembler.test.ts  story-assembler-concurrency.test.ts
     email/
       send-digest.test.ts

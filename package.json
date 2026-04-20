@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "backfill:tags": "tsx scripts/backfill-tags.ts"
+    "backfill:tags": "tsx scripts/backfill-tags.ts",
+    "audit:deterministic-assembly": "tsx scripts/audit-deterministic-assembly.ts"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

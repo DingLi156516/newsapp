@@ -87,19 +87,16 @@ This runs three sub-stages in fair, freshness-first rounds:
 
 #### 2a. Assembly (`lib/ai/story-assembler.ts`)
 
-For each pending story (`assembly_status = 'pending'`), the system claims a bounded batch, and runs **2 primary model calls in parallel**:
+For each pending story (`assembly_status = 'pending'`), the system claims a bounded batch. By default, assembly is deterministic and extractive with no model calls; `PIPELINE_ASSEMBLY_MODE=gemini` opts into the legacy generated-summary path.
 
 | Operation | File | What it does |
 |-----------|------|-------------|
-| **Classification** | `story-classifier.ts` | Writes one neutral headline from all article titles, picks one of 9 categories (politics, world, tech, etc.), and classifies story into a geographic region (us, uk, etc.) |
-| **AI Summary** | `summary-generator.ts` | Produces 3 perspectives: Common Ground, Left Framing, Right Framing |
+| **Deterministic Assembly** | `deterministic-assembly.ts` | Chooses an extractive headline, local topic/region, extractive common-ground bullets, source-bias grouped title bullets, and deterministic key claims |
+| **Legacy Gemini Classification** | `story-classifier.ts` | Only used with `PIPELINE_ASSEMBLY_MODE=gemini`; writes one neutral headline from all article titles, picks one of 9 categories, and classifies story into a geographic region |
+| **Legacy Gemini Summary** | `summary-generator.ts` | Only used with `PIPELINE_ASSEMBLY_MODE=gemini`; produces Common Ground, Left Framing, Right Framing |
 | **Spectrum** | `spectrum-calculator.ts` | Deterministically calculates % breakdown by political leaning |
 | **Blindspot** | `blindspot-detector.ts` | Deterministically flags stories where >80% coverage is from one side |
-| **Entity Tags** | `entity-extractor.ts` + `tag-upsert.ts` | Starts async entity extraction after update and awaits completion at the end of the batch; writes `story_tags` |
-
-The headline prompt explicitly tells Gemini: *"avoid loaded language or bias framing."*
-
-The summary prompt labels each article's source bias (e.g., `[LEFT] CNN: ...`, `[RIGHT] Fox News: ...`) so Gemini can distinguish perspectives.
+| **Entity Tags** | `entity-extractor.ts` + `tag-upsert.ts` | Starts async local entity extraction after update and awaits completion at the end of the batch; writes `story_tags` |
 
 Entity tag extraction is scheduled after the story update and runs concurrently with other stories in the batch; all tag promises are awaited at the end of the batch to prevent serverless termination before completion. Tagging failures are swallowed so they never block publication or retries. A pure publication-decision layer scores the story and either auto-publishes it or routes it to manual review. Sparse clusters (fewer than 2 articles or sources) go to review. Stories that fail assembly move to `assembly_status = 'failed'` and stay out of the public feed until reprocessed. Story claiming is batched. Story assembly runs with bounded concurrency (default 6, env: PIPELINE_ASSEMBLY_CONCURRENCY).
 `assembly_claimed_at` acts as the in-flight lease for this stage; claims older than 60 minutes are treated as stale and can be reclaimed.
@@ -310,13 +307,14 @@ lib/ai/          — AI processing (12 files)
   embeddings.ts         — Generates vector embeddings for articles
   clustering.ts         — Groups articles into story clusters by embedding similarity (6 composable stages: fetch, claim, pgvector+JS Pass 1, union-find Pass 2, persist assignments, persist clusters); singletons stay unclustered and expire after 7 days
   recluster.ts          — Re-clustering maintenance: merges fragmented story pairs, ejects misassigned articles below split threshold
+  deterministic-assembly.ts — Builds no-cost extractive story headline, summary, classification, and key-claim fields
   spectrum-calculator.ts — Computes bias distribution (SpectrumSegment[]) per story cluster
   topic-classifier.ts   — Provides deterministic fallback topic logic
   region-classifier.ts  — Provides deterministic fallback region logic
-  story-classifier.ts   — Synthesises a neutral headline, topic and region from cluster headlines in a single Gemini call
-  summary-generator.ts  — Generates cross-spectrum AISummary (commonGround, leftFraming, rightFraming)
+  story-classifier.ts   — Legacy Gemini headline/topic/region generation when `PIPELINE_ASSEMBLY_MODE=gemini`
+  summary-generator.ts  — Legacy Gemini cross-spectrum AISummary generation when `PIPELINE_ASSEMBLY_MODE=gemini`
   blindspot-detector.ts — Flags stories with skewed left/right coverage as blindspots
-  entity-extractor.ts   — Extracts named entities (people, orgs, locations, topics) from article titles/descriptions via Gemini
+  entity-extractor.ts   — Extracts named entities (people, orgs, locations, topics) from article titles/descriptions with local heuristics
   tag-upsert.ts         — Upserts extracted entities into story_tags table
   story-assembler.ts    — Coordinates the above modules to produce a complete DbStoryInsert
 
@@ -522,7 +520,7 @@ A journalist publishes an article about a new climate bill on NPR:
 1. **Ingest** — NPR's RSS feed is fetched, the article is saved to `articles` with `story_id = null`
 2. **Embed** — "Climate bill passes Senate with bipartisan support" → `[0.023, -0.018, ...]` (768 numbers)
 3. **Cluster** — The embedding is 82% similar to a Fox News article about the same bill → both get assigned to the same story
-4. **Assemble** — AI generates headline: *"Senate Passes Major Climate Legislation"*, topic: `environment`, summary with three perspectives, spectrum: 60% left / 15% center / 25% right, not a blindspot
+4. **Assemble** — deterministic assembly chooses an extractive headline, topic: `environment`, source-bias grouped summary fields, spectrum: 60% left / 15% center / 25% right, not a blindspot
 5. **Publish** — The classifier marks the story `published` if confidence is high enough, otherwise it lands in `/admin/review`
 6. **API** — User opens Axiom, published stories appear in the feed with a spectrum bar and source count badge
 7. **Detail** — User clicks in, sees NPR and Fox News listed as covering sources, reads how left outlets emphasize environmental impact while right outlets focus on economic costs
