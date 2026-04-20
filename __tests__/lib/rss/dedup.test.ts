@@ -42,6 +42,7 @@ function makeFeedItem(url: string, title = 'Test'): ParsedFeedItem {
     content: null,
     imageUrl: null,
     publishedAt: '2026-01-01T00:00:00Z',
+    categories: null,
   }
 }
 

@@ -309,8 +309,9 @@ lib/ai/          — AI processing (12 files)
   recluster.ts          — Re-clustering maintenance: merges fragmented story pairs, ejects misassigned articles below split threshold
   deterministic-assembly.ts — Builds no-cost extractive story headline, summary, classification, and key-claim fields
   spectrum-calculator.ts — Computes bias distribution (SpectrumSegment[]) per story cluster
-  topic-classifier.ts   — Provides deterministic fallback topic logic
-  region-classifier.ts  — Provides deterministic fallback region logic
+  topic-classifier.ts   — Provides deterministic keyword-based topic fallback
+  region-classifier.ts  — Provides deterministic keyword-based region fallback
+  thin-topic-classifier.ts — Multi-signal topic/region classifier for the thin path (RSS `<category>` → per-source topic prior → keyword fallback → default). Zero Gemini calls.
   story-classifier.ts   — Legacy Gemini headline/topic/region generation when `PIPELINE_ASSEMBLY_MODE=gemini`
   summary-generator.ts  — Legacy Gemini cross-spectrum AISummary generation when `PIPELINE_ASSEMBLY_MODE=gemini`
   blindspot-detector.ts — Flags stories with skewed left/right coverage as blindspots

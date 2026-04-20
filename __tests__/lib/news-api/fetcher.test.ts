@@ -69,7 +69,7 @@ describe('newsApiFetcher', () => {
   })
 
   it('routes to NewsAPI provider', async () => {
-    const mockItems = [{ title: 'Test', url: 'https://test.com', description: null, content: null, imageUrl: null, publishedAt: '2024-01-01T00:00:00Z' }]
+    const mockItems = [{ title: 'Test', url: 'https://test.com', description: null, content: null, imageUrl: null, publishedAt: '2024-01-01T00:00:00Z', categories: null }]
     vi.mocked(fetchNewsApi).mockResolvedValue(mockItems)
 
     const result = await newsApiFetcher.fetch(newsapiSource)
@@ -81,7 +81,7 @@ describe('newsApiFetcher', () => {
   })
 
   it('routes to GDELT provider', async () => {
-    const mockItems = [{ title: 'Climate', url: 'https://news.com', description: null, content: null, imageUrl: null, publishedAt: '2024-01-01T00:00:00Z' }]
+    const mockItems = [{ title: 'Climate', url: 'https://news.com', description: null, content: null, imageUrl: null, publishedAt: '2024-01-01T00:00:00Z', categories: null }]
     vi.mocked(fetchGdelt).mockResolvedValue(mockItems)
 
     const result = await newsApiFetcher.fetch(gdeltSource)

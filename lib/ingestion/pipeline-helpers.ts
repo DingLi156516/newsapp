@@ -29,6 +29,7 @@ export function toArticleInsert(
     image_url: item.imageUrl,
     published_at: item.publishedAt,
     published_at_estimated: item.publishedAt === null,
+    rss_categories: item.categories ? [...item.categories] : null,
   }
 }
 

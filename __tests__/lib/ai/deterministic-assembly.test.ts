@@ -153,6 +153,17 @@ describe('deterministic assembly helpers', () => {
     expect(result.aiSummary.rightFraming.toLowerCase()).toContain('no coverage')
   })
 
+  it('uses classifier-supplied topic/region overrides when provided', () => {
+    const result = buildDeterministicStoryAssembly([articles[0]], {
+      isSingleSource: true,
+      topic: 'technology',
+      region: 'uk',
+    })
+
+    expect(result.topic).toBe('technology')
+    expect(result.region).toBe('uk')
+  })
+
   it('prefers the shortest central headline as the representative headline', () => {
     expect(selectRepresentativeHeadline([
       'Long analysis: What the Senate climate vote means for the future of clean energy policy',

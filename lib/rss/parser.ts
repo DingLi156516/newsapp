@@ -17,6 +17,10 @@ export interface ParsedFeedItem {
   // unparseable value. The ingestion layer records these as
   // `published_at_estimated = true` rather than fabricating a timestamp.
   readonly publishedAt: string | null
+  // RSS <category> tag values — feeds like TechCrunch/NYT tag items with
+  // section labels ("Technology", "Politics") that feed the thin-cluster
+  // topic classifier's first signal. Null when absent or empty.
+  readonly categories: readonly string[] | null
 }
 
 const parser = new RssParser({
@@ -44,6 +48,34 @@ function extractImageUrl(item: RssParser.Item): string | null {
   return null
 }
 
+function normalizeCategories(raw: unknown): readonly string[] | null {
+  if (!Array.isArray(raw)) return null
+
+  const normalized: string[] = []
+  for (const entry of raw) {
+    // rss-parser passes attributed categories as objects:
+    //   <category domain="section">Politics</category>  →  { _: 'Politics', $: { domain: 'section' } }
+    // Plain <category>Politics</category> is delivered as a string. Read
+    // the text content from either shape; skip anything unrecognisable.
+    let text: string | null = null
+    if (typeof entry === 'string') {
+      text = entry
+    } else if (entry && typeof entry === 'object') {
+      const inner = (entry as { _?: unknown })._
+      if (typeof inner === 'string') {
+        text = inner
+      }
+    }
+
+    if (text === null) continue
+    const trimmed = text.trim()
+    if (trimmed.length === 0) continue
+    normalized.push(trimmed)
+  }
+
+  return normalized.length > 0 ? normalized : null
+}
+
 function normalizeDate(dateString: string | undefined): string | null {
   if (!dateString) {
     return null
@@ -69,6 +101,7 @@ export async function parseFeed(url: string): Promise<readonly ParsedFeedItem[]>
       content: item.content?.trim() ?? null,
       imageUrl: extractImageUrl(item),
       publishedAt: normalizeDate(item.isoDate ?? item.pubDate),
+      categories: normalizeCategories((item as { categories?: unknown }).categories),
     }))
 }
 

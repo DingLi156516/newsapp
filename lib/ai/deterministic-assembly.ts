@@ -25,6 +25,11 @@ export interface DeterministicAssemblyArticle {
 
 export interface DeterministicAssemblyOptions {
   readonly isSingleSource: boolean
+  // Optional classifier-supplied topic/region. When present, skip the
+  // keyword fallback. Lets callers plug in the multi-signal thin-topic
+  // classifier without this module reaching into the DB.
+  readonly topic?: Topic
+  readonly region?: Region
 }
 
 export interface DeterministicStoryAssembly {
@@ -208,8 +213,8 @@ export function buildDeterministicStoryAssembly(
 
   return {
     headline,
-    topic: fallbackTopic(titles),
-    region: fallbackRegion(titles),
+    topic: options.topic ?? fallbackTopic(titles),
+    region: options.region ?? fallbackRegion(titles),
     aiSummary,
     sentiment: null,
     keyQuotes: null,

@@ -100,6 +100,7 @@ describe('Database type interfaces', () => {
       created_at: '2026-01-01T00:00:00Z',
       fetched_at: '2026-01-01T00:00:00Z',
       published_at_estimated: false,
+      rss_categories: null,
     }
     expect(article.id).toBe('a1')
     expect(article.source_id).toBe('s1')

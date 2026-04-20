@@ -43,6 +43,7 @@ describe('fetchGdelt', () => {
       content: null,
       imageUrl: 'https://news.com/image.jpg',
       publishedAt: '2024-01-15T12:00:00.000Z',
+      categories: null,
     })
     expect(items[1].imageUrl).toBeNull()
   })

@@ -209,6 +209,7 @@ export interface DbArticle {
   created_at: string
   fetched_at: string
   published_at_estimated: boolean
+  rss_categories: string[] | null
 }
 
 export interface DbArticleInsert {
@@ -235,6 +236,7 @@ export interface DbArticleInsert {
   story_id?: string | null
   clustering_attempts?: number
   clustering_status?: 'pending' | 'clustered' | 'expired'
+  rss_categories?: string[] | null
 }
 
 // ---------------------------------------------------------------------------

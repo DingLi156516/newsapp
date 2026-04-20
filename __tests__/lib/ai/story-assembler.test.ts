@@ -140,6 +140,13 @@ function createMockClient(overrides: {
               }),
             }),
           }),
+          // thin-topic-classifier priors query:
+          // .in(...).gt('stories.first_published', cutoff).eq('stories.assembly_status', 'completed')
+          in: vi.fn().mockReturnValue({
+            gt: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+            }),
+          }),
         }),
       }
     }

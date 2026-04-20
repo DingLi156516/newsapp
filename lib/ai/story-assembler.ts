@@ -18,6 +18,12 @@ import {
 } from '@/lib/ai/deterministic-assembly'
 import { chooseAssemblyPath } from '@/lib/ai/assembly-routing'
 import {
+  classifyThinTopic,
+  classifyThinRegion,
+  createTopicPriorCache,
+  type TopicPriorCache,
+} from '@/lib/ai/thin-topic-classifier'
+import {
   computeStoryVelocity,
   computeSourceDiversity,
   computeImpactScore,
@@ -80,6 +86,7 @@ interface StoryArticle {
   source_id: string
   image_url: string | null
   published_at: string | null
+  rss_categories: string[] | null
 }
 
 export interface AssemblyResult {
@@ -206,7 +213,8 @@ export async function assembleSingleStory(
   storyId: string,
   firstPublished?: string,
   emitter: StageEventEmitter = noopStageEmitter,
-  owner?: ClaimOwner
+  owner?: ClaimOwner,
+  priorCache?: TopicPriorCache
 ): Promise<SingleStoryAssemblyResult> {
   let dbTimeMs = 0
   let modelTimeMs = 0
@@ -214,7 +222,7 @@ export async function assembleSingleStory(
   const articlesStartedAt = Date.now()
   const { data: articles, error: articlesError } = await client
     .from('articles')
-    .select('id, title, description, source_id, image_url, published_at')
+    .select('id, title, description, source_id, image_url, published_at, rss_categories')
     .eq('story_id', storyId)
     .order('published_at', { ascending: false })
     .order('id', { ascending: true })
@@ -282,13 +290,27 @@ export async function assembleSingleStory(
   let summaryResult: ExpandedSummaryResult
 
   if (assemblyPath === 'thin') {
+    const classifierArticles = articles.map((article) => ({
+      title: article.title,
+      rssCategories: article.rss_categories,
+      sourceId: article.source_id,
+    }))
+    // classifyThinTopic may perform a Supabase prior read. Account for it
+    // under dbTimeMs so thin-heavy batches don't under-report Stage 4 DB
+    // time. classifyThinRegion is synchronous and CPU-only — no timer.
+    const classifierStartedAt = Date.now()
+    const [thinTopic, thinRegion] = await Promise.all([
+      classifyThinTopic(classifierArticles, client, priorCache),
+      Promise.resolve(classifyThinRegion(classifierArticles)),
+    ])
+    dbTimeMs += Date.now() - classifierStartedAt
     const deterministic = buildDeterministicStoryAssembly(
       articles.map((article) => ({
         title: article.title,
         description: article.description,
         bias: sourceMap.get(article.source_id)?.bias ?? 'center',
       })),
-      { isSingleSource }
+      { isSingleSource, topic: thinTopic, region: thinRegion }
     )
     normalizedHeadline = {
       headline: deterministic.headline,
@@ -581,6 +603,12 @@ export async function assembleStories(
     Math.min(claimedStories, Math.floor(options?.concurrency ?? DEFAULT_STORY_ASSEMBLY_CONCURRENCY))
   )
 
+  // Batch-scoped cache for thin-path topic priors. Many thin clusters in
+  // the same batch share sources; a shared cache collapses N per-story
+  // prior queries into at most one query per distinct source-id (+ Promise
+  // dedup for concurrent claimants).
+  const priorCache = createTopicPriorCache()
+
   const batchResults = await mapWithConcurrency<PendingStory, StoryAssemblyBatchResult>(
     pendingStories,
     concurrency,
@@ -591,7 +619,8 @@ export async function assembleStories(
           story.id,
           story.first_published,
           emitter,
-          owner
+          owner,
+          priorCache
         )
         return { storyId: story.id, result }
       } catch (err) {

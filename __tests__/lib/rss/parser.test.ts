@@ -44,7 +44,78 @@ describe('parseFeed', () => {
       content: '<p>Full content</p>',
       imageUrl: 'https://example.com/image.jpg',
       publishedAt: '2026-03-01T12:00:00.000Z',
+      categories: null,
     })
+  })
+
+  it('surfaces RSS <category> tags when present', async () => {
+    mockParseURL.mockResolvedValue({
+      items: [
+        {
+          title: 'Article',
+          link: 'https://example.com/article',
+          categories: ['Technology', 'AI'],
+        },
+      ],
+    })
+
+    const parseFeed = await loadParseFeed()
+    const items = await parseFeed('https://example.com/feed')
+
+    expect(items[0].categories).toEqual(['Technology', 'AI'])
+  })
+
+  it('returns null categories when feed omits them', async () => {
+    mockParseURL.mockResolvedValue({
+      items: [
+        { title: 'Article', link: 'https://example.com/article' },
+      ],
+    })
+
+    const parseFeed = await loadParseFeed()
+    const items = await parseFeed('https://example.com/feed')
+
+    expect(items[0].categories).toBeNull()
+  })
+
+  it('extracts text from attributed category objects', async () => {
+    // rss-parser surfaces <category domain="section">Politics</category>
+    // as an object like { _: 'Politics', $: { domain: 'section' } }.
+    // Dropping the object form would silently lose the category signal.
+    mockParseURL.mockResolvedValue({
+      items: [
+        {
+          title: 'Article',
+          link: 'https://example.com/article',
+          categories: [
+            { _: 'Politics', $: { domain: 'section' } },
+            'Business',
+          ],
+        },
+      ],
+    })
+
+    const parseFeed = await loadParseFeed()
+    const items = await parseFeed('https://example.com/feed')
+
+    expect(items[0].categories).toEqual(['Politics', 'Business'])
+  })
+
+  it('normalizes whitespace and drops empty categories', async () => {
+    mockParseURL.mockResolvedValue({
+      items: [
+        {
+          title: 'Article',
+          link: 'https://example.com/article',
+          categories: ['  Politics  ', '', '   ', 'Business'],
+        },
+      ],
+    })
+
+    const parseFeed = await loadParseFeed()
+    const items = await parseFeed('https://example.com/feed')
+
+    expect(items[0].categories).toEqual(['Politics', 'Business'])
   })
 
   it('filters items without title or link', async () => {

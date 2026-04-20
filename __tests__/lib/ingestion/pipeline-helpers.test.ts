@@ -14,6 +14,7 @@ describe('toArticleInsert', () => {
       content: '<p>Content</p>',
       imageUrl: 'https://example.com/image.jpg',
       publishedAt: '2024-01-01T00:00:00.000Z',
+      categories: null,
     }
 
     const insert = toArticleInsert(item, 'source-123')
@@ -25,6 +26,23 @@ describe('toArticleInsert', () => {
     expect(insert.title_fingerprint).toBe('test article')
     expect(insert.image_url).toBe('https://example.com/image.jpg')
     expect(insert.published_at).toBe('2024-01-01T00:00:00.000Z')
+    expect(insert.rss_categories).toBeNull()
+  })
+
+  it('passes through RSS categories when present', () => {
+    const item: ParsedFeedItem = {
+      title: 'Tech Article',
+      url: 'https://example.com/tech',
+      description: null,
+      content: null,
+      imageUrl: null,
+      publishedAt: null,
+      categories: ['Technology', 'AI'],
+    }
+
+    const insert = toArticleInsert(item, 'source-1')
+
+    expect(insert.rss_categories).toEqual(['Technology', 'AI'])
   })
 })
 

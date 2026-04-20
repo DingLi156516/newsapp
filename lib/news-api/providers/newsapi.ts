@@ -91,6 +91,7 @@ export async function fetchNewsApi(
       content: article.content?.trim() ?? null,
       imageUrl: article.urlToImage ?? null,
       publishedAt: normalizeNewsApiDate(article.publishedAt),
+      categories: null,
     }))
 }
 

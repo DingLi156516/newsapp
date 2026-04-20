@@ -61,6 +61,7 @@ describe('fetchNewsApi', () => {
       content: 'Article content',
       imageUrl: 'https://example.com/image.jpg',
       publishedAt: '2024-01-15T10:00:00.000Z',
+      categories: null,
     })
   })
 

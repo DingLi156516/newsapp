@@ -88,7 +88,7 @@ describe('ingestAllSources', () => {
     vi.mocked(groupByType).mockReturnValue(new Map([['rss', [source]]]))
 
     const mockItems = [
-      { title: 'Article 1', url: 'https://test.com/1', description: null, content: null, imageUrl: null, publishedAt: '2024-01-01T00:00:00Z' },
+      { title: 'Article 1', url: 'https://test.com/1', description: null, content: null, imageUrl: null, publishedAt: '2024-01-01T00:00:00Z', categories: null },
     ]
 
     vi.mocked(rssFetcher.fetch).mockResolvedValue({ items: mockItems, error: null })

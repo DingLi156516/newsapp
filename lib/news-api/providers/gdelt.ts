@@ -90,5 +90,6 @@ export async function fetchGdelt(
       content: null, // GDELT provides no content
       imageUrl: article.socialimage ?? null,
       publishedAt: parseGdeltDate(article.seendate),
+      categories: null,
     }))
 }

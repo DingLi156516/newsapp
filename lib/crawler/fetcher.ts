@@ -103,6 +103,7 @@ export const crawlerFetcher: SourceFetcher = {
             content: article.content,
             imageUrl: article.imageUrl,
             publishedAt: article.publishedAt,
+            categories: null,
           })
           continue
         }
