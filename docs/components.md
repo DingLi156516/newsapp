@@ -69,6 +69,7 @@
 | `AdminSourceCreate` | `@/components/organisms/AdminSourceCreate` — Right panel: new source form with RSS auto-discovery |
 | `AdminSourceImport` | `@/components/organisms/AdminSourceImport` — Right panel: CSV upload → preview → import flow |
 | `HeadlineRoundup` | `@/components/organisms/HeadlineRoundup` — AllSides-style L/C/R headline roundup on story detail; picks one representative headline per side via `lib/utils/headline-roundup`, hides empty columns, returns null when fewer than 2 sides have a headline |
+| `BiasDriftChart` | `@/components/organisms/BiasDriftChart` — Per-story bias drift over time; stacked-spectrum bar per timeline event rendering `cumulativeSpectrum` from the existing story timeline payload (no new endpoint); dedupes events, floors elapsed-time labels, and shows a truncation note when `article.sourceCount` exceeds the last drift row (drift weighting is per-unique-source, so no synthetic "now" bar is fabricated from `article.spectrumSegments`); returns null for <3 distinct events |
 
 ## Pages (`components/pages/`)
 

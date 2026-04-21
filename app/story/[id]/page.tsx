@@ -47,6 +47,7 @@ import { GuideLink } from '@/components/atoms/GuideLink'
 import { StoryTimeline } from '@/components/organisms/StoryTimeline'
 import { HeadlineComparison } from '@/components/organisms/HeadlineComparison'
 import { HeadlineRoundup } from '@/components/organisms/HeadlineRoundup'
+import { BiasDriftChart } from '@/components/organisms/BiasDriftChart'
 import { KeyQuotes } from '@/components/organisms/KeyQuotes'
 import { ClaimsComparison } from '@/components/organisms/ClaimsComparison'
 import { UserMenu } from '@/components/organisms/UserMenu'
@@ -260,6 +261,14 @@ export default function StoryPage({ params }: Props) {
         {/* Coverage intelligence (multi-source only) */}
         {article.sourceCount > 1 && (
           <CoverageIntelligence article={article} timeline={timeline} />
+        )}
+
+        {/* Bias drift — how the cumulative spectrum evolved */}
+        {article.sourceCount > 1 && timeline && (
+          <BiasDriftChart
+            events={timeline.events}
+            currentSourceCount={article.sourceCount}
+          />
         )}
 
         {/* Source ownership summary (Phase 2 — Ground News parity) */}

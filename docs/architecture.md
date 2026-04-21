@@ -154,7 +154,7 @@ Every page uses **SWR** (a caching library) to fetch data. While the API loads, 
 | Page | Route | What it shows |
 |------|-------|-------------|
 | **Home feed** | `/` | Filterable story feed with inline view switcher (Feed/Sources), feed tabs (For You/Trending/Latest/Blindspot/Saved), search, and advanced filters (topic, region, bias range, factuality, date, perspective presets); `/?view=sources` renders the sources directory inline |
-| **Story detail** | `/story/[id]` | Hero image, headline, spectrum bar, AI perspective tabs (Common Ground / Left / Right), headline roundup (L/C/R picks), coverage-intelligence analysis cards, timeline, source list |
+| **Story detail** | `/story/[id]` | Hero image, headline, spectrum bar, AI perspective tabs (Common Ground / Left / Right), headline roundup (L/C/R picks), coverage-intelligence analysis cards, bias drift chart (reuses existing timeline payload — no new endpoint), timeline, source list |
 | **Sources** | `/sources` → redirects to `/?view=sources` | `/sources` is a server redirect; the sources directory renders inline on the home page via `SourcesView` |
 | **Source profile** | `/sources/[slug]` | Single-outlet profile with metadata snapshot, recent clustered coverage, topic mix, blindspot participation, and methodology |
 | **Source comparison** | `/sources/compare?left=<slug>&right=<slug>` | Two-outlet comparison with side-by-side metadata, shared coverage, exclusive stories, topic overlap, blindspot participation, and methodology |
