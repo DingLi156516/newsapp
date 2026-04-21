@@ -30,6 +30,7 @@
 | `ReviewDetail` | `@/components/molecules/ReviewDetail` — Expanded detail panel for reviewing AI summary, spectrum, and blindspot data |
 | `AdminSourceListItem` | `@/components/molecules/AdminSourceListItem` — Single row in admin source list showing name, bias badge, region, active status, and health indicators |
 | `OwnershipBar` | `@/components/molecules/OwnershipBar` — Horizontal segmented bar showing proportional source ownership for a story; colors segments by `OwnerType` and trails an unknown slice |
+| `RoutingPreviewPanel` | `@/components/molecules/RoutingPreviewPanel` — Admin routing-preview panel inside `ReviewDetail`; shows chosen assembly path (rich/single/thin), source count, distinct bias buckets, and applied thresholds via `useRoutingPreview` |
 
 ## Organisms (`components/organisms/`)
 

@@ -87,9 +87,10 @@ __tests__/
       clustering.test.ts  clustering-stage.test.ts  recluster.test.ts
       embeddings.test.ts
       spectrum-calculator.test.ts  story-classifier.test.ts
-      summary-generator.test.ts
+      summary-generator.test.ts  summary-verifier.test.ts
       blindspot-detector.test.ts
       deterministic-assembly.test.ts  entity-extractor.test.ts
+      thin-topic-classifier.test.ts
       story-assembler.test.ts  story-assembler-concurrency.test.ts
     email/
       send-digest.test.ts
@@ -119,6 +120,7 @@ __tests__/
       dashboard/suggestions-route.test.ts
       stories/for-you-route.test.ts
       admin/review-route.test.ts
+      admin/review-routing-preview.test.ts
       admin/review-stats-route.test.ts
       admin/pipeline/route.test.ts
       admin/pipeline/sources/route.test.ts
@@ -127,7 +129,7 @@ __tests__/
       admin/pipeline/events/route.test.ts
   components/
     atoms/   (10 test files — includes Skeleton.test.tsx, ReviewStatusBadge.test.tsx, OfflineIndicator.test.tsx, ShareButton.test.tsx, Toast.test.tsx)
-    molecules/  (9 test files — adds BiasComparisonBar.test.tsx, StatsRow.test.tsx, ForYouCta.test.tsx, ReviewListItem.test.tsx, ReviewDetail.test.tsx, MetricsRow.test.tsx)
+    molecules/  (10 test files — adds BiasComparisonBar.test.tsx, StatsRow.test.tsx, ForYouCta.test.tsx, ReviewListItem.test.tsx, ReviewDetail.test.tsx, MetricsRow.test.tsx, RoutingPreviewPanel.test.tsx)
     organisms/  (25 test files — adds HeroCard.test.tsx, ViewSwitcher.test.tsx, SourcesView.test.tsx, BiasProfileChart.test.tsx, SettingsForm.test.tsx, StickyFilterBar.test.tsx, SuggestionsList.test.tsx, SearchFilters.test.tsx, ReviewQueue.test.tsx, CoverageIntelligence.test.tsx, SourceDirectoryInsights.test.tsx, PipelineControls.test.tsx, PipelineRunHistory.test.tsx, PipelineSummaryStats.test.tsx, SourceHealthTable.test.tsx, PipelineEventsPanel.test.tsx; AppNavigation.test.tsx, PerspectiveSlider.test.tsx and RegionSelector.test.tsx removed)
     pages/
       SourceProfilePage.test.tsx

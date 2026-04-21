@@ -47,6 +47,8 @@ All fetchers produce the same `ParsedFeedItem[]` format, so the downstream pipel
 6. Per-source cap, then upsert articles in batches of 50 (`lib/ingestion/pipeline-helpers.ts`)
 7. Update source health per source (`lib/ingestion/pipeline-helpers.ts`)
 
+RSS `<category>` tags are captured end-to-end for the thin-path topic classifier: `lib/rss/parser.ts` surfaces `categories` on `ParsedFeedItem`, `lib/ingestion/pipeline-helpers.ts` threads them onto `DbArticleInsert.rss_categories`, and migration `051_articles_rss_categories.sql` adds the `articles.rss_categories TEXT[]` column.
+
 New articles are created with:
 ```
 is_embedded = false
@@ -146,28 +148,41 @@ Both phases respect `assembly_claimed_at` TTLs to avoid interfering with concurr
 
 ## Stage 4: Assemble
 
-**File:** `lib/ai/story-assembler.ts`
+**Files:** `lib/ai/story-assembler.ts` (orchestrator), `lib/ai/assembly-routing.ts` (path selection), `lib/ai/deterministic-assembly.ts` (no-Gemini fallback).
 
-1. Fetch stories where `assembly_status = 'pending'`, scanning 3x batch, filtering to unclaimed (claim TTL = 60 min)
-2. Claim stories (`assembly_status = 'processing'`, `assembly_claimed_at = now`)
-3. For each story, fetch all articles and source metadata
-4. Run model calls with `Promise.all(...)`:
-   - **Multi-source path** (≥2 sources): 2 calls — `classifyStory` (generates headline, topic, region), `generateAISummary` (spectrum-aware with `leftFraming`, `rightFraming`, `commonGround`)
-   - **Single-source path** (1 source): 2 calls — `classifyStory` (generates topic, region), `generateSingleSourceSummary` (flash-lite). Headline = original article title (no generation). Sets `is_blindspot = false`, `controversy_score = 0`, `sentiment = null`
-5. Compute deterministic metadata: spectrum distribution, blindspot flag, factuality, ownership
-6. Update story publication status and start background entity tag extraction. Tag extraction promises are collected and awaited at the end of the batch to ensure completion before the function exits. Tagging failures are logged but do not fail the story.
-7. **Publication decision:**
-   - **Auto-publish** if: >= 2 articles, >= 2 sources, good AI summary, confidence >= 0.25
+1. Fetch stories where `assembly_status = 'pending'`, scanning 3x batch, filtering to unclaimed (claim TTL = 60 min).
+2. Claim stories (`assembly_status = 'processing'`, `assembly_claimed_at = now`).
+3. For each story, fetch all articles and source metadata.
+4. Pick an assembly path via `chooseAssemblyPath({ sourceCount, biases })`:
+
+   | Path | Condition | What runs | Gemini cost |
+   |------|-----------|-----------|-------------|
+   | **rich** | `sourceCount ≥ PIPELINE_RICH_CLUSTER_MIN_SOURCES` (default 3) **and** distinct L/C/R buckets ≥ `PIPELINE_RICH_CLUSTER_MIN_BUCKETS` (default 2) | `classifyStory` + `generateVerifiedAISummary` | 1 cheap + 1 full (+ up to 2 regen) |
+   | **single** | `sourceCount === 1` | `classifyStory` + `generateSingleSourceSummary`. Headline = original title (no generation). | 2 cheap |
+   | **thin** | everything else (2 sources, or 3+ all one bucket) | `buildDeterministicStoryAssembly` — extractive headline, `classifyThinTopic` / `classifyThinRegion` (RSS `<category>` → per-source topic prior → keyword fallback → default), bucket-grouped title bullets for framing, placeholder on the empty side, `sentiment = null`, `keyQuotes = null` | 0 |
+
+The thin-path classifier ladder is deterministic and entirely DB-local — zero Gemini calls. Per-source topic priors are batch-cached so thin stories sharing a source dedupe their prior lookup.
+
+The rich path wraps `generateAISummary` in `generateVerifiedAISummary` (`lib/ai/summary-verifier.ts`): each `keyQuote.text` must appear verbatim in some article's title+description (fuzzy whitespace, unicode-normalised), and each `keyClaim.claim` must share ≥60% token overlap with a supporting article sentence plus match sentence polarity. Failed items trigger regeneration with drop hints up to 2 extra rounds; anything still unverified after the final round is dropped from the output. Observability fields on the assembly summary: `verification_rounds` (0-2) and `verification_dropped_count`.
+
+   Bias buckets: L = {`far-left`, `left`, `lean-left`} · C = {`center`} · R = {`lean-right`, `right`, `far-right`}. Kill-switch override: `PIPELINE_ASSEMBLY_MODE=deterministic` forces thin for every story; `PIPELINE_ASSEMBLY_MODE=gemini` forces rich/single and ignores the bucket threshold.
+5. Compute deterministic metadata: spectrum distribution, blindspot flag, factuality, ownership.
+6. Compute `controversy_score` **only when the cluster has at least one left- and one right-leaning source**; one-sided clusters always score 0 to avoid false "high disagreement" signals when the thin path leaves a framing side with placeholder content.
+7. Update story publication status and start background entity tag extraction. Tag extraction promises are collected and awaited at the end of the batch. Tagging failures are logged but do not fail the story.
+8. **Publication decision:**
+   - **Auto-publish** if: ≥ 2 articles, ≥ 2 sources, good AI summary, confidence ≥ 0.25.
    - **Needs review** if any condition fails. Review reasons:
-     - `sparse_coverage` -- fewer than 2 articles or 2 sources (-0.35 confidence)
-     - `ai_fallback` -- AI summary generation failed (-0.25)
-     - `processing_anomaly` -- errors during assembly (-0.25)
-8. Update story with all generated fields, set final `publication_status`
-9. On error: set `assembly_status = 'failed'`, `publication_status = 'needs_review'`
+     - `sparse_coverage` — fewer than 2 articles or 2 sources (-0.35 confidence)
+     - `ai_fallback` — AI summary generation failed (-0.25)
+     - `processing_anomaly` — errors during assembly (-0.25)
+9. Update story with all generated fields, set final `publication_status`.
+10. On error: set `assembly_status = 'failed'`, `publication_status = 'needs_review'`.
 
-Claiming is batched. Story assembly runs with bounded concurrency (default 12, env: PIPELINE_ASSEMBLY_CONCURRENCY).
+All three paths converge on the same output shape (`{headline, topic, region, aiSummary, sentiment, keyQuotes, keyClaims}`), so downstream metadata / publication / tag extraction are path-agnostic. Entity tagging runs via the deterministic `extractEntities` helper (proper-name + topic-keyword extraction, no Gemini) regardless of which assembly path fired.
 
-**Batch size:** 50 stories per pass (env: `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`)
+Claiming is batched. Story assembly runs with bounded concurrency (default 12, env: `PIPELINE_ASSEMBLY_CONCURRENCY`).
+
+**Batch size:** 50 stories per pass (env: `PIPELINE_PROCESS_ASSEMBLE_BATCH_SIZE`).
 
 ## Process Runner
 
@@ -429,6 +444,9 @@ The approved plan in `.omx/plans/prd-pipeline-throughput-scale-20260402.md` keep
 | `lib/ai/embeddings.ts` | Gemini embedding generation |
 | `lib/ai/clustering.ts` | Cosine similarity clustering + singleton/expiry logic |
 | `lib/ai/story-assembler.ts` | AI headline/summary/topic/region generation |
+| `lib/ai/thin-topic-classifier.ts` | Multi-signal deterministic topic/region classifier for the thin path (RSS category → source prior → keyword → default) |
+| `lib/ai/summary-verifier.ts` | Verify-then-regenerate wrapper around `generateAISummary` with up to 2 regen rounds and drop-on-fail semantics |
+| `app/api/admin/review/[id]/routing-preview/route.ts` | Admin-only read of which assembly path the pipeline would pick for a story |
 | `lib/pipeline/story-state.ts` | Publication decision logic |
 | `lib/ai/region-classifier.ts` | Region classification via Gemini |
 | `lib/pipeline/process-runner.ts` | Budget-constrained multi-pass orchestrator |

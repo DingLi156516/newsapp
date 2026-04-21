@@ -40,7 +40,7 @@ DB schema types (`DbSource`, `DbStory`, `DbArticle`, and their `Insert` variants
 
 Pipeline-specific DB fields:
 - `DbStory`: `assembly_status`, `publication_status`, `review_reasons`, `confidence_score`, `processing_error`, `assembled_at`, `published_at`, `assembly_claimed_at`
-- `DbArticle`: `canonical_url`, `title_fingerprint`, `embedding_claimed_at`, `clustering_claimed_at`
+- `DbArticle`: `canonical_url`, `title_fingerprint`, `embedding_claimed_at`, `clustering_claimed_at`, `rss_categories: string[] | null` (RSS `<category>` tags captured at ingest, consumed by the thin-path topic classifier; migration `051_articles_rss_categories.sql`; also on `DbArticleInsert`)
 - `DbPipelineMaintenanceAudit` (Phase 12 maintenance tool, migration 047):
   - `action: DbMaintenanceAction` — one of `purge_unembedded_articles`, `purge_orphan_stories`, `purge_expired_articles`.
   - `dry_run: boolean` — true when the row was written by a dry-run call. Real runs always have `dry_run = false`.

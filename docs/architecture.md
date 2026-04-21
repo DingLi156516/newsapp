@@ -352,6 +352,7 @@ lib/hooks/       — SWR data-fetching hooks + auth hooks + utilities (23 files)
   use-filter-params.ts — Persists filter state in URL search params; survives navigation to story detail and back
   use-infinite-scroll.ts — IntersectionObserver-based infinite scroll; replaced "Load more" button
   use-pipeline.ts     — SWR hook for pipeline admin dashboard data (runs, stats, sources)
+  use-routing-preview.ts — SWR hook for `/api/admin/review/[id]/routing-preview`; returns which assembly path the pipeline would pick for a story (rich/single/thin) plus applied thresholds
 ```
 
 ---

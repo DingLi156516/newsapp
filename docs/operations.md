@@ -335,6 +335,8 @@ curl -s -X POST http://localhost:3000/api/cron/digest \
 
 ## Manual Reprocessing
 
+Before reprocessing, admins can preview which assembly path the pipeline will take via the **Routing Preview** panel in `ReviewDetail` on `/admin/review` (or `GET /api/admin/review/[id]/routing-preview` directly). This surfaces the current `sourceCount`, distinct L/C/R buckets, chosen path (`rich`/`single`/`thin`), and any `PIPELINE_ASSEMBLY_MODE` override, so the operator can judge whether a rerun will hit Gemini or stay deterministic before issuing the reset.
+
 If stories have missing or broken headlines/summaries, reset them back to draft/pending and re-run assembly:
 
 ### Reset a story's AI-generated fields via Supabase REST
@@ -812,6 +814,7 @@ curl -s "http://localhost:3000/api/sources/compare?left=reuters&right=fox-news" 
 |--------|------|-------------|
 | GET | `/api/admin/review` | Review queue (filterable by status) |
 | PATCH | `/api/admin/review/[id]` | Approve or reject a story |
+| GET | `/api/admin/review/[id]/routing-preview` | Preview which assembly path (rich/single/thin) the pipeline would pick |
 | GET | `/api/admin/review/stats` | Review queue statistics |
 | GET | `/api/admin/pipeline` | Pipeline dashboard overview |
 | GET | `/api/admin/pipeline/sources` | Source health data |
@@ -824,6 +827,27 @@ curl -s "http://localhost:3000/api/sources/compare?left=reuters&right=fox-news" 
 # Fetch review queue (pending stories)
 curl -s "http://localhost:3000/api/admin/review?status=pending&page=1&limit=20" \
   -H "Cookie: <auth-cookies>" | jq .
+```
+
+```bash
+# Preview which assembly path the pipeline would pick for a review-queue story
+curl -s "http://localhost:3000/api/admin/review/{story-id}/routing-preview" \
+  -H "Cookie: <auth-cookies>" | jq .
+```
+
+Expected response:
+```json
+{
+  "success": true,
+  "data": {
+    "storyId": "...",
+    "sourceCount": 2,
+    "biases": ["left", "lean-left"],
+    "distinctBiasBuckets": 1,
+    "assemblyPath": "thin",
+    "appliedThresholds": { "minSources": 3, "minBuckets": 2, "modeOverride": null }
+  }
+}
 ```
 
 ```bash
