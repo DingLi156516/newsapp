@@ -382,6 +382,7 @@ lib/hooks/       — SWR data-fetching hooks + auth hooks + utilities (23 files)
 | `GET` | `/api/stories/for-you` | Personalized "For You" feed (auth required) |
 | `GET` | `/api/admin/review` | Review queue list with status filter (admin required) |
 | `PATCH` | `/api/admin/review/[id]` | Approve or reject a story (admin required) |
+| `GET` | `/api/admin/review/[id]/routing-preview` | Preview which assembly path (`rich`/`single`/`thin`) the pipeline would select for this story, with applied thresholds + mode override (admin required) |
 | `GET` | `/api/admin/review/stats` | Review queue statistics (admin required) |
 | `GET` | `/api/admin/pipeline` | Pipeline dashboard overview (admin required) |
 | `GET` | `/api/admin/pipeline/sources` | Source health data for pipeline admin (admin required) |

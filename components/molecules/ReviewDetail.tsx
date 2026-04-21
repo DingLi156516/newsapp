@@ -9,6 +9,8 @@ import { useState, useCallback } from 'react'
 import { Check, X, RefreshCw, Pencil } from 'lucide-react'
 import { ReviewStatusBadge } from '@/components/atoms/ReviewStatusBadge'
 import { MonochromeSpectrumBar } from '@/components/molecules/MonochromeSpectrumBar'
+import { RoutingPreviewPanel } from '@/components/molecules/RoutingPreviewPanel'
+import { useRoutingPreview } from '@/lib/hooks/use-routing-preview'
 import type { AISummary, SpectrumSegment } from '@/lib/types'
 
 interface ReviewStoryDetail {
@@ -61,6 +63,12 @@ export function ReviewDetail({ story, onApprove, onReject, onReprocess, isLoadin
     leftFraming: '',
     rightFraming: '',
   })
+
+  const {
+    preview: routingPreview,
+    isLoading: routingLoading,
+    error: routingError,
+  } = useRoutingPreview(story?.id ?? null)
 
   const enterEditMode = useCallback(() => {
     if (!story) return
@@ -132,6 +140,14 @@ export function ReviewDetail({ story, onApprove, onReject, onReprocess, isLoadin
           )}
         </div>
       )}
+
+      {/* Routing preview — admin-only visibility into which assembly path
+          this story would take given its current articles + biases. */}
+      <RoutingPreviewPanel
+        preview={routingPreview}
+        isLoading={routingLoading}
+        error={routingError}
+      />
 
       {/* Headline */}
       {isEditing ? (

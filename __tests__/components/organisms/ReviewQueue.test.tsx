@@ -20,6 +20,10 @@ vi.mock('@/lib/hooks/use-auth', () => ({
   useAuth: vi.fn().mockReturnValue({ user: { id: 'admin-1' } }),
 }))
 
+vi.mock('@/lib/hooks/use-routing-preview', () => ({
+  useRoutingPreview: () => ({ preview: null, isLoading: false, error: null }),
+}))
+
 import { useReviewQueue } from '@/lib/hooks/use-review-queue'
 import { useReviewAction } from '@/lib/hooks/use-review-action'
 import { ReviewQueue } from '@/components/organisms/ReviewQueue'
