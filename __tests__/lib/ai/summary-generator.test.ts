@@ -9,6 +9,51 @@ describe('generateAISummary', () => {
     vi.clearAllMocks()
   })
 
+  it('includes article sourceName in the prompt when present', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockResolvedValue({
+      text: JSON.stringify({
+        commonGround: '• cg',
+        leftFraming: '• lf',
+        rightFraming: '• rf',
+      }),
+    })
+
+    const { generateAISummary } = await import('@/lib/ai/summary-generator')
+    await generateAISummary([
+      { title: 'A title', description: 'A desc', bias: 'left', sourceName: 'The New York Times' },
+      { title: 'B title', description: 'B desc', bias: 'right', sourceName: 'Fox News' },
+    ])
+
+    const prompt = vi.mocked(generateText).mock.calls[0][0]
+    // Without outlet in the prompt, the model cannot emit keyQuote.sourceName
+    // accurately, and the verifier's outlet check will drop all quotes.
+    expect(prompt).toContain('The New York Times')
+    expect(prompt).toContain('Fox News')
+  })
+
+  it('frames regeneration hints as advisory rather than absolute', async () => {
+    const { generateText } = await import('@/lib/ai/gemini-client')
+    vi.mocked(generateText).mockResolvedValue({
+      text: JSON.stringify({
+        commonGround: '• cg',
+        leftFraming: '• lf',
+        rightFraming: '• rf',
+      }),
+    })
+
+    const { generateAISummary } = await import('@/lib/ai/summary-generator')
+    await generateAISummary(
+      [{ title: 'x', description: null, bias: 'center' }],
+      { regenerationHints: { dropQuotes: ['some quote'], dropClaims: [] } }
+    )
+    const prompt = vi.mocked(generateText).mock.calls[0][0]
+    // The hint should allow the model to reuse the text with corrected
+    // attribution — not blacklist grounded content permanently.
+    expect(prompt.toLowerCase()).not.toMatch(/do not (include|use)/)
+    expect(prompt).toContain('some quote')
+  })
+
   it('returns default summary for empty articles', async () => {
     const { generateAISummary } = await import('@/lib/ai/summary-generator')
     const result = await generateAISummary([])

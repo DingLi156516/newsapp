@@ -10,7 +10,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database, DbSource } from '@/lib/supabase/types'
 import type { BiasCategory, FactualityLevel, OwnershipType } from '@/lib/types'
 import { classifyStory } from '@/lib/ai/story-classifier'
-import { generateAISummary, generateSingleSourceSummary, isFallbackSummary, type ExpandedSummaryResult } from '@/lib/ai/summary-generator'
+import { generateSingleSourceSummary, isFallbackSummary, type ExpandedSummaryResult } from '@/lib/ai/summary-generator'
+import { generateVerifiedAISummary } from '@/lib/ai/summary-verifier'
 import {
   buildDeterministicStoryAssembly,
   LEFT_BIASES,
@@ -241,9 +242,9 @@ export async function assembleSingleStory(
   const sourcesStartedAt = Date.now()
   const { data: sources, error: sourcesError } = await client
     .from('sources')
-    .select('id, bias, factuality, ownership')
+    .select('id, name, bias, factuality, ownership')
     .in('id', sourceIds)
-    .returns<Array<Pick<DbSource, 'id' | 'bias' | 'factuality' | 'ownership'>>>()
+    .returns<Array<Pick<DbSource, 'id' | 'name' | 'bias' | 'factuality' | 'ownership'>>>()
   dbTimeMs += Date.now() - sourcesStartedAt
 
   if (sourcesError) {
@@ -352,20 +353,24 @@ export async function assembleSingleStory(
   } else {
     // rich
     const modelStartedAt = Date.now()
-    const [classificationRes, fullSummary] = await Promise.all([
+    const [classificationRes, verifiedSummary] = await Promise.all([
       classifyStory(titles),
-      generateAISummary(
-        articles.map((article) => ({
-          title: article.title,
-          description: article.description,
-          bias: sourceMap.get(article.source_id)?.bias ?? 'center',
-        }))
+      generateVerifiedAISummary(
+        articles.map((article) => {
+          const source = sourceMap.get(article.source_id)
+          return {
+            title: article.title,
+            description: article.description,
+            bias: source?.bias ?? 'center',
+            sourceName: source?.name,
+          }
+        })
       ),
     ])
     normalizedHeadline = { headline: classificationRes.headline, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.headlineFallback }
     normalizedTopic = { topic: classificationRes.topic, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.topicFallback }
     normalizedRegion = { region: classificationRes.region, usedCheapModel: classificationRes.usedCheapModel, usedFallback: classificationRes.regionFallback }
-    summaryResult = fullSummary
+    summaryResult = verifiedSummary.result
     modelTimeMs += Date.now() - modelStartedAt
   }
 

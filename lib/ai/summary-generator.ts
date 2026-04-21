@@ -12,6 +12,11 @@ export interface ArticleWithBias {
   readonly title: string
   readonly description: string | null
   readonly bias: string
+  // Optional outlet name. Populated by story-assembler so the verifier
+  // can validate keyQuote.sourceName against the article the text came
+  // from. Plumbed through without surfacing in the LLM prompt to keep
+  // the prompt schema stable; the prompt still only shows [BIAS].
+  readonly sourceName?: string
 }
 
 export interface ExpandedSummaryResult {
@@ -30,8 +35,43 @@ const FALLBACK_LEFT = 'Analysis unavailable.'
 const FALLBACK_RIGHT = 'Analysis unavailable.'
 const SINGLE_SOURCE_FALLBACK_LEFT = '[single-source-fallback]'
 
+export interface RegenerationHints {
+  readonly dropQuotes: readonly string[]
+  readonly dropClaims: readonly string[]
+}
+
+export interface GenerateAISummaryOptions {
+  readonly regenerationHints?: RegenerationHints
+}
+
+function regenerationPromptSuffix(hints: RegenerationHints | undefined): string {
+  if (!hints) return ''
+  const parts: string[] = []
+  // Frame hints as advisory. A previous failure may have been
+  // fabricated text OR merely wrong attribution/side — in the latter
+  // case the text is real and can be reused with corrected metadata.
+  // Forbidding the exact text would permanently lose grounded content.
+  if (hints.dropQuotes.length > 0) {
+    parts.push(
+      `These quotes failed verification last round: ${hints.dropQuotes
+        .map((q) => `"${q}"`)
+        .join('; ')}. If the text does not actually appear in any article, omit it. If it does appear, re-include it with the correct sourceName and sourceBias.`
+    )
+  }
+  if (hints.dropClaims.length > 0) {
+    parts.push(
+      `These claims failed verification last round: ${hints.dropClaims
+        .map((c) => `"${c}"`)
+        .join('; ')}. If the wording diverges from any article, omit it. If it is grounded, re-include it with the correct side.`
+    )
+  }
+  if (parts.length === 0) return ''
+  return `\n\nIMPORTANT: ${parts.join(' ')} Only emit keyQuotes whose text literally appears in an article, and keyClaims whose wording closely matches an article.`
+}
+
 export async function generateAISummary(
-  articles: readonly ArticleWithBias[]
+  articles: readonly ArticleWithBias[],
+  options?: GenerateAISummaryOptions
 ): Promise<ExpandedSummaryResult> {
   if (articles.length === 0) {
     return {
@@ -46,8 +86,16 @@ export async function generateAISummary(
     }
   }
 
+  // When the caller provides sourceName, include it in the prompt so
+  // the model can emit correct keyQuote.sourceName labels. The verifier
+  // requires sourceName to match the article a quote came from —
+  // without this, the model would be guessing outlet names and almost
+  // every grounded quote would fail verification.
   const articlesBlock = articles
-    .map((article) => `[${article.bias.toUpperCase()}] ${article.title}${article.description ? ` — ${article.description}` : ''}`)
+    .map((article) => {
+      const outlet = article.sourceName ? ` {${article.sourceName}}` : ''
+      return `[${article.bias.toUpperCase()}]${outlet} ${article.title}${article.description ? ` — ${article.description}` : ''}`
+    })
     .join('\n')
 
   const prompt = `You are a media analyst. Analyze these news articles about the same story from different political perspectives.
@@ -71,7 +119,7 @@ Generate a structured summary in exactly this JSON format (no markdown, no code 
 }
 
 Each summary section should have 2-4 bullet points separated by newlines.
-Include 1-3 key quotes and 1-3 key claims. Return ONLY valid JSON.`
+Include 1-3 key quotes and 1-3 key claims. Return ONLY valid JSON.${regenerationPromptSuffix(options?.regenerationHints)}`
 
   try {
     const response = await generateText(prompt, {

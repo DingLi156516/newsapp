@@ -314,6 +314,7 @@ lib/ai/          — AI processing (12 files)
   thin-topic-classifier.ts — Multi-signal topic/region classifier for the thin path (RSS `<category>` → per-source topic prior → keyword fallback → default). Zero Gemini calls.
   story-classifier.ts   — Legacy Gemini headline/topic/region generation when `PIPELINE_ASSEMBLY_MODE=gemini`
   summary-generator.ts  — Legacy Gemini cross-spectrum AISummary generation when `PIPELINE_ASSEMBLY_MODE=gemini`
+  summary-verifier.ts   — Verify-then-regenerate wrapper around generateAISummary; checks keyQuotes appear verbatim in source articles (fuzzy whitespace) and keyClaims have ≥60% token overlap; regenerates up to 2× with drop hints before dropping unverified fields
   blindspot-detector.ts — Flags stories with skewed left/right coverage as blindspots
   entity-extractor.ts   — Extracts named entities (people, orgs, locations, topics) from article titles/descriptions with local heuristics
   tag-upsert.ts         — Upserts extracted entities into story_tags table

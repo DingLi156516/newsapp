@@ -551,11 +551,13 @@ describe('assembleSingleStory', () => {
     ]
 
     mockClassifyStory.mockResolvedValue(classificationResult('Rich headline', 'politics', 'us'))
+    // Quote text and claim must appear in source articles — otherwise the
+    // verify-regenerate wrapper treats them as hallucinations and retries.
     mockSummary.mockResolvedValue({
       aiSummary: { commonGround: 'CG', leftFraming: 'LF', rightFraming: 'RF' },
       sentiment: { left: 'hopeful', right: 'critical' },
-      keyQuotes: [{ text: 'q', sourceName: 'Source A', sourceBias: 'left' }],
-      keyClaims: [{ claim: 'c', side: 'both', disputed: false }],
+      keyQuotes: [{ text: 'Left take on policy', sourceName: 'Source A', sourceBias: 'left' }],
+      keyClaims: [{ claim: 'Centrist analysis of policy', side: 'both', disputed: false }],
     })
     mockSpectrum.mockReturnValue([
       { bias: 'left', percentage: 33 },
@@ -581,7 +583,7 @@ describe('assembleSingleStory', () => {
         headline: 'Rich headline',
         source_count: 3,
         sentiment: { left: 'hopeful', right: 'critical' },
-        key_quotes: [{ text: 'q', sourceName: 'Source A', sourceBias: 'left' }],
+        key_quotes: [{ text: 'Left take on policy', sourceName: 'Source A', sourceBias: 'left' }],
       })
     )
   })
