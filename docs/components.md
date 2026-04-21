@@ -68,6 +68,7 @@
 | `AdminSourceDetail` | `@/components/organisms/AdminSourceDetail` — Right panel: view/edit source with health metrics and form fields |
 | `AdminSourceCreate` | `@/components/organisms/AdminSourceCreate` — Right panel: new source form with RSS auto-discovery |
 | `AdminSourceImport` | `@/components/organisms/AdminSourceImport` — Right panel: CSV upload → preview → import flow |
+| `HeadlineRoundup` | `@/components/organisms/HeadlineRoundup` — AllSides-style L/C/R headline roundup on story detail; picks one representative headline per side via `lib/utils/headline-roundup`, hides empty columns, returns null when fewer than 2 sides have a headline |
 
 ## Pages (`components/pages/`)
 

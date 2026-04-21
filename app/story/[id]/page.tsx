@@ -46,6 +46,7 @@ import { FactualityBar } from '@/components/atoms/FactualityBar'
 import { GuideLink } from '@/components/atoms/GuideLink'
 import { StoryTimeline } from '@/components/organisms/StoryTimeline'
 import { HeadlineComparison } from '@/components/organisms/HeadlineComparison'
+import { HeadlineRoundup } from '@/components/organisms/HeadlineRoundup'
 import { KeyQuotes } from '@/components/organisms/KeyQuotes'
 import { ClaimsComparison } from '@/components/organisms/ClaimsComparison'
 import { UserMenu } from '@/components/organisms/UserMenu'
@@ -231,6 +232,11 @@ export default function StoryPage({ params }: Props) {
         {/* Headline comparison (multi-source only) */}
         {article.sourceCount > 1 && article.headlines && article.headlines.length > 0 && (
           <HeadlineComparison headlines={article.headlines} />
+        )}
+
+        {/* Headline roundup — AllSides-style L/C/R picks */}
+        {article.sourceCount > 1 && article.headlines && article.headlines.length > 0 && (
+          <HeadlineRoundup headlines={article.headlines} />
         )}
 
         {/* Key quotes */}
