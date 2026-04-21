@@ -769,6 +769,7 @@ When the source was already healthy the response additionally includes
 | `datePreset` | string | 'all' | Time range: `24h`, `7d`, `30d`, `all` |
 | `page` | number | 1 | Page number (1-indexed) |
 | `region` | string | (all) | Filter by region (us, international, uk, canada, europe) |
+| `owner` | string | (none) | Media-owner slug (e.g. `warner-bros-discovery`). Recent-coverage filter (180-day window, max 1000 story IDs materialized). Not an all-time archive. |
 | `limit` | number | 20 | Results per page (max 50) |
 
 ### /api/sources/compare Query Parameters

@@ -51,6 +51,7 @@ interface StoriesParams {
   readonly datePreset?: DatePreset
   readonly tag?: string | null
   readonly tagType?: string | null
+  readonly owner?: string | null
   readonly sort?: 'last_updated' | 'source_count' | 'trending'
   readonly page?: number
   readonly limit?: number
@@ -63,6 +64,13 @@ interface StoriesApiResponse {
     readonly total: number
     readonly page: number
     readonly limit: number
+    /**
+     * Present (true) only when an owner-filter lookup failed upstream
+     * (media_owners / sources.owner_id / articles). The route omits the key
+     * for the common case so the success shape stays unchanged when owner is
+     * not in use. See `queryStories` in lib/api/query-helpers.ts.
+     */
+    readonly ownerFilterUnavailable?: boolean
   }
 }
 
@@ -86,6 +94,7 @@ function buildStoriesUrl(params: StoriesParams): string {
   if (params.datePreset && params.datePreset !== 'all') searchParams.set('datePreset', params.datePreset)
   if (params.tag) searchParams.set('tag', params.tag)
   if (params.tagType) searchParams.set('tag_type', params.tagType)
+  if (params.owner) searchParams.set('owner', params.owner)
   if (params.sort) searchParams.set('sort', params.sort)
   if (params.page && params.page > 1) searchParams.set('page', String(params.page))
   if (params.limit) searchParams.set('limit', String(params.limit))
@@ -115,6 +124,7 @@ export function useStories(params: StoriesParams = {}) {
     stories: data?.data ?? sampleArticles,
     total: data?.meta?.total ?? 0,
     page: data?.meta?.page ?? 1,
+    ownerFilterUnavailable: data?.meta?.ownerFilterUnavailable ?? false,
     isLoading,
     isError: !!error,
     error,

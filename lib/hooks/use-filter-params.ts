@@ -53,6 +53,7 @@ export function useFilterParams() {
 
   const tag = searchParams.get('tag') ?? null
   const tagType = searchParams.get('tag_type') ?? null
+  const owner = searchParams.get('owner') ?? null
 
   const setTopic = useCallback(
     (t: Topic | null) => push({ topic: t, tag: null, tag_type: null }),
@@ -94,9 +95,14 @@ export function useFilterParams() {
     [push]
   )
 
+  const setOwner = useCallback(
+    (slug: string | null) => push({ owner: slug }),
+    [push]
+  )
+
   const clearAll = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString())
-    for (const key of ['topic', 'region', 'q', 'bias', 'factuality', 'date', 'tag', 'tag_type']) {
+    for (const key of ['topic', 'region', 'q', 'bias', 'factuality', 'date', 'tag', 'tag_type', 'owner']) {
       params.delete(key)
     }
     const str = params.toString()
@@ -108,6 +114,7 @@ export function useFilterParams() {
     topic,
     tag,
     tagType,
+    owner,
     search,
     region,
     biasRange,
@@ -121,6 +128,7 @@ export function useFilterParams() {
     setBiasRange,
     setMinFactuality,
     setDatePreset,
+    setOwner,
     clearAll,
   }
 }

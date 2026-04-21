@@ -60,6 +60,7 @@ interface Props {
   readonly onDatePresetChange: (v: DatePreset) => void
   readonly hideTopic?: boolean
   readonly activeTag?: string | null
+  readonly activeOwner?: string | null
   readonly onClearTag?: () => void
   readonly onClearAll?: () => void
 }
@@ -70,7 +71,8 @@ function countActiveFilters(
   biasRange: BiasCategory[],
   minFactuality: FactualityLevel | null,
   datePreset: DatePreset,
-  activeTag?: string | null
+  activeTag?: string | null,
+  activeOwner?: string | null
 ): number {
   let count = 0
   if (topic !== null) count += 1
@@ -79,6 +81,7 @@ function countActiveFilters(
   if (minFactuality !== null) count += 1
   if (datePreset !== 'all') count += 1
   if (activeTag) count += 1
+  if (activeOwner) count += 1
   return count
 }
 
@@ -95,11 +98,12 @@ export function SearchFilters({
   onDatePresetChange,
   hideTopic,
   activeTag,
+  activeOwner,
   onClearTag,
   onClearAll,
 }: Props) {
   const [open, setOpen] = useState(false)
-  const activeCount = countActiveFilters(hideTopic ? null : topic, region, biasRange, minFactuality, datePreset, activeTag)
+  const activeCount = countActiveFilters(hideTopic ? null : topic, region, biasRange, minFactuality, datePreset, activeTag, activeOwner)
   const activePreset = deriveActivePreset(biasRange)
 
   function handlePreset(preset: PerspectiveFilter) {

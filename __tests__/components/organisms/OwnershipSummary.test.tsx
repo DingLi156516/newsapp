@@ -128,4 +128,47 @@ describe('OwnershipSummary', () => {
     )
     expect(screen.getByText(/2 unknown/i)).toBeInTheDocument()
   })
+
+  it('renders "View recent stories from X" link when a dominant owner exists', () => {
+    const warner = makeOwner({ id: 'warner', name: 'Warner Bros. Discovery', slug: 'warner-bros-discovery' })
+    render(
+      <OwnershipSummary
+        sources={[
+          makeSource('1', warner),
+          makeSource('2', warner),
+          makeSource('3', warner),
+          makeSource('4', warner),
+          makeSource('5'),
+          makeSource('6'),
+        ]}
+      />
+    )
+    const link = screen.getByTestId('ownership-summary-view-feed')
+    expect(link).toBeInTheDocument()
+    // Must include tab=latest — Trending (the default feed tab) applies a
+    // 7-day server-side cutoff that would contradict the 180-day owner scope.
+    expect(link).toHaveAttribute('href', '/?owner=warner-bros-discovery&tab=latest')
+    expect(link).toHaveTextContent(/View recent stories from Warner Bros\. Discovery/)
+    // Link title explains the bounded window to screen readers / hover users
+    expect(link).toHaveAttribute('title', expect.stringMatching(/last 180 days/i))
+  })
+
+  it('does not render a View feed link when no owner dominates', () => {
+    const a = makeOwner({ id: 'a', name: 'A' })
+    const b = makeOwner({ id: 'b', name: 'B' })
+    const c = makeOwner({ id: 'c', name: 'C' })
+    render(
+      <OwnershipSummary
+        sources={[
+          makeSource('1', a),
+          makeSource('2', a),
+          makeSource('3', b),
+          makeSource('4', b),
+          makeSource('5', c),
+          makeSource('6', c),
+        ]}
+      />
+    )
+    expect(screen.queryByTestId('ownership-summary-view-feed')).not.toBeInTheDocument()
+  })
 })

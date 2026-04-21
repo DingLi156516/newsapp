@@ -7,6 +7,7 @@ function base(overrides: Partial<FeedFilterKeyInput> = {}): FeedFilterKeyInput {
     topic: null,
     tag: null,
     tagType: null,
+    owner: null,
     region: null,
     search: '',
     feedTab: 'latest',
@@ -62,5 +63,34 @@ describe('buildFeedFilterKey', () => {
     expect(buildFeedFilterKey(base({ biasRange: ['left'] }))).not.toBe(
       buildFeedFilterKey(base({ biasRange: ['right'] }))
     )
+  })
+
+  it('changes when owner changes', () => {
+    expect(buildFeedFilterKey(base({ owner: 'fox-corporation' }))).not.toBe(
+      buildFeedFilterKey(base({ owner: 'dow-jones' }))
+    )
+    expect(buildFeedFilterKey(base({ owner: 'fox-corporation' }))).not.toBe(
+      buildFeedFilterKey(base())
+    )
+  })
+
+  it('is stable across trending/latest tab switch when owner filter is active', () => {
+    // With an active owner filter, sort=trending is suppressed at the client
+    // and the server routes through the owner-specific path either way.
+    // Toggling tabs hits the same backend request, so the cache key must stay
+    // identical — otherwise `accumulated` resets and page 1 refetches for an
+    // identical query, costing already-loaded pages on long owner feeds.
+    const latest = buildFeedFilterKey(base({ owner: 'fox-corporation', feedTab: 'latest' }))
+    const trending = buildFeedFilterKey(base({ owner: 'fox-corporation', feedTab: 'trending' }))
+    expect(latest).toBe(trending)
+  })
+
+  it('is stable across blindspot/latest tab switch when owner filter is active', () => {
+    // Same pattern: owner filter suppresses the blindspot server filter, so
+    // /?owner=X and /?owner=X&tab=blindspot hit identical backend queries.
+    // Cache key must match so accumulator survives the no-op tab toggle.
+    const latest = buildFeedFilterKey(base({ owner: 'fox-corporation', feedTab: 'latest' }))
+    const blindspot = buildFeedFilterKey(base({ owner: 'fox-corporation', feedTab: 'blindspot' }))
+    expect(latest).toBe(blindspot)
   })
 })

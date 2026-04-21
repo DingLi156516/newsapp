@@ -31,6 +31,7 @@
 | `AdminSourceListItem` | `@/components/molecules/AdminSourceListItem` — Single row in admin source list showing name, bias badge, region, active status, and health indicators |
 | `OwnershipBar` | `@/components/molecules/OwnershipBar` — Horizontal segmented bar showing proportional source ownership for a story; colors segments by `OwnerType` and trails an unknown slice |
 | `RoutingPreviewPanel` | `@/components/molecules/RoutingPreviewPanel` — Admin routing-preview panel inside `ReviewDetail`; shows chosen assembly path (rich/single/thin), source count, distinct bias buckets, and applied thresholds via `useRoutingPreview` |
+| `ActiveOwnerChip` | `@/components/molecules/ActiveOwnerChip` — Visible pill rendered on the home feed when `?owner=…` is set; shows a title-cased display of the slug (fallback) or an explicit `displayName`, with an × to clear. Exports `formatOwnerSlugForDisplay` helper. |
 
 ## Organisms (`components/organisms/`)
 

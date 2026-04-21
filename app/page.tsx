@@ -29,6 +29,7 @@ import Link from 'next/link'
 import { ViewSwitcher, type AppView } from '@/components/organisms/ViewSwitcher'
 import { SourcesView } from '@/components/organisms/SourcesView'
 import { TopicPills } from '@/components/organisms/TopicPills'
+import { ActiveOwnerChip } from '@/components/molecules/ActiveOwnerChip'
 import { usePromotedTags } from '@/lib/hooks/use-promoted-tags'
 
 export default function HomePage() {
@@ -50,8 +51,8 @@ function HomePageContent() {
 
   // Filter state persisted in URL search params
   const {
-    feedTab, topic, tag, tagType, search, region, biasRange, minFactuality, datePreset,
-    setFeedTab, setTopic, setTag, setSearch, setRegion, setBiasRange, setMinFactuality, setDatePreset,
+    feedTab, topic, tag, tagType, owner, search, region, biasRange, minFactuality, datePreset,
+    setFeedTab, setTopic, setTag, setSearch, setRegion, setBiasRange, setMinFactuality, setDatePreset, setOwner,
     clearAll,
   } = useFilterParams()
 
@@ -89,6 +90,7 @@ function HomePageContent() {
       topic,
       tag,
       tagType,
+      owner,
       region,
       search: debouncedSearch,
       feedTab,
@@ -96,7 +98,7 @@ function HomePageContent() {
       minFactuality,
       datePreset,
     }),
-    [topic, tag, tagType, region, debouncedSearch, feedTab, biasRange, minFactuality, datePreset]
+    [topic, tag, tagType, owner, region, debouncedSearch, feedTab, biasRange, minFactuality, datePreset]
   )
 
   // Synchronous reset when filters change mid-pagination. React's documented
@@ -111,17 +113,25 @@ function HomePageContent() {
     setAccumulated([])
   }
 
-  const { stories, total, isLoading } = useStories({
+  const { stories, total, isLoading, ownerFilterUnavailable } = useStories({
     topic: selectedTag ? undefined : topic,
     tag: selectedTag?.slug,
     tagType: selectedTag?.type,
+    owner,
     region,
     search: debouncedSearch,
-    blindspot: feedTab === 'blindspot',
+    // When owner filter is active displayFeedTab collapses to 'latest', so the
+    // blindspot server filter drops — owner feed wins over blindspot scope.
+    blindspot: (owner ? 'latest' : feedTab) === 'blindspot',
     biasRange,
     minFactuality,
     datePreset,
-    sort: feedTab === 'trending' ? 'trending' : undefined,
+    // When an owner filter is active, suppress sort=trending: the server's
+    // trending branch applies a 7-day window that contradicts the 180-day
+    // owner-coverage scope. The owner-specific resolver order wins instead.
+    // Covers both URL entry (`/?owner=…` with default trending tab) and
+    // mid-session tab switches. See Codex review round 8.
+    sort: feedTab === 'trending' && !owner ? 'trending' : undefined,
     page,
   })
 
@@ -147,40 +157,57 @@ function HomePageContent() {
   // Count blindspot articles for the FeedTabs badge (from accumulated stories)
   const totalBlindspotCount = accumulated.filter((a) => a.isBlindspot).length
 
-  // Client-side filtering for saved/latest tabs
+  // When an owner filter is active, the server ignores sort=trending and
+  // returns owner-recency results (resolver-ordered, 180-day window). The UI
+  // must match — otherwise the user sees Trending/Saved/Blindspot chrome on
+  // a feed that isn't trending-ranked / bookmark-filtered / blindspot-scoped.
+  // displayFeedTab is used *throughout* content selection and display logic
+  // so a URL like `/?owner=fox&tab=saved` renders as Latest-with-owner rather
+  // than mixing owner-coverage articles through a Saved-tab filter. The URL
+  // tab param still persists so clearing the owner restores the original
+  // tab. See Codex review rounds 9 P2 and 12 P3.
+  const displayFeedTab = owner ? 'latest' : feedTab
+
+  // Client-side filtering for saved/latest tabs. All branches use
+  // displayFeedTab — with owner set, only the Latest behavior applies.
   const filtered = useMemo(() => {
-    if (feedTab === 'for-you') {
+    if (displayFeedTab === 'for-you') {
       return [...forYouStories]
     }
 
     let articles = [...accumulated]
 
-    if (feedTab === 'saved') {
+    if (displayFeedTab === 'saved') {
       articles = articles.filter((a) => bookmarkedIds.has(a.id))
     }
 
-    if (feedTab === 'latest') {
+    // When an owner filter is active the server has already ordered the page
+    // by resolver position (per-owner article recency). Client-side re-sort
+    // by `timestamp` (which maps to `published_at`) would bury older ongoing
+    // stories with fresh owner coverage — the very case the server-side
+    // order was designed to surface. See Codex round-6 finding #2.
+    if (displayFeedTab === 'latest' && !owner) {
       articles.sort(
         (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       )
     }
 
     return articles
-  }, [feedTab, accumulated, forYouStories, bookmarkedIds])
+  }, [displayFeedTab, owner, accumulated, forYouStories, bookmarkedIds])
 
   // Stats from filtered results
   const blindspotCount = filtered.filter(s => s.isBlindspot).length
   const heroStory = filtered[0] ?? null
   const gridStories = filtered.slice(1)
 
-  const hasMore = total > accumulated.length && feedTab !== 'for-you' && feedTab !== 'saved'
+  const hasMore = total > accumulated.length && displayFeedTab !== 'for-you' && displayFeedTab !== 'saved'
   const handleLoadMore = useCallback(() => setPage(p => p + 1), [])
   const sentinelRef = useInfiniteScroll(handleLoadMore, { enabled: hasMore, isLoading })
 
-  const hasActiveFilters = topic !== null || tag !== null || region !== null || search !== '' ||
+  const hasActiveFilters = topic !== null || tag !== null || owner !== null || region !== null || search !== '' ||
     biasRange.length !== ALL_BIASES.length || minFactuality !== null || datePreset !== 'all'
 
-  const showFilters = feedTab !== 'for-you'
+  const showFilters = displayFeedTab !== 'for-you'
 
   return (
     <div className="min-h-screen mesh-gradient">
@@ -230,9 +257,43 @@ function HomePageContent() {
                 onDatePresetChange={setDatePreset}
                 hideTopic
                 activeTag={tag}
+                activeOwner={owner}
                 onClearTag={() => setTag(null)}
                 onClearAll={clearAll}
               />
+            )}
+
+            {/* Active owner filter chip — visible when ?owner=… is set */}
+            {showFilters && owner && (
+              <ActiveOwnerChip slug={owner} onClear={() => setOwner(null)} />
+            )}
+
+            {/*
+              Owner-lookup outage banner — surfaces independently of whether
+              the user has already accumulated stories from earlier pages.
+              Without this, a mid-scroll owner-lookup failure would silently
+              collapse `hasMore` to false and the empty-state copy would never
+              render (filtered.length > 0 on later pages). See Codex round-7
+              finding #1.
+            */}
+            {showFilters && owner && ownerFilterUnavailable && filtered.length > 0 && (
+              <div
+                data-testid="owner-filter-unavailable-banner"
+                role="status"
+                className="glass-sm flex items-center gap-3 px-4 py-2.5 text-xs text-white/70"
+              >
+                <span className="h-2 w-2 rounded-full bg-amber-400/80 flex-shrink-0" />
+                <span className="flex-1">
+                  Owner filter hit a temporary lookup error — some recent coverage may be
+                  missing. Try again in a minute or clear the filter.
+                </span>
+                <button
+                  onClick={() => setOwner(null)}
+                  className="glass-pill px-3 py-1 text-[11px] text-white/80 hover:text-white transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
             )}
 
             {/* Topic + promoted tag pills */}
@@ -246,10 +307,30 @@ function HomePageContent() {
               />
             )}
 
-            {/* Sticky filter bar */}
+            {/* Sticky filter bar — tab switches clear the owner filter so
+                content, tab highlight, and URL state stay coherent. Both
+                changes must land in a single router.push: calling setOwner
+                then setFeedTab back-to-back would derive both URLs from the
+                same stale searchParams snapshot and the second push would
+                restore ?owner=…. See round-10 P1 + round-11 P1. */}
             <StickyFilterBar
-              feedTab={feedTab}
-              onFeedTabChange={setFeedTab}
+              feedTab={displayFeedTab}
+              onFeedTabChange={(tab) => {
+                // Re-clicking the already-active tab is a no-op — don't
+                // silently drop the owner filter just because the user
+                // tapped the tab that's already selected. See round-12 P2.
+                if (tab === displayFeedTab) return
+                if (owner) {
+                  const params = new URLSearchParams(searchParams.toString())
+                  params.delete('owner')
+                  if (tab === 'trending') params.delete('tab')
+                  else params.set('tab', tab)
+                  const str = params.toString()
+                  router.push(str ? `/?${str}` : '/')
+                } else {
+                  setFeedTab(tab)
+                }
+              }}
               savedCount={savedCount}
               blindspotCount={totalBlindspotCount}
             />
@@ -264,19 +345,36 @@ function HomePageContent() {
 
             {/* Dashboard bento feed */}
             <main className="space-y-2">
-              {feedTab === 'for-you' && !isAuthenticated ? (
+              {displayFeedTab === 'for-you' && !isAuthenticated ? (
                 <ForYouCta onDismiss={() => setFeedTab('trending')} />
-              ) : (feedTab === 'for-you' ? forYouLoading : isLoading) ? (
+              ) : (displayFeedTab === 'for-you' ? forYouLoading : isLoading) ? (
                 <>
                   <NexusCardSkeleton />
                   <NexusCardSkeletonList count={4} layout="bento" />
                 </>
               ) : filtered.length === 0 ? (
-                <div className="glass py-16 flex flex-col items-center gap-4 text-center">
+                <div
+                  className="glass py-16 flex flex-col items-center gap-4 text-center"
+                  data-testid={ownerFilterUnavailable ? 'owner-filter-unavailable' : 'empty-feed'}
+                >
                   <SearchX size={48} className="text-white/20" />
                   <div className="space-y-1">
-                    <p className="text-white/70 font-medium">No stories match your filters.</p>
-                    <p className="text-sm text-white/40">Try broadening your filters or switching to a different tab</p>
+                    {ownerFilterUnavailable ? (
+                      <>
+                        <p className="text-white/70 font-medium">
+                          Owner filter temporarily unavailable.
+                        </p>
+                        <p className="text-sm text-white/40">
+                          We couldn&apos;t look up this publisher&apos;s recent coverage. Try again
+                          in a minute, or clear the filter to see the full feed.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-white/70 font-medium">No stories match your filters.</p>
+                        <p className="text-sm text-white/40">Try broadening your filters or switching to a different tab</p>
+                      </>
+                    )}
                   </div>
                   {hasActiveFilters && (
                     <button
@@ -296,7 +394,7 @@ function HomePageContent() {
                       onSave={toggle}
                       isSaved={isBookmarked(heroStory.id)}
                       isRead={isRead(heroStory.id)}
-                      showMetrics={feedTab === 'trending'}
+                      showMetrics={displayFeedTab === 'trending'}
                     />
                   )}
                   {gridStories.length > 0 && (
@@ -310,7 +408,7 @@ function HomePageContent() {
                           isSaved={isBookmarked(article.id)}
                           isRead={isRead(article.id)}
                           compact
-                          showMetrics={feedTab === 'trending'}
+                          showMetrics={displayFeedTab === 'trending'}
                         />
                       ))}
                     </div>

@@ -96,10 +96,178 @@ interface SourceProfileStoryRow {
   articleUrl?: string
 }
 
+/**
+ * Explicit recent-stories window for the owner filter. The endpoint contract
+ * is "owner's recent coverage", not "all-time archive" — a deeper window would
+ * require a SQL-side predicate (RPC or view) to avoid serializing thousands of
+ * UUIDs into the stories query URL. See `OWNER_FILTER_MAX_STORY_IDS` below.
+ */
+export const OWNER_FILTER_WINDOW_DAYS = 180
+
+/**
+ * Hard cap on the number of story IDs materialized into the `id=in.(…)` filter
+ * built from `resolveStoryIdsForOwner`. A UUID + comma is ~37 chars; at 1000
+ * IDs the URL-filter payload is ~37 KB, well under common proxy limits (nginx
+ * default 8 KB per header but 16–32 KB per URL in practice; PostgREST happily
+ * accepts multi-KB `in.(…)` clauses). This cap combined with the
+ * 180-day window keeps the worst-case request bounded by construction.
+ *
+ * Stories are ordered by article recency, so when the cap bites the filter
+ * still covers the most recent coverage — which is what feed pagination
+ * actually reaches. Older coverage is only reachable once SQL-side filtering
+ * replaces this resolver; see `docs/ground-news-parity-roadmap.md`.
+ */
+export const OWNER_FILTER_MAX_STORY_IDS = 1000
+
+/**
+ * Resolve a media_owners.slug → distinct story IDs with articles from sources
+ * owned by that owner. Three-step chain: owner → sources → articles.
+ *
+ * Bounded for URL-payload sanity:
+ * - 180-day `published_at` window (covers any realistic feed lookback)
+ * - Articles fetched newest-first, then deduped and capped at
+ *   `OWNER_FILTER_MAX_STORY_IDS` distinct story IDs so the downstream
+ *   `.in('id', …)` filter URL stays well under proxy limits.
+ *
+ * Returns `[]` when the slug is unknown, the owner has no active sources, or
+ * none of those sources produced articles within the window. Callers treat
+ * that as an empty-set sentinel.
+ */
+/**
+ * Result of owner-slug resolution. `unavailable: true` signals a dependency
+ * failure (missing table, RLS regression, transient DB error) so callers can
+ * distinguish "owner has no recent coverage" from "we couldn't check". The
+ * route surfaces this flag via response meta so the UI doesn't have to guess.
+ */
+interface ResolveOwnerResult {
+  readonly storyIds: readonly string[]
+  readonly unavailable: boolean
+}
+
+async function resolveStoryIdsForOwner(
+  client: SupabaseClient<Database>,
+  ownerSlug: string
+): Promise<ResolveOwnerResult> {
+  // Graceful degradation: if the `media_owners` table, the `sources.owner_id`
+  // column, or the RLS policies covering them are missing — as can happen
+  // during migration 048 rollout or an RLS regression — return an empty set
+  // and log for monitoring instead of surfacing a 500. Mirrors the tiered
+  // fallback strategy in `querySources`. Non-filter feed traffic is
+  // unaffected; owner filter requests land on an empty feed until the schema
+  // catches up. See Codex round-3 finding #1.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: owner, error: ownerError } = await (client.from('media_owners') as any)
+      .select('id')
+      .eq('slug', ownerSlug)
+      .maybeSingle()
+
+    if (ownerError) {
+      console.error(
+        `[resolveStoryIdsForOwner] media_owners lookup failed for slug "${ownerSlug}":`,
+        ownerError.message
+      )
+      return { storyIds: [], unavailable: true }
+    }
+    if (!owner) return { storyIds: [], unavailable: false }
+
+    // Intentionally NOT filtering `is_active = true`: that flag tracks
+    // ingestion status (should we keep fetching this feed?), not
+    // owner-relationship status. Articles already in the 180-day window
+    // belong in the owner's recent coverage whether or not the source is
+    // still actively ingested. A source retired last week still owns its
+    // last 90 days of articles for this owner. See Codex review round 13 P2.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: sourceRows, error: sourcesError } = await (client.from('sources') as any)
+      .select('id')
+      .eq('owner_id', owner.id)
+
+    if (sourcesError) {
+      console.error(
+        `[resolveStoryIdsForOwner] sources lookup failed for owner "${ownerSlug}":`,
+        sourcesError.message
+      )
+      return { storyIds: [], unavailable: true }
+    }
+    const sourceIds = ((sourceRows ?? []) as Array<{ id: string }>).map((r) => r.id)
+    if (sourceIds.length === 0) return { storyIds: [], unavailable: false }
+
+    const windowIso = new Date(
+      Date.now() - OWNER_FILTER_WINDOW_DAYS * 24 * 3_600_000
+    ).toISOString()
+
+    // Article-fetch ceiling: sized for the realistic case where an owner's
+    // sources produce ~5-10 articles per story on average, so 10× MAX_STORY_IDS
+    // of article rows comfortably dedupes past 1000 distinct story IDs. The
+    // ceiling is a defense against pathological owners where a few stories
+    // dominate the article sample (e.g. 50+ articles of the same breaking
+    // story); bumping to 10× reduces, but does not eliminate, the edge case.
+    // True distinct-story pagination would require an RPC/view — see
+    // `docs/ground-news-parity-roadmap.md` for the SQL-side follow-up.
+    const ARTICLE_FETCH_CEILING = OWNER_FILTER_MAX_STORY_IDS * 10
+
+    // `stories!inner` + `stories.publication_status=eq.published` narrows the
+    // article sample to rows whose parent story is *actually* visible on the
+    // public feed — otherwise drafts/needs_review occupy slots in the 1000-ID
+    // cap and then get filtered out downstream (Codex round-2 finding #2).
+    //
+    // Effective-timestamp window: migration 040 made `articles.published_at`
+    // nullable because some feeds omit pubDates. Those articles still belong
+    // in the owner's recent coverage, so we accept a row if either its
+    // `published_at` is in-window, OR `published_at IS NULL` and `fetched_at`
+    // (always set, ingest-time) is in-window. Ordering falls back to
+    // `fetched_at` since it's the only timestamp guaranteed non-null across
+    // the mixed set. See Codex round-3 finding #2.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: articleRows, error: articlesError } = await (client.from('articles') as any)
+      .select('story_id, stories!inner(publication_status)')
+      .in('source_id', sourceIds)
+      .not('story_id', 'is', null)
+      .eq('stories.publication_status', 'published')
+      .or(
+        `published_at.gte.${windowIso},and(published_at.is.null,fetched_at.gte.${windowIso})`
+      )
+      // Primary order: published_at DESC so backfilled/reprocessed articles
+      // (fresh fetched_at, old published_at) can't leapfrog genuinely newer
+      // coverage. NULLS LAST keeps null-pubDate articles (migration 040) in
+      // the sample at the window edge; fetched_at breaks ties and orders
+      // the null-pub tail. See Codex review round 14 P2.
+      .order('published_at', { ascending: false, nullsFirst: false })
+      .order('fetched_at', { ascending: false })
+      .limit(ARTICLE_FETCH_CEILING)
+
+    if (articlesError) {
+      console.error(
+        `[resolveStoryIdsForOwner] articles lookup failed for owner "${ownerSlug}":`,
+        articlesError.message
+      )
+      return { storyIds: [], unavailable: true }
+    }
+
+    const storyIds = new Set<string>()
+    for (const row of (articleRows ?? []) as Array<{ story_id: string | null }>) {
+      if (!row.story_id) continue
+      storyIds.add(row.story_id)
+      if (storyIds.size >= OWNER_FILTER_MAX_STORY_IDS) break
+    }
+    return { storyIds: [...storyIds], unavailable: false }
+  } catch (err) {
+    // Defense-in-depth against unexpected client-layer throws (network, auth,
+    // etc.). We'd rather show an empty owner feed than 500 the whole stories
+    // route — users can still browse without the owner filter.
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(
+      `[resolveStoryIdsForOwner] unexpected failure for slug "${ownerSlug}":`,
+      message
+    )
+    return { storyIds: [], unavailable: true }
+  }
+}
+
 export async function queryStories(
   client: SupabaseClient<Database>,
   params: StoriesQuery
-): Promise<{ data: StoryRow[]; count: number }> {
+): Promise<{ data: StoryRow[]; count: number; ownerFilterUnavailable: boolean }> {
   const {
     topic,
     region,
@@ -111,12 +279,27 @@ export async function queryStories(
     sort,
     tag,
     tag_type,
+    owner,
     ids,
     page,
     limit,
   } = params
 
   const offset = (page - 1) * limit
+
+  // Resolve owner slug → story IDs before the base query so we can intersect
+  // with any `ids` param below. An owner slug with no matching stories is a
+  // hard empty-set — short-circuit before hitting stories at all. The
+  // `unavailable` flag propagates upward so the route/UI can distinguish a
+  // legitimate empty feed from a dependency outage.
+  let ownerStoryIds: readonly string[] | null = null
+  let ownerFilterUnavailable = false
+  if (owner) {
+    const resolved = await resolveStoryIdsForOwner(client, owner)
+    ownerFilterUnavailable = resolved.unavailable
+    ownerStoryIds = resolved.storyIds
+    if (ownerStoryIds.length === 0) return { data: [], count: 0, ownerFilterUnavailable }
+  }
 
   // Resolve tag slug → ID(s) before building the base query (needed for !inner join)
   let tagIds: readonly string[] = []
@@ -135,16 +318,47 @@ export async function queryStories(
     if (tagLookupError) {
       throw new Error(`Failed to look up tag "${tag}": ${tagLookupError.message}`)
     }
-    if (!tagRows || tagRows.length === 0) return { data: [], count: 0 }
+    if (!tagRows || tagRows.length === 0) return { data: [], count: 0, ownerFilterUnavailable }
     tagIds = (tagRows as Array<{ id: string }>).map(r => r.id)
   }
 
   const hasTagFilter = tagIds.length > 0
-  // `trending_score` is added only for sort=trending so non-trending queries
-  // don't depend on migration 050 — protects Latest/Saved/Blindspot against
-  // schema skew if the app is ever deployed ahead of the migration.
+
+  // Compute the id constraint up front so we can short-circuit (e.g. owner ∩
+  // ids = ∅) without ever opening the stories query builder. A single
+  // `.in('id', …)` call would otherwise let the later one clobber the earlier.
+  let idConstraint: readonly string[] | null = null
+  if (ids) {
+    const idList = ids.split(',').filter(Boolean)
+    if (idList.length > 0) idConstraint = idList
+  }
+  if (ownerStoryIds !== null) {
+    if (idConstraint === null) {
+      idConstraint = ownerStoryIds
+    } else {
+      const ownerSet = new Set(ownerStoryIds)
+      const intersection = idConstraint.filter((id) => ownerSet.has(id))
+      if (intersection.length === 0) return { data: [], count: 0, ownerFilterUnavailable }
+      idConstraint = intersection
+    }
+  }
+
+  // Effective sort: owner-filter path wins over trending/source_count. This
+  // also governs whether `trending_score` is added to the select — a caller
+  // sending `?owner=X&sort=trending` would otherwise request the column
+  // without the server ever routing through the trending branch, and in the
+  // migration-skew scenario this file already defends against (migration 050
+  // not deployed) the request would 500 purely because the column was
+  // selected. See Codex review round 15 P2.
+  const effectiveSort: StoriesQuery['sort'] =
+    ownerStoryIds !== null ? undefined : sort
+
+  // `trending_score` is added only for effective sort=trending so non-trending
+  // queries don't depend on migration 050 — protects Latest/Saved/Blindspot
+  // and owner-filter paths against schema skew if the app is ever deployed
+  // ahead of the migration.
   const baseColumns = 'id, headline, topic, region, source_count, is_blindspot, image_url, factuality, ownership, spectrum_segments, ai_summary, published_at, first_published, last_updated, story_velocity, impact_score, source_diversity, controversy_score, sentiment, key_quotes, key_claims'
-  const columnsWithSort = sort === 'trending' ? `${baseColumns}, trending_score` : baseColumns
+  const columnsWithSort = effectiveSort === 'trending' ? `${baseColumns}, trending_score` : baseColumns
   const selectStr = hasTagFilter ? `${columnsWithSort}, story_tags!inner(tag_id)` : columnsWithSort
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -158,11 +372,8 @@ export async function queryStories(
       : query.in('story_tags.tag_id', [...tagIds])
   }
 
-  if (ids) {
-    const idList = ids.split(',').filter(Boolean)
-    if (idList.length > 0) {
-      query = query.in('id', idList)
-    }
+  if (idConstraint !== null) {
+    query = query.in('id', [...idConstraint])
   }
 
   if (topic) {
@@ -190,7 +401,19 @@ export async function queryStories(
     query = query.gte('first_published', getDateThreshold(datePreset as Exclude<DatePreset, 'all'>))
   }
 
-  if (sort === 'trending') {
+  // Owner-specific path must win over `sort=trending` / `sort=source_count`
+  // so direct API callers (mobile, external consumers, bookmarked URLs) can't
+  // bypass the 180-day owner-coverage contract by passing a conflicting sort.
+  // The client already suppresses sort=trending when owner is set; this is the
+  // server-side backstop. See Codex review round 10, P2.
+  if (ownerStoryIds !== null) {
+    // Skip server-side pagination — the resolver already ordered storyIds by
+    // per-owner article recency; we'll sort + slice in memory below so each
+    // page reflects the owner's actual coverage cadence.
+    query = query
+      .order('id', { ascending: false })
+      .range(0, OWNER_FILTER_MAX_STORY_IDS - 1)
+  } else if (sort === 'trending') {
     // Trending uses the materialized `trending_score` column (migration 050).
     // Scores are populated by the refresh cron (`/api/cron/refresh-trending`)
     // and the migration's inline backfill. Newly-assembled stories with NULL
@@ -265,6 +488,29 @@ export async function queryStories(
     }
   }
 
+  if (ownerStoryIds !== null) {
+    // Re-order by the resolver's per-owner recency ranking: index 0 = most
+    // recent owner article, index N = oldest within the 180-day window. Then
+    // paginate in memory against the (bounded) full result set so page N
+    // reflects the owner's actual coverage cadence, not any global timestamp.
+    const position = new Map<string, number>()
+    ownerStoryIds.forEach((id, idx) => position.set(id, idx))
+    filteredStories = filteredStories
+      .slice()
+      .sort(
+        (a: StoryRow, b: StoryRow) =>
+          (position.get(a.id) ?? Number.POSITIVE_INFINITY) -
+          (position.get(b.id) ?? Number.POSITIVE_INFINITY)
+      )
+    const totalAfterBiasFilter = filteredStories.length
+    filteredStories = filteredStories.slice(offset, offset + limit)
+    return {
+      data: filteredStories,
+      count: totalAfterBiasFilter,
+      ownerFilterUnavailable,
+    }
+  }
+
   filteredStories = filteredStories.sort((a: StoryRow, b: StoryRow) => {
     if (sort === 'trending') {
       const scoreDiff = (b.trending_score ?? 0) - (a.trending_score ?? 0)
@@ -277,7 +523,7 @@ export async function queryStories(
     return new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
   })
 
-  return { data: filteredStories, count: count ?? 0 }
+  return { data: filteredStories, count: count ?? 0, ownerFilterUnavailable }
 }
 
 export function getFactualitiesAtOrAbove(min: FactualityLevel): string[] {

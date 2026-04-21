@@ -46,6 +46,11 @@ export const storiesQuerySchema = z.object({
   sort: z.enum(SORT_FIELDS).optional(),
   tag: z.string().max(100).optional(),
   tag_type: z.enum(TAG_TYPES).optional(),
+  owner: z
+    .string()
+    .max(100)
+    .regex(/^[a-z0-9][a-z0-9-]*$/, 'Invalid owner slug')
+    .optional(),
   ids: z.string().max(2000).optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   limit: z.coerce.number().int().min(1).max(50).optional().default(20),

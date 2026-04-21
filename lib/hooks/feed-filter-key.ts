@@ -21,6 +21,7 @@ export interface FeedFilterKeyInput {
   readonly topic: Topic | null
   readonly tag: string | null
   readonly tagType: string | null
+  readonly owner: string | null
   readonly region: Region | null
   readonly search: string
   readonly feedTab: FeedTab
@@ -30,14 +31,24 @@ export interface FeedFilterKeyInput {
 }
 
 export function buildFeedFilterKey(input: FeedFilterKeyInput): string {
+  // When an owner filter is active, app/page.tsx suppresses both `sort=trending`
+  // and the blindspot server filter — the backend routes through the
+  // owner-specific path regardless of which tab is highlighted. Both
+  // distinctions drop out of the cache key in that case, otherwise switching
+  // tabs (Latest↔Trending or Latest↔Blindspot) for an identical backend query
+  // would reset `accumulated` and refetch page 1 for no real change. See
+  // Codex review round 9 P3 + round 14 P3.
+  const serverSeesTrending = input.feedTab === 'trending' && !input.owner
+  const serverSeesBlindspot = input.feedTab === 'blindspot' && !input.owner
   return JSON.stringify([
     input.topic,
     input.tag,
     input.tagType,
+    input.owner,
     input.region,
     input.search,
-    input.feedTab === 'blindspot',
-    input.feedTab === 'trending',
+    serverSeesBlindspot,
+    serverSeesTrending,
     input.biasRange,
     input.minFactuality,
     input.datePreset,

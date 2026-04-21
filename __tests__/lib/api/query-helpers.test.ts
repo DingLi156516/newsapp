@@ -30,6 +30,7 @@ function createMockQueryBuilder(data: unknown = [], count: number = 0, error: nu
     range: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     single: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockReturnThis(),
     returns: vi.fn().mockReturnThis(),
     then: vi.fn().mockImplementation((resolve: (value: unknown) => void) => {
       resolve({ data, count, error })
@@ -258,7 +259,8 @@ describe('queryStories', () => {
 
     const result = await queryStories(client, { tag: 'nonexistent', page: 1, limit: 20 })
 
-    expect(result).toEqual({ data: [], count: 0 })
+    // Tag-miss is not an owner-filter outage
+    expect(result).toEqual({ data: [], count: 0, ownerFilterUnavailable: false })
   })
 
   describe('sort=trending', () => {
@@ -378,6 +380,389 @@ describe('queryStories', () => {
       const result = await queryStories(client, { sort: 'trending', page: 1, limit: 20 })
 
       expect(result.data.map((s) => s.id)).toEqual(['high', 'mid', 'low'])
+    })
+  })
+
+  describe('owner filter', () => {
+    it('resolves slug → sources → story_ids and applies as .in(id, …)', async () => {
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }, { id: 's2' }])
+      const articlesBuilder = createMockQueryBuilder([
+        { story_id: 'story-a' },
+        { story_id: 'story-b' },
+        { story_id: 'story-a' }, // duplicate — should dedupe
+        { story_id: null },      // null — should drop
+      ])
+      const storiesBuilder = createMockQueryBuilder([mockStory], 1)
+
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder)
+          .mockReturnValueOnce(storiesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      await queryStories(client, { owner: 'warner-bros-discovery', page: 1, limit: 20 })
+
+      // Owner slug lookup
+      expect(ownerBuilder.eq).toHaveBeenCalledWith('slug', 'warner-bros-discovery')
+      // Sources filtered by owner_id only — is_active is intentionally NOT a
+      // constraint (tracks ingestion status, not owner-relationship validity).
+      expect(sourcesBuilder.eq).toHaveBeenCalledWith('owner_id', 'owner-uuid')
+      const sourcesEqCalls = (sourcesBuilder.eq as ReturnType<typeof vi.fn>).mock.calls
+      expect(sourcesEqCalls.every((c) => c[0] !== 'is_active')).toBe(true)
+      // Articles filtered by the resolved source IDs
+      expect(articlesBuilder.in).toHaveBeenCalledWith('source_id', ['s1', 's2'])
+      // Main stories query constrained to the deduped story_ids
+      expect(storiesBuilder.in).toHaveBeenCalledWith(
+        'id',
+        expect.arrayContaining(['story-a', 'story-b'])
+      )
+      // Dedup invariant: only the 2 distinct IDs
+      const inCall = (storiesBuilder.in as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === 'id'
+      )
+      expect(inCall?.[1]).toHaveLength(2)
+    })
+
+    it('short-circuits to empty when slug is unknown', async () => {
+      const ownerBuilder = createMockQueryBuilder(null)
+      const client = {
+        from: vi.fn().mockReturnValueOnce(ownerBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      const result = await queryStories(client, { owner: 'unknown-owner', page: 1, limit: 20 })
+      // Unknown slug is NOT an outage — ownerFilterUnavailable stays false
+      expect(result).toEqual({ data: [], count: 0, ownerFilterUnavailable: false })
+    })
+
+    it('short-circuits when owner has no active sources', async () => {
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([])
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      const result = await queryStories(client, { owner: 'orphan-owner', page: 1, limit: 20 })
+      expect(result).toEqual({ data: [], count: 0, ownerFilterUnavailable: false })
+    })
+
+    it('short-circuits when sources have no articles within window', async () => {
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }])
+      const articlesBuilder = createMockQueryBuilder([])
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      const result = await queryStories(client, { owner: 'dormant-owner', page: 1, limit: 20 })
+      expect(result).toEqual({ data: [], count: 0, ownerFilterUnavailable: false })
+    })
+
+    it('intersects owner story_ids with explicit ids param', async () => {
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }])
+      const articlesBuilder = createMockQueryBuilder([
+        { story_id: 'story-a' },
+        { story_id: 'story-b' },
+        { story_id: 'story-c' },
+      ])
+      const storiesBuilder = createMockQueryBuilder([mockStory], 1)
+
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder)
+          .mockReturnValueOnce(storiesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      // User supplies ids=story-b,story-d; owner produces a,b,c. Intersection = [b]
+      await queryStories(client, {
+        owner: 'warner-bros-discovery',
+        ids: 'story-b,story-d',
+        page: 1,
+        limit: 20,
+      })
+
+      expect(storiesBuilder.in).toHaveBeenCalledWith('id', ['story-b'])
+    })
+
+    it('restricts the article sample to published parent stories (!inner + eq filter)', async () => {
+      // Draft / needs_review stories would otherwise consume slots in the 1000-ID
+      // cap and then get filtered out by the main query's publication_status
+      // clause — silently shrinking the feed for the owners most likely to use
+      // it. The article resolver must pre-filter via a joined stories row.
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }])
+      const articlesBuilder = createMockQueryBuilder([{ story_id: 'story-a' }])
+      const storiesBuilder = createMockQueryBuilder([mockStory], 1)
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder)
+          .mockReturnValueOnce(storiesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      await queryStories(client, { owner: 'warner-bros-discovery', page: 1, limit: 20 })
+
+      // Verify the inner join on stories was selected
+      expect(articlesBuilder.select).toHaveBeenCalledWith(
+        expect.stringContaining('stories!inner(publication_status)')
+      )
+      // Verify the published filter was applied at the article layer
+      expect(articlesBuilder.eq).toHaveBeenCalledWith('stories.publication_status', 'published')
+    })
+
+    it('uses an effective timestamp so null published_at articles stay in-window', async () => {
+      // Migration 040 made articles.published_at nullable. Those articles still
+      // belong in the owner's recent coverage when fetched_at is in-window.
+      // The resolver must use a combined .or() filter, not a bare .gte on
+      // published_at. See Codex round-3 finding #2.
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }])
+      const articlesBuilder = createMockQueryBuilder([{ story_id: 'story-a' }])
+      const storiesBuilder = createMockQueryBuilder([mockStory], 1)
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder)
+          .mockReturnValueOnce(storiesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      await queryStories(client, { owner: 'warner-bros-discovery', page: 1, limit: 20 })
+
+      // OR filter covers both branches: published_at in-window, or null with
+      // fetched_at in-window
+      expect(articlesBuilder.or).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /^published_at\.gte\..+,and\(published_at\.is\.null,fetched_at\.gte\..+\)$/
+        )
+      )
+      // Primary order: published_at DESC NULLS LAST so backfilled/reprocessed
+      // articles (fresh fetched_at, stale published_at) can't leapfrog newer
+      // genuine coverage. fetched_at is the tiebreak + null-pub tail order.
+      expect(articlesBuilder.order).toHaveBeenCalledWith(
+        'published_at',
+        expect.objectContaining({ ascending: false, nullsFirst: false })
+      )
+      expect(articlesBuilder.order).toHaveBeenCalledWith(
+        'fetched_at',
+        expect.objectContaining({ ascending: false })
+      )
+    })
+
+    it('degrades to empty (no throw) when media_owners lookup fails', async () => {
+      // Rollout safety: pre-migration-048 or RLS regression must not turn
+      // /api/stories?owner=… into a 500. Mirror the tiered fallback used by
+      // querySources. See Codex round-3 finding #1.
+      const ownerBuilder = createMockQueryBuilder(null, 0, {
+        message: 'relation media_owners does not exist',
+      })
+      const client = {
+        from: vi.fn().mockReturnValueOnce(ownerBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      const result = await queryStories(client, {
+        owner: 'warner-bros-discovery',
+        page: 1,
+        limit: 20,
+      })
+      // Dependency failure surfaces as ownerFilterUnavailable=true so
+      // route meta and UI can distinguish outage from empty
+      expect(result).toEqual({ data: [], count: 0, ownerFilterUnavailable: true })
+    })
+
+    it('degrades to empty (no throw) when sources.owner_id is missing', async () => {
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder(null, 0, {
+        message: 'column sources.owner_id does not exist',
+      })
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      const result = await queryStories(client, {
+        owner: 'warner-bros-discovery',
+        page: 1,
+        limit: 20,
+      })
+      expect(result).toEqual({ data: [], count: 0, ownerFilterUnavailable: true })
+    })
+
+    it('degrades to empty (no throw) when articles lookup fails', async () => {
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }])
+      const articlesBuilder = createMockQueryBuilder(null, 0, {
+        message: 'articles RLS denied',
+      })
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      const result = await queryStories(client, {
+        owner: 'warner-bros-discovery',
+        page: 1,
+        limit: 20,
+      })
+      expect(result).toEqual({ data: [], count: 0, ownerFilterUnavailable: true })
+    })
+
+    it('caps the materialized story_ids list to keep the .in() URL bounded', async () => {
+      // Construct >1000 distinct story IDs so the cap must engage. The cap
+      // guards against URL overflow on the downstream .in('id', …) filter —
+      // 1000 UUID-length IDs is ~37 KB of URL-filter payload, well under proxy
+      // limits. A future SQL-side predicate (RPC/view) can lift this cap.
+      // Use 10000 (matches ARTICLE_FETCH_CEILING = 10 × MAX_STORY_IDS) so the
+      // dedupe path can reach the cap before the fetch limit bites.
+      const manyStoryIds = Array.from({ length: 10000 }, (_, i) => ({
+        story_id: `story-${i.toString().padStart(5, '0')}`,
+      }))
+
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }])
+      const articlesBuilder = createMockQueryBuilder(manyStoryIds)
+      const storiesBuilder = createMockQueryBuilder([mockStory], 1)
+
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder)
+          .mockReturnValueOnce(storiesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      await queryStories(client, { owner: 'prolific-owner', page: 1, limit: 20 })
+
+      const inCall = (storiesBuilder.in as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c) => c[0] === 'id'
+      )
+      expect(inCall).toBeDefined()
+      // Exactly the cap — not the full 2000, not silently truncated lower
+      expect(inCall?.[1]).toHaveLength(1000)
+      // The first 1000 (most recent by articles order) are retained
+      expect(inCall?.[1][0]).toBe('story-00000')
+      expect(inCall?.[1][999]).toBe('story-00999')
+    })
+
+    it('returns empty when owner story_ids ∩ ids is empty', async () => {
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }])
+      const articlesBuilder = createMockQueryBuilder([{ story_id: 'story-a' }])
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      const result = await queryStories(client, {
+        owner: 'warner-bros-discovery',
+        ids: 'story-other',
+        page: 1,
+        limit: 20,
+      })
+      expect(result).toEqual({ data: [], count: 0, ownerFilterUnavailable: false })
+    })
+
+    it('preserves resolver per-owner recency order instead of sorting by global stories.last_updated', async () => {
+      // Resolver returns story_ids in order of newest owner article activity
+      // (fetched_at DESC). The final page must reflect that owner-specific
+      // ordering rather than re-sorting by stories.last_updated, which is
+      // updated by any outlet's activity and would let unrelated publishers
+      // move stories ahead of the owner's genuinely newest coverage. See
+      // Codex round-7 finding #2.
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }])
+      // Resolver will produce owner recency order: [alpha, beta, gamma]
+      const articlesBuilder = createMockQueryBuilder([
+        { story_id: 'alpha' },
+        { story_id: 'beta' },
+        { story_id: 'gamma' },
+      ])
+      // Stories come back from SQL in an unrelated order (arbitrary IDs)
+      const storiesBuilder = createMockQueryBuilder(
+        [
+          { ...mockStory, id: 'gamma' },
+          { ...mockStory, id: 'alpha' },
+          { ...mockStory, id: 'beta' },
+        ],
+        3
+      )
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder)
+          .mockReturnValueOnce(storiesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      const result = await queryStories(client, {
+        owner: 'warner-bros-discovery',
+        page: 1,
+        limit: 20,
+      })
+
+      // Final page order must match the resolver's per-owner recency order
+      expect(result.data.map((s) => s.id)).toEqual(['alpha', 'beta', 'gamma'])
+      // Must NOT re-sort by stories.last_updated — that column tracks any
+      // outlet's activity, so relying on it would defeat the owner-specific
+      // ranking the resolver established.
+      const orderCalls = (storiesBuilder.order as ReturnType<typeof vi.fn>).mock.calls
+      expect(orderCalls.every((c) => c[0] !== 'last_updated')).toBe(true)
+    })
+
+    it('paginates in memory against the resolver-ordered full result set', async () => {
+      const ownerBuilder = createMockQueryBuilder({ id: 'owner-uuid' })
+      const sourcesBuilder = createMockQueryBuilder([{ id: 's1' }])
+      const articlesBuilder = createMockQueryBuilder([
+        { story_id: 'a' },
+        { story_id: 'b' },
+        { story_id: 'c' },
+        { story_id: 'd' },
+        { story_id: 'e' },
+      ])
+      const storiesBuilder = createMockQueryBuilder(
+        [
+          { ...mockStory, id: 'c' },
+          { ...mockStory, id: 'e' },
+          { ...mockStory, id: 'a' },
+          { ...mockStory, id: 'd' },
+          { ...mockStory, id: 'b' },
+        ],
+        5
+      )
+      const client = {
+        from: vi.fn()
+          .mockReturnValueOnce(ownerBuilder)
+          .mockReturnValueOnce(sourcesBuilder)
+          .mockReturnValueOnce(articlesBuilder)
+          .mockReturnValueOnce(storiesBuilder),
+      } as unknown as SupabaseClient<Database>
+
+      // Page 2, limit 2 → resolver order [a,b,c,d,e] sliced at offset=2,count=2 → [c,d]
+      const result = await queryStories(client, {
+        owner: 'warner-bros-discovery',
+        page: 2,
+        limit: 2,
+      })
+
+      expect(result.data.map((s) => s.id)).toEqual(['c', 'd'])
+      // Total count reflects the full owner-filtered result set, not the page
+      expect(result.count).toBe(5)
     })
   })
 })

@@ -401,12 +401,13 @@ All responses follow `{ success: boolean, data: T, meta?: { total, page, limit }
 
 ### Query Parameters
 
-**GET /api/stories** — `topic`, `search`, `blindspot`, `biasRange`, `minFactuality`, `datePreset`, `region`, `tag`, `tag_type`, `sort`, `ids` (comma-separated story IDs, max 2000 chars), `page` (default 1), `limit` (default 20, max 50)
+**GET /api/stories** — `topic`, `search`, `blindspot`, `biasRange`, `minFactuality`, `datePreset`, `region`, `tag`, `tag_type`, `owner` (media-owner slug, e.g. `warner-bros-discovery`), `sort`, `ids` (comma-separated story IDs, max 2000 chars), `page` (default 1), `limit` (default 20, max 50)
 - Uses full-text search (`tsvector` + `textSearch()`) on headline/summary instead of `ilike`
 - `biasRange` — comma-separated bias values (e.g., `'lean-left,center,lean-right'`)
 - `minFactuality` — minimum factuality threshold (e.g., `'high'` includes high + very-high)
 - `datePreset` — time range (default 'all'): `'24h'`, `'7d'`, `'30d'`, `'all'`
 - `sort` — `'last_updated'` (default, `published_at DESC`), `'source_count'` (most-covered first), or `'trending'`. Trending orders by the materialized `stories.trending_score` column (migration 050) within the last 7 days using normal SQL pagination, with `biasRange` applied in SQL via JSONB containment before `.range()`. The score is computed at story-assembly time via `lib/api/trending-score.ts` (`impact × (1 + log10(articles_24h)) × diversity × time_decay`); the dedicated cron `GET /api/cron/refresh-trending` calls `refresh_trending_scores()` on a schedule (recommended 15 min) to keep the stored time-decay component fresh and evict aged-out rows from the partial index.
+- `owner` — media-owner slug (lowercase, hyphenated; validated against `^[a-z0-9][a-z0-9-]*$`, max 100 chars). `queryStories` resolves slug → `media_owners.id` → `sources.id[]` (active only) → distinct `articles.story_id[]`, then applies as `.in('id', storyIds)`. **Bounded scope:** the filter is a "recent coverage" feed, not an all-time archive — it uses a 180-day article window (`OWNER_FILTER_WINDOW_DAYS`) and caps the materialized ID list at 1000 (`OWNER_FILTER_MAX_STORY_IDS`) so the downstream `.in()` URL stays well under proxy limits. The UI copy ("View recent stories from X") reflects this contract. Archival owner coverage or owners with thousands of distinct stories in-window will require a SQL-side predicate (RPC or materialized `stories.owner_ids[]`) to lift these bounds. Intersects cleanly with the `ids` param — empty intersection short-circuits before hitting the stories query. Returns empty when the slug is unknown, the owner has no active sources, or no articles fall inside the window.
 
 **GET /api/sources** — `bias`, `factuality`, `ownership`, `region`, `search`, `page` (default 1), `limit` (default 50, max 100)
 

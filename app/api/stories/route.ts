@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const client = getSupabaseServerClient()
-    const { data: stories, count } = await queryStories(
+    const { data: stories, count, ownerFilterUnavailable } = await queryStories(
       client,
       parsed.data as Parameters<typeof queryStories>[1]
     )
@@ -40,6 +40,11 @@ export async function GET(request: NextRequest) {
         total: count,
         page: parsed.data.page as number,
         limit: parsed.data.limit as number,
+        // Only surface the flag when it flipped, to keep the success-path
+        // response shape unchanged for the common feed case. Round-5 Codex
+        // finding #1: users/monitoring can now distinguish "owner has no
+        // recent stories" from "owner-filter dependency outage".
+        ...(ownerFilterUnavailable ? { ownerFilterUnavailable: true } : {}),
       },
     })
   } catch (err) {

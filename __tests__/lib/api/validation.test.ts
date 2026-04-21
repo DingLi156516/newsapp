@@ -169,6 +169,44 @@ describe('storiesQuerySchema tag param', () => {
   })
 })
 
+describe('storiesQuerySchema owner param', () => {
+  it('parses valid owner slug', () => {
+    const result = storiesQuerySchema.safeParse({ owner: 'warner-bros-discovery' })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.owner).toBe('warner-bros-discovery')
+    }
+  })
+
+  it('accepts owner as optional', () => {
+    const result = storiesQuerySchema.safeParse({})
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.owner).toBeUndefined()
+    }
+  })
+
+  it('rejects owner slug with uppercase characters', () => {
+    const result = storiesQuerySchema.safeParse({ owner: 'Warner-Bros' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects owner slug starting with hyphen', () => {
+    const result = storiesQuerySchema.safeParse({ owner: '-warner' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects owner slug with spaces or punctuation', () => {
+    const result = storiesQuerySchema.safeParse({ owner: 'warner bros' })
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects owner slug exceeding 100 chars', () => {
+    const result = storiesQuerySchema.safeParse({ owner: 'a'.repeat(101) })
+    expect(result.success).toBe(false)
+  })
+})
+
 describe('tagsQuerySchema', () => {
   it('returns defaults when no params provided', () => {
     const result = tagsQuerySchema.safeParse({})
