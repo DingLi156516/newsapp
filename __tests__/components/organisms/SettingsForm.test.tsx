@@ -123,4 +123,27 @@ describe('SettingsForm', () => {
     expect(mockUpdatePreferences).toHaveBeenCalledWith({ blindspot_digest_enabled: true })
   })
 
+  it('renders the telemetry consent toggle (default sharing enabled)', () => {
+    mockPreferences()
+    window.localStorage.clear()
+    render(<SettingsForm />)
+    expect(screen.getByTestId('telemetry-consent-section')).toBeInTheDocument()
+    expect(screen.getByTestId('telemetry-consent-toggle')).toHaveTextContent(
+      'Share anonymous engagement'
+    )
+  })
+
+  it('flipping the telemetry toggle persists to localStorage', async () => {
+    mockPreferences()
+    window.localStorage.clear()
+    const user = userEvent.setup()
+    render(<SettingsForm />)
+    await user.click(screen.getByTestId('telemetry-consent-toggle'))
+    expect(window.localStorage.getItem('axiom_telemetry_opt_out')).toBe('true')
+    expect(screen.getByTestId('telemetry-consent-toggle')).toHaveTextContent('Sharing disabled')
+
+    await user.click(screen.getByTestId('telemetry-consent-toggle'))
+    expect(window.localStorage.getItem('axiom_telemetry_opt_out')).toBeNull()
+  })
+
 })

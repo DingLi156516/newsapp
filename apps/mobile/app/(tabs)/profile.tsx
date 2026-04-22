@@ -15,6 +15,8 @@ import { useBiasProfile } from '@/lib/hooks/use-bias-profile'
 import { useSuggestions } from '@/lib/hooks/use-suggestions'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
+import { TelemetryConsentToggle } from '@/components/molecules/TelemetryConsentToggle'
+import { HotNowCard } from '@/components/organisms/HotNowCard'
 import { BiasComparisonBar } from '@/components/molecules/BiasComparisonBar'
 import { BiasDistributionList } from '@/components/molecules/BiasDistributionList'
 import { NexusCard } from '@/components/organisms/NexusCard'
@@ -264,6 +266,12 @@ export default function ProfileScreen() {
               )}
             </CollapsibleSection>
 
+            <View style={{ marginHorizontal: -SPACING.lg }}>
+              <HotNowCard />
+            </View>
+
+            <TelemetryConsentToggle />
+
             <Button
               testID="sign-out-button"
               onPress={signOut}
@@ -304,6 +312,9 @@ export default function ProfileScreen() {
                 Sign In
               </Button>
             </Surface>
+            <View style={{ marginTop: SPACING.lg }}>
+              <TelemetryConsentToggle />
+            </View>
           </View>
         )}
       </ScrollView>

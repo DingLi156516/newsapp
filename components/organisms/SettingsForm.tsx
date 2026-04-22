@@ -6,13 +6,17 @@
  */
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Check } from 'lucide-react'
 import { usePreferences } from '@/lib/hooks/use-preferences'
 import type { UserPreferences } from '@/lib/hooks/use-preferences'
 import { TOPIC_LABELS, FACTUALITY_LABELS } from '@/lib/types'
 import type { Topic, PerspectiveFilter, FactualityLevel } from '@/lib/types'
+import {
+  getTelemetryOptOut,
+  setTelemetryOptOut,
+} from '@/lib/hooks/use-telemetry-consent'
 
 const PERSPECTIVES: { value: PerspectiveFilter; label: string }[] = [
   { value: 'all', label: 'All Perspectives' },
@@ -35,6 +39,18 @@ export function SettingsForm() {
   const { preferences, updatePreferences, isLoading } = usePreferences()
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [telemetryOptOut, setTelemetryOptOutState] = useState(false)
+
+  useEffect(() => {
+    setTelemetryOptOutState(getTelemetryOptOut())
+  }, [])
+
+  function handleTelemetryToggle(nextOptOut: boolean) {
+    setTelemetryOptOutState(nextOptOut)
+    setTelemetryOptOut(nextOptOut)
+    setSaveSuccess(true)
+    setTimeout(() => setSaveSuccess(false), 2000)
+  }
 
   async function handleTopicToggle(topic: Topic) {
     const current = preferences.followed_topics
@@ -161,6 +177,29 @@ export function SettingsForm() {
               {label}
             </button>
           ))}
+        </div>
+      </section>
+
+      {/* Privacy / Engagement Telemetry */}
+      <section className="glass p-5 space-y-3" data-testid="telemetry-consent-section">
+        <h3 className="text-sm font-medium text-white/80">Anonymous Engagement</h3>
+        <p className="text-xs text-white/50">
+          Share an opaque, rotating session id with stories you read so the
+          feed can surface what other readers find interesting. No IP, no
+          User-Agent, no profile is built. Honors Do Not Track.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            data-testid="telemetry-consent-toggle"
+            onClick={() => handleTelemetryToggle(!telemetryOptOut)}
+            className={`glass-pill px-3 py-1.5 text-xs transition-colors ${
+              !telemetryOptOut
+                ? 'bg-white/20 text-white border border-white/30'
+                : 'text-white/60 hover:text-white/80'
+            }`}
+          >
+            {telemetryOptOut ? 'Sharing disabled' : 'Share anonymous engagement'}
+          </button>
         </div>
       </section>
 
