@@ -57,6 +57,7 @@ import { StoryTagsRow } from '@/components/molecules/StoryTagsRow'
 import { StoryScores } from '@/components/molecules/StoryScores'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
+import { useStoryTelemetry } from '@/lib/hooks/use-story-telemetry'
 
 /**
  * In Next.js 15, params from dynamic routes are Promises.
@@ -81,6 +82,13 @@ export default function StoryPage({ params }: Props) {
       markAsRead(id)
     }
   }, [id, isLoading, article, markAsRead])
+
+  // Engagement telemetry — view on mount, read_through at 80% scroll,
+  // dwell on pagehide / visibilitychange:hidden / unmount. Gated on the
+  // article actually being loaded: the loading skeleton's min-h-screen
+  // wrapper would otherwise satisfy "page is shorter than viewport" and
+  // fire a bogus read_through before the real story ever rendered.
+  useStoryTelemetry({ storyId: id, enabled: !isLoading && !!article })
 
   if (isLoading) {
     return (

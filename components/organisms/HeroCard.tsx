@@ -54,7 +54,7 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false, sh
             <FactualityBar level={article.factuality} />
           </span>
           <span className="ml-auto flex items-center gap-2">
-            <ShareButton url={`/story/${article.id}`} title={article.headline} />
+            <ShareButton url={`/story/${article.id}`} title={article.headline} storyId={article.id} />
             <BookmarkButton
               isSaved={isSaved}
               onToggle={() => onSave(article.id)}

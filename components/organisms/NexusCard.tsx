@@ -100,7 +100,7 @@ export function NexusCard({ article, onSave, isSaved, onClick, compact = false, 
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <ShareButton url={`/story/${article.id}`} title={article.headline} size="sm" />
+              <ShareButton url={`/story/${article.id}`} title={article.headline} size="sm" storyId={article.id} />
               <BookmarkButton
                 isSaved={isSaved}
                 onToggle={() => onSave(article.id)}
