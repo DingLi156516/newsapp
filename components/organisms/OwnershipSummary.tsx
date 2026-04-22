@@ -101,19 +101,30 @@ export function OwnershipSummary({ sources, ownershipUnavailable }: Props) {
         surface the link. See Codex review round 15 P3.
       */}
       {dominantOwner && dominantOwner.sourceCount * 2 > total && (
-        <Link
-          // `tab=latest` is required: the feed defaults to Trending, which caps
-          // the candidate set at 7 days regardless of any filter. An owner CTA
-          // that lands on Trending would contradict the 180-day contract this
-          // link advertises. See Codex round-2 finding #1.
-          href={`/?owner=${encodeURIComponent(dominantOwner.ownerSlug)}&tab=latest`}
-          data-testid="ownership-summary-view-feed"
-          className="inline-flex items-center gap-1 text-[11px] text-white/60 hover:text-white transition-colors"
-          title="Recent coverage (last 180 days) from this owner's sources"
-        >
-          <span>View recent stories from {dominantOwner.ownerName}</span>
-          <ArrowRight size={11} />
-        </Link>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <Link
+            // `tab=latest` is required: the feed defaults to Trending, which caps
+            // the candidate set at 7 days regardless of any filter. An owner CTA
+            // that lands on Trending would contradict the 180-day contract this
+            // link advertises. See Codex round-2 finding #1.
+            href={`/?owner=${encodeURIComponent(dominantOwner.ownerSlug)}&tab=latest`}
+            data-testid="ownership-summary-view-feed"
+            className="inline-flex items-center gap-1 text-[11px] text-white/60 hover:text-white transition-colors"
+            title="Recent coverage (last 180 days) from this owner's sources"
+          >
+            <span>View recent stories from {dominantOwner.ownerName}</span>
+            <ArrowRight size={11} />
+          </Link>
+          <Link
+            href={`/owners/${encodeURIComponent(dominantOwner.ownerSlug)}`}
+            data-testid="ownership-summary-view-profile"
+            className="inline-flex items-center gap-1 text-[11px] text-white/60 hover:text-white transition-colors"
+            title={`Profile of ${dominantOwner.ownerName}`}
+          >
+            <span>View owner profile</span>
+            <ArrowRight size={11} />
+          </Link>
+        </div>
       )}
     </section>
   )

@@ -77,3 +77,4 @@
 |-----------|--------|
 | `SourceProfilePage` | `@/components/pages/SourceProfilePage` — Source detail page shell for snapshot metadata, recent coverage, topic mix, and methodology |
 | `SourceComparisonPage` | `@/components/pages/SourceComparisonPage` — Outlet-vs-outlet comparison page shell with a second-source picker, shared coverage, coverage gaps, and methodology |
+| `OwnerProfilePage` | `@/components/pages/OwnerProfilePage` — Owner detail page shell for owner snapshot, controlled sources grid, bias distribution, topic mix, recent 180-day coverage, and methodology |

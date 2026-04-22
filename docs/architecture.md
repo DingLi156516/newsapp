@@ -158,6 +158,7 @@ Every page uses **SWR** (a caching library) to fetch data. While the API loads, 
 | **Sources** | `/sources` → redirects to `/?view=sources` | `/sources` is a server redirect; the sources directory renders inline on the home page via `SourcesView` |
 | **Source profile** | `/sources/[slug]` | Single-outlet profile with metadata snapshot, recent clustered coverage, topic mix, blindspot participation, and methodology |
 | **Source comparison** | `/sources/compare?left=<slug>&right=<slug>` | Two-outlet comparison with side-by-side metadata, shared coverage, exclusive stories, topic overlap, blindspot participation, and methodology |
+| **Owner profile** | `/owners/[slug]` | Media-owner profile with owner metadata snapshot, controlled sources grid, bias distribution, topic mix, recent 180-day coverage, and methodology |
 | **Blindspot** | `/blindspot` | Stories where >80% coverage comes from one political side |
 | **Login** | `/login` | Email + Google OAuth sign-in |
 | **Signup** | `/signup` | New account registration (email + Google OAuth) |
@@ -178,6 +179,7 @@ Every page uses **SWR** (a caching library) to fetch data. While the API loads, 
 - **CoverageIntelligence** — story-detail panel that turns existing spectrum, AI summaries, ownership, and timeline data into momentum, gap, framing, and methodology analysis
 - **SourceDirectoryInsights** — source-directory summary card that describes the currently filtered source set
 - **SourceProfilePage** — source-detail shell that renders snapshot metadata, recent coverage, topic mix, and methodology copy
+- **OwnerProfilePage** — owner-detail shell that renders owner snapshot, controlled sources grid, bias distribution, topic mix, recent 180-day coverage, and methodology copy
 - **SourceComparisonPage** — source-comparison shell that renders a second-source picker, side-by-side snapshot cards, shared coverage, coverage gaps, and methodology copy
 
 ---
@@ -367,6 +369,9 @@ lib/hooks/       — SWR data-fetching hooks + auth hooks + utilities (23 files)
 | `GET` | `/api/sources` | Source directory |
 | `GET` | `/api/sources/[slug]` | Single source profile with recent coverage rollups |
 | `GET` | `/api/sources/compare?left=<slug>&right=<slug>` | Two-source comparison built from two 30-day source profiles |
+| `GET` | `/api/owners` | Media owner directory (paginated, optional search + owner_type filter) |
+| `GET` | `/api/owners/[id]` | Single owner detail (UUID-keyed) with associated sources |
+| `GET` | `/api/owners/by-slug/[slug]` | Owner profile with controlled sources, recent 180-day coverage, bias distribution, and topic breakdown |
 | `GET` | `/api/cron/ingest` | Trigger RSS ingestion (protected by CRON_SECRET) |
 | `GET` | `/api/cron/process` | Trigger AI clustering + assembly (protected by CRON_SECRET) |
 | `GET` | `/auth/callback` | OAuth callback handler (Google OAuth redirect) |

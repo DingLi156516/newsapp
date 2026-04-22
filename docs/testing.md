@@ -59,6 +59,7 @@ __tests__/
       use-online.test.ts
       use-infinite-scroll.test.ts
       use-pipeline.test.ts
+      use-owner-profile.test.ts
     api/
       query-helpers.test.ts
       transformers.test.ts
@@ -77,6 +78,9 @@ __tests__/
       admin-helpers.test.ts
       review-validation.test.ts
       review-queries.test.ts
+      owner-queries.test.ts
+      owner-validation.test.ts
+      ownership-aggregator.test.ts
     auth/
       validation.test.ts
       auth-provider.test.tsx
@@ -109,6 +113,8 @@ __tests__/
       client.test.ts  server.test.ts  types.test.ts  seed-sources.test.ts
     utils/
       csv-parser.test.ts  headline-roundup.test.ts
+    wikidata/
+      sparql-client.test.ts
   app/
     api/
       bookmarks/route.test.ts
@@ -118,6 +124,7 @@ __tests__/
       preferences/route.test.ts
       sources/source-slug-route.test.ts
       sources/compare-route.test.ts
+      owners/by-slug-route.test.ts
       dashboard/bias-profile-route.test.ts
       dashboard/suggestions-route.test.ts
       stories/for-you-route.test.ts
@@ -136,6 +143,7 @@ __tests__/
     pages/
       SourceProfilePage.test.tsx
       SourceComparisonPage.test.tsx
+      OwnerProfilePage.test.tsx
 ```
 
 `story-intelligence.test.ts` now covers structured story-analysis output for momentum, coverage gaps, framing delta, and methodology copy. `CoverageIntelligence.test.tsx` verifies the corresponding story-detail analysis cards, and `e2e/public/story-detail.spec.ts` checks that those sections render in the browser.
