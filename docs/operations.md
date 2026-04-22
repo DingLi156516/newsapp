@@ -189,6 +189,48 @@ The CSV columns: `source_slug, source_wikidata_qid, resolved_owner_name, resolve
 4. `supabase db push` against staging, spot-check 5 stories
 5. Repeat against production
 
+## Engagement Telemetry (Phase 3)
+
+Anonymous engagement events flow into `story_views` (migration 053) and feed
+the trending `engagement_factor` (migration 054) + the Hot Now dashboard
+card. Privacy contract is documented in `docs/phase3-privacy-audit.md`.
+
+**Session id.** First request to any non-static path passes through
+`middleware.ts`, which sets the httpOnly `axiom_session` cookie when
+absent (UUID v4, 7-day rotation). Cookie attributes: `httpOnly`,
+`SameSite=Lax`, `Secure` in production. The route reads it from the
+cookie store; mobile clients forward an equivalent value via
+`x-session-id` header (RN cookies are unreliable across the bridge).
+
+**DNT honor path.** When the request advertises `DNT: 1`, middleware
+emits `x-axiom-dnt: 1` so the client hook can short-circuit; the
+`/api/events/story` route also drops with 204 server-side.
+
+**Manual smoke check.**
+```bash
+# Open a story in the browser. The view event lands like:
+psql -c "SELECT story_id, action, dwell_bucket, client, created_at
+         FROM story_views
+         ORDER BY created_at DESC LIMIT 5;"
+
+# Confirm trending refresh picks up engagement:
+psql -c "SELECT refresh_trending_scores();"
+psql -c "SELECT id, headline, trending_score
+         FROM stories
+         WHERE publication_status = 'published'
+         ORDER BY trending_score DESC NULLS LAST
+         LIMIT 5;"
+```
+
+**Hot Now endpoint.**
+```bash
+curl -s -b cookies.txt http://localhost:3000/api/dashboard/hot-stories | jq
+```
+
+**Disable for a single user.** Toggle "Share anonymous engagement" off
+in `/settings` (web) or the profile tab (mobile). The flag persists
+locally; clearing browser storage / app data re-enables it.
+
 ## Running the Pipeline Locally
 
 ### 1. Start the dev server

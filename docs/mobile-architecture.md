@@ -96,6 +96,10 @@ Session storage: expo-secure-store (encrypted keychain)
 | `usePreferences` | `lib/hooks/use-preferences.ts` | User topic/perspective/factuality preferences |
 | `useDebounce` | `lib/hooks/use-debounce.ts` | Debounced value (search input) |
 | `useOnline` | `lib/hooks/use-online.ts` | Network connectivity status |
+| `useSessionId` | `lib/hooks/use-session-id.ts` | Opaque rotating session id (UUID v4 in expo-secure-store, 7-day rotation) for engagement telemetry |
+| `useTelemetryConsent` | `lib/hooks/use-telemetry-consent.ts` | Consent state for engagement telemetry; reads `axiom_telemetry_opt_out` from AsyncStorage |
+| `useStoryTelemetry` | `lib/hooks/use-story-telemetry.ts` | Fires view/dwell/read_through events for the story screen via reanimated `useAnimatedReaction` + `AppState` listener |
+| `useHotStories` | `lib/hooks/use-hot-stories.ts` | SWR hook for `/api/dashboard/hot-stories` (auth-gated) |
 | `fetcher` | `lib/hooks/fetcher.ts` | SWR fetcher with Bearer tokens |
 | `SWRProvider` | `lib/hooks/swr-provider.tsx` | SWR config + AppState + Auth revalidation |
 

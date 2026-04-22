@@ -162,9 +162,9 @@ Every page uses **SWR** (a caching library) to fetch data. While the API loads, 
 | **Blindspot** | `/blindspot` | Stories where >80% coverage comes from one political side |
 | **Login** | `/login` | Email + Google OAuth sign-in |
 | **Signup** | `/signup` | New account registration (email + Google OAuth) |
-| **Dashboard** | `/dashboard` | Bias calibration profile, blindspots, suggestions |
+| **Dashboard** | `/dashboard` | Bias calibration profile, blindspots, Hot Now strip, suggestions |
 | **History** | `/history` | Reading history feed |
-| **Settings** | `/settings` | User preferences form (topics, perspective, factuality, email digest) |
+| **Settings** | `/settings` | User preferences form (topics, perspective, factuality, email digest, anonymous engagement opt-out) |
 | **Admin Review** | `/admin/review` | Manual review queue for AI-generated story summaries (admin only) |
 | **Admin Pipeline** | `/admin/pipeline` | Pipeline admin dashboard with live stats, run history, source health, and manual triggers (admin only) |
 | **Admin Sources** | `/admin/sources` | Source CRUD management with CSV import and RSS discovery (admin only) |
@@ -385,6 +385,8 @@ lib/hooks/       — SWR data-fetching hooks + auth hooks + utilities (23 files)
 | `PATCH` | `/api/preferences` | Update user preferences (auth required) |
 | `GET` | `/api/dashboard/bias-profile` | Computed bias distribution (auth required) |
 | `GET` | `/api/dashboard/suggestions` | Bias-aware story recommendations (auth required) |
+| `GET` | `/api/dashboard/hot-stories` | Top 5 stories by recent unique-viewer count (last 6h, auth required) |
+| `POST` | `/api/events/story` | Anonymous engagement telemetry insert (`view`/`dwell`/`read_through`/`share`); honors DNT, drops without session id |
 | `GET` | `/api/stories/for-you` | Personalized "For You" feed (auth required) |
 | `GET` | `/api/admin/review` | Review queue list with status filter (admin required) |
 | `PATCH` | `/api/admin/review/[id]` | Approve or reject a story (admin required) |

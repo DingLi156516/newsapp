@@ -32,11 +32,13 @@ __tests__/
                             FactualityDots, OfflineIndicator, ShareButton, Skeleton
   molecules/      7 files — BiasComparisonBar, BiasLegend, EmptyStateView, ForYouCta,
                             MonochromeSpectrumBar, NetworkErrorView, SourceList
-  organisms/     11 files — AISummaryTabs, CoverageIntelligence, FeedTabs, HeroCard,
-                            NexusCard, NexusCardSkeleton, SearchBar, SearchFilters,
-                            StickyFilterBar, StoryTimeline, TopicPills
-  hooks/          8 files — use-bookmarks, use-debounce, use-for-you, use-preferences,
-                            use-reading-history, use-sources, use-stories, use-story
+  organisms/     12 files — AISummaryTabs, CoverageIntelligence, FeedTabs, HeroCard,
+                            HotNowCard, NexusCard, NexusCardSkeleton, SearchBar,
+                            SearchFilters, StickyFilterBar, StoryTimeline, TopicPills
+  hooks/         12 files — use-bookmarks, use-debounce, use-for-you, use-preferences,
+                            use-reading-history, use-sources, use-stories, use-story,
+                            use-session-id, use-telemetry-consent, use-story-telemetry,
+                            use-hot-stories
   screens/        4 files — login, profile, saved, sources
   lib/            4 files — auth-provider, haptics, story-intelligence, swr-provider
   ui/             1 file  — GlassView
@@ -63,7 +65,7 @@ Configured in `jest.setup.ts`:
 | Category | Flows | What they cover |
 |----------|-------|----------------|
 | `auth/` (4) | login-form, signup-form, skip-login, google-oauth | Form rendering, validation, OAuth, modal dismiss |
-| `public/` (4) | home-feed, story-detail, sources, search | Feed tabs, cards, detail navigation, source filters, search |
+| `public/` (5) | home-feed, story-detail, sources, search, story-telemetry | Feed tabs, cards, detail navigation, source filters, search, telemetry view→scroll→back lifecycle |
 | `protected/` (5) | dashboard, bookmarks, settings, history, for-you | Bias calibration, bookmark cycle, preferences, reading history |
 | `journeys/` (3) | read-story, bookmark-cycle, onboarding | Multi-screen user flows |
 
