@@ -44,6 +44,7 @@ describe('Database type interfaces', () => {
       source_type: 'rss',
       ingestion_config: {},
       owner_id: null,
+      wikidata_qid: null,
       cooldown_until: null,
       auto_disabled_at: null,
       auto_disabled_reason: null,

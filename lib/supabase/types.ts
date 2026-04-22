@@ -63,6 +63,9 @@ export interface DbSource {
   ingestion_config: Record<string, unknown>
   // Media ownership (migration 048):
   owner_id: string | null
+  // Wikidata Q-id for the outlet (migration 055). Drives the
+  // seed-ownership.ts backfill script; NULL = skip.
+  wikidata_qid: string | null
   // Source-health control plane (migration 046):
   cooldown_until: string | null
   auto_disabled_at: string | null
@@ -89,6 +92,7 @@ export interface DbSourceInsert {
   source_type?: SourceType
   ingestion_config?: Record<string, unknown>
   owner_id?: string | null
+  wikidata_qid?: string | null
   cooldown_until?: string | null
   auto_disabled_at?: string | null
   auto_disabled_reason?: string | null
