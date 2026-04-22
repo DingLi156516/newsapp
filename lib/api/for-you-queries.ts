@@ -9,15 +9,19 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from '@/lib/supabase/types'
 import type { Topic } from '@/lib/types'
 import type { ForYouQuery } from '@/lib/api/validation'
-import type { ForYouSignals, ScoredStory } from '@/lib/api/for-you-scoring'
+import type { ForYouSignals, ReadSimilarSignal, ScoredStory } from '@/lib/api/for-you-scoring'
 import { queryPreferences } from '@/lib/api/preferences-queries'
 import { queryReadStoryIds } from '@/lib/api/reading-history-queries'
+import { queryReadThroughStoryIds } from '@/lib/api/engagement-queries'
+import { getSupabaseServiceClient } from '@/lib/supabase/server'
 import { computeBiasProfile } from '@/lib/api/bias-calculator'
 import type { StoryWithSpectrum } from '@/lib/api/bias-calculator'
 import { rankStoriesForUser } from '@/lib/api/for-you-scoring'
 import { transformStoryList } from '@/lib/api/transformers'
+import type { Region } from '@/lib/types'
 
 const CANDIDATE_LIMIT = 200
+const READ_SIMILAR_WINDOW_DAYS = 14
 
 interface StoryRow {
   id: string
@@ -48,15 +52,21 @@ export async function queryForYouStories(
   userId: string,
   params: ForYouQuery
 ): Promise<{ data: readonly ScoredStory[]; count: number }> {
-  // Fetch user signals in parallel
-  const [preferences, readStoryIds, candidateResult] = await Promise.all([
+  // Fetch user signals in parallel. The read-through lookup goes through
+  // the service-role client because story_views has SELECT-admin-only RLS;
+  // calling it via the user's auth client would always return 0 rows and
+  // silently disable the read-similar bonus.
+  const engagementClient = getSupabaseServiceClient()
+  const [preferences, readStoryIds, readThroughIds, candidateResult] = await Promise.all([
     queryPreferences(client, userId),
     queryReadStoryIds(client, userId),
+    queryReadThroughStoryIds(engagementClient, userId, READ_SIMILAR_WINDOW_DAYS),
     fetchCandidateStories(client),
   ])
 
   const candidates = candidateResult.stories
   const readIdSet = new Set(readStoryIds)
+  const readSimilarSignals = buildReadSimilarSignals(candidates, new Set(readThroughIds))
 
   // Compute bias profile for blindspot detection.
   // Note: uses the candidate pool (last 200 stories) as the "overall" baseline,
@@ -71,6 +81,7 @@ export async function queryForYouStories(
     followedTopics: (preferences.followed_topics ?? []) as Topic[],
     blindspotCategories,
     readStoryIds: readIdSet,
+    readSimilarSignals,
     now: new Date(),
   }
 
@@ -98,6 +109,29 @@ export async function queryForYouStories(
     data: paged,
     count: ranked.length,
   }
+}
+
+/**
+ * Map the user's recent read-through story ids to (topic, region) tuples
+ * by intersecting with the candidate pool. Stories outside the candidate
+ * window (older than ~200 stories) silently drop out — acceptable because
+ * the read-similar bonus is a recency-weighted nudge, not a hard signal.
+ */
+function buildReadSimilarSignals(
+  candidates: readonly StoryRow[],
+  readThroughIdSet: ReadonlySet<string>
+): readonly ReadSimilarSignal[] {
+  if (readThroughIdSet.size === 0) return []
+  const seen = new Set<string>()
+  const out: ReadSimilarSignal[] = []
+  for (const candidate of candidates) {
+    if (!readThroughIdSet.has(candidate.id)) continue
+    const key = `${candidate.topic}::${candidate.region}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ topic: candidate.topic as Topic, region: candidate.region as Region })
+  }
+  return out
 }
 
 function computeBlindspots(

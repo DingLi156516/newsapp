@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest'
 import type { SpectrumSegment } from '@/lib/types'
 import {
   computeTrendingScore,
+  engagementFactor,
   shannonDiversityFactor,
   rankByTrendingScore,
   type TrendingInputs,
@@ -187,6 +188,45 @@ describe('computeTrendingScore', () => {
   })
 })
 
+describe('engagementFactor', () => {
+  it('returns 1 when there are no observed viewers', () => {
+    expect(engagementFactor(0)).toBe(1)
+  })
+
+  it('returns 1 for negative or non-finite inputs (defensive)', () => {
+    expect(engagementFactor(-5)).toBe(1)
+    expect(engagementFactor(Number.NaN)).toBe(1)
+    expect(engagementFactor(Number.POSITIVE_INFINITY)).toBe(1)
+  })
+
+  it('grows logarithmically with viewer count', () => {
+    expect(engagementFactor(9)).toBeCloseTo(2, 1)
+    expect(engagementFactor(99)).toBeCloseTo(3, 1)
+    expect(engagementFactor(999)).toBeCloseTo(4, 1)
+  })
+
+  it('is monotonic increasing', () => {
+    expect(engagementFactor(10)).toBeGreaterThan(engagementFactor(0))
+    expect(engagementFactor(100)).toBeGreaterThan(engagementFactor(10))
+  })
+})
+
+describe('computeTrendingScore — engagement factor', () => {
+  it('preserves editorial-only score when uniqueViewersRecent is omitted', () => {
+    const without = computeTrendingScore(inputs({}))
+    const withZero = computeTrendingScore(inputs({ uniqueViewersRecent: 0 }))
+    expect(without).toBeCloseTo(withZero, 9)
+  })
+
+  it('boosts score by ~2x at 9 viewers, ~3x at 99', () => {
+    const baseline = computeTrendingScore(inputs({ uniqueViewersRecent: 0 }))
+    const tenViewers = computeTrendingScore(inputs({ uniqueViewersRecent: 9 }))
+    const hundredViewers = computeTrendingScore(inputs({ uniqueViewersRecent: 99 }))
+    expect(tenViewers / baseline).toBeCloseTo(2, 1)
+    expect(hundredViewers / baseline).toBeCloseTo(3, 1)
+  })
+})
+
 describe('rankByTrendingScore', () => {
   interface StoryLike {
     id: string
@@ -228,6 +268,31 @@ describe('rankByTrendingScore', () => {
 
     const ranked = rankByTrendingScore(stories, NOW)
     expect(ranked.map((s) => s.id)).toEqual(['b-momentum', 'c-fresh', 'a-low'])
+  })
+
+  it('orders by engagement when other inputs are equal', () => {
+    interface EngagedStory {
+      id: string
+      impactScore: number
+      articles24h: number
+      spectrumSegments: SpectrumSegment[]
+      publishedAt: string
+      uniqueViewersRecent?: number
+    }
+    const base: EngagedStory = {
+      id: 'base',
+      impactScore: 50,
+      articles24h: 5,
+      spectrumSegments: balanced,
+      publishedAt: hoursAgo(2).toISOString(),
+    }
+    const stories: EngagedStory[] = [
+      { ...base, id: 'cold', uniqueViewersRecent: 0 },
+      { ...base, id: 'lukewarm', uniqueViewersRecent: 9 },
+      { ...base, id: 'hot', uniqueViewersRecent: 999 },
+    ]
+    const ranked = rankByTrendingScore(stories, NOW)
+    expect(ranked.map((s) => s.id)).toEqual(['hot', 'lukewarm', 'cold'])
   })
 
   it('is pure — returns a new array without mutating the input', () => {

@@ -5,12 +5,24 @@
  * reading history, recency). Pure functions — no side effects, no DB calls.
  */
 
-import type { BiasCategory, Topic } from '@/lib/types'
+import type { BiasCategory, Region, Topic } from '@/lib/types'
+
+/**
+ * Topic+region tuples derived from stories the user has *finished* reading
+ * (≥80% scroll, see migration 053). Phase 3 introduces a "read-similar"
+ * bonus that rewards candidates matching one of these tuples — a cheap
+ * first pass while we defer pgvector centroid scoring to a follow-up.
+ */
+export interface ReadSimilarSignal {
+  readonly topic: Topic
+  readonly region: Region
+}
 
 export interface ForYouSignals {
   readonly followedTopics: readonly Topic[]
   readonly blindspotCategories: readonly BiasCategory[]
   readonly readStoryIds: ReadonlySet<string>
+  readonly readSimilarSignals?: readonly ReadSimilarSignal[]
   readonly now: Date
 }
 
@@ -18,6 +30,7 @@ export interface ScoredStory {
   readonly id: string
   readonly headline: string
   readonly topic: string
+  readonly region?: string
   readonly timestamp: string
   readonly spectrumSegments: readonly { bias: string; percentage: number }[]
   readonly score: number
@@ -28,6 +41,7 @@ interface StoryCandidate {
   readonly id: string
   readonly headline: string
   readonly topic: string
+  readonly region?: string
   readonly timestamp: string
   readonly spectrumSegments: readonly { bias: string; percentage: number }[]
   readonly [key: string]: unknown
@@ -41,6 +55,7 @@ const BLINDSPOT_MEDIUM_THRESHOLD = 15
 const RECENCY_MAX_POINTS = 20
 const RECENCY_DECAY_HOURS = 48
 const UNREAD_BONUS_POINTS = 10
+const READ_SIMILAR_POINTS = 15
 
 /**
  * Computes the blindspot score for a story based on user's underrepresented categories.
@@ -63,6 +78,35 @@ function computeBlindspotScore(
 }
 
 /**
+ * +READ_SIMILAR_POINTS when a candidate matches the (topic, region) of any
+ * story the user has read through in the last 14 days. Cheap proxy for
+ * embedding-cosine similarity until the read-through volume justifies the
+ * pgvector query cost. Region must match exactly; topic must match
+ * exactly. A story missing either field cannot earn the bonus.
+ *
+ * Important: skip when the candidate is itself one of the read stories.
+ * Without this guard a finished-read story trivially matches the
+ * read-similar signal it generated, scoring 0 (unread) + 15 (similar)
+ * = 15 — higher than an unread-not-similar story at 10 — which inverts
+ * the "elevate fresh similar content" intent.
+ */
+function computeReadSimilarScore(
+  story: StoryCandidate,
+  readStoryIds: ReadonlySet<string>,
+  signals: readonly ReadSimilarSignal[] | undefined
+): number {
+  if (!signals || signals.length === 0) return 0
+  if (!story.region) return 0
+  if (readStoryIds.has(story.id)) return 0
+  for (const signal of signals) {
+    if (signal.topic === story.topic && signal.region === story.region) {
+      return READ_SIMILAR_POINTS
+    }
+  }
+  return 0
+}
+
+/**
  * Computes the recency score: linear decay from 20→0 over 48 hours.
  */
 function computeRecencyScore(timestamp: string, now: Date): number {
@@ -77,7 +121,7 @@ function computeRecencyScore(timestamp: string, now: Date): number {
 
 /**
  * Scores a single story based on user signals.
- * Max score: 100 (40 topic + 30 blindspot + 20 recency + 10 unread).
+ * Max score: 115 (40 topic + 30 blindspot + 20 recency + 10 unread + 15 read-similar).
  */
 export function scoreStory(story: StoryCandidate, signals: ForYouSignals): number {
   const topicScore = signals.followedTopics.includes(story.topic as Topic)
@@ -86,8 +130,9 @@ export function scoreStory(story: StoryCandidate, signals: ForYouSignals): numbe
   const blindspotScore = computeBlindspotScore(story.spectrumSegments, signals.blindspotCategories)
   const recencyScore = computeRecencyScore(story.timestamp, signals.now)
   const unreadScore = signals.readStoryIds.has(story.id) ? 0 : UNREAD_BONUS_POINTS
+  const readSimilarScore = computeReadSimilarScore(story, signals.readStoryIds, signals.readSimilarSignals)
 
-  return topicScore + blindspotScore + recencyScore + unreadScore
+  return topicScore + blindspotScore + recencyScore + unreadScore + readSimilarScore
 }
 
 /**

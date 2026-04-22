@@ -189,6 +189,101 @@ describe('scoreStory', () => {
     const score = scoreStory(story, signals)
     expect(score).toBe(0)
   })
+
+  it('adds 15 points when topic+region matches a recent read-through', () => {
+    // Candidate is a *different* unread story than the one that
+    // generated the read-similar signal — so the self-match guard
+    // doesn't fire and the bonus is awarded.
+    const story = {
+      ...baseStory,
+      id: 'fresh-similar',
+      topic: 'politics',
+      region: 'us',
+      timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(),
+    }
+    const signals: ForYouSignals = {
+      ...emptySignals,
+      readStoryIds: new Set(['previously-read']),
+      readSimilarSignals: [{ topic: 'politics', region: 'us' }],
+    }
+    // 0 (recency expired) + 10 (unread) + 15 (read-similar) = 25
+    expect(scoreStory(story, signals)).toBe(25)
+  })
+
+  it('does not award the read-similar bonus when only topic matches', () => {
+    // Use an unread story id so this test exercises the topic+region
+    // gate, not the new "skip already-read" self-match guard.
+    const story = {
+      ...baseStory,
+      id: 'unread-eu',
+      topic: 'politics',
+      region: 'eu',
+      timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(),
+    }
+    const signals: ForYouSignals = {
+      ...emptySignals,
+      readStoryIds: new Set(['previously-read']),
+      readSimilarSignals: [{ topic: 'politics', region: 'us' }],
+    }
+    // 0 (recency expired) + 10 (unread) + 0 (region mismatch) = 10
+    expect(scoreStory(story, signals)).toBe(10)
+  })
+
+  it('does not award the read-similar bonus to a story the user has already read', () => {
+    const story = {
+      ...baseStory,
+      id: 'already-read',
+      topic: 'politics',
+      region: 'us',
+      timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(),
+    }
+    const signals: ForYouSignals = {
+      ...emptySignals,
+      readStoryIds: new Set(['already-read']),
+      readSimilarSignals: [{ topic: 'politics', region: 'us' }],
+    }
+    // No unread bonus (already read), and no read-similar bonus either —
+    // would otherwise let a finished-read story self-match its own signal
+    // and outrank fresh content.
+    expect(scoreStory(story, signals)).toBe(0)
+  })
+
+  it('does not award the read-similar bonus when story has no region', () => {
+    // Use an unread id so the assertion isolates the missing-region
+    // condition rather than the self-match guard.
+    const story = {
+      ...baseStory,
+      id: 'unread-no-region',
+      topic: 'politics',
+      timestamp: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(),
+    }
+    const signals: ForYouSignals = {
+      ...emptySignals,
+      readStoryIds: new Set(['previously-read']),
+      readSimilarSignals: [{ topic: 'politics', region: 'us' }],
+    }
+    // 0 (recency) + 10 (unread) + 0 (no region) = 10
+    expect(scoreStory(story, signals)).toBe(10)
+  })
+
+  it('max score becomes 115 with all signals + read-similar bonus', () => {
+    const now = new Date()
+    const story = {
+      ...baseStory,
+      topic: 'politics',
+      region: 'us',
+      timestamp: now.toISOString(),
+      spectrumSegments: [{ bias: 'far-right', percentage: 40 }],
+    }
+    const signals: ForYouSignals = {
+      followedTopics: ['politics'],
+      blindspotCategories: ['far-right'],
+      readStoryIds: new Set(),
+      readSimilarSignals: [{ topic: 'politics', region: 'us' }],
+      now,
+    }
+    expect(scoreStory(story, signals)).toBe(115)
+  })
 })
 
 describe('rankStoriesForUser', () => {
