@@ -20,6 +20,7 @@ import { NexusCard } from '@/components/organisms/NexusCard'
 import { SwipeableCard } from '@/components/molecules/SwipeableCard'
 import { NexusCardSkeleton, NexusCardSkeletonList } from '@/components/organisms/NexusCardSkeleton'
 import { EditorialHeroCard } from '@/components/organisms/EditorialHeroCard'
+import { HotNowCard } from '@/components/organisms/HotNowCard'
 import { UnifiedTabBar } from '@/components/organisms/UnifiedTabBar'
 import { EditFeedModal } from '@/components/organisms/EditFeedModal'
 import { SearchBar } from '@/components/organisms/SearchBar'
@@ -266,6 +267,16 @@ export default function HomeFeedScreen() {
         selectedPromotedTag={selectedPromotedTag}
         onPromotedTagChange={setSelectedPromotedTag}
       />
+
+      {/* Hot Now strip — trending tab + signed-in users only. We hide
+          for signed-out users because useHotStories returns a null SWR
+          key without auth, which would otherwise show a misleading
+          "no engagement data yet" empty state on the public feed. */}
+      {isTrending && isAuthenticated && (
+        <View style={{ paddingTop: SPACING.sm, paddingBottom: SPACING.sm }}>
+          <HotNowCard />
+        </View>
+      )}
 
       {/* For You CTA or editorial hero */}
       <View style={{ paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xs }}>

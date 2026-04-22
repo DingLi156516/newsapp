@@ -16,6 +16,18 @@ vi.mock('@/lib/api/bias-calculator', () => ({
   computeBiasProfile: vi.fn(),
 }))
 
+vi.mock('@/lib/supabase/server', () => ({
+  getSupabaseServiceClient: vi.fn(() => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          eq: () => ({ gte: () => Promise.resolve({ data: [], error: null }) }),
+        }),
+      }),
+    }),
+  })),
+}))
+
 import { queryForYouStories } from '@/lib/api/for-you-queries'
 import { queryPreferences } from '@/lib/api/preferences-queries'
 import { queryReadStoryIds } from '@/lib/api/reading-history-queries'

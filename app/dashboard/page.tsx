@@ -16,6 +16,7 @@ import { UserMenu } from '@/components/organisms/UserMenu'
 import { BiasProfileChart } from '@/components/organisms/BiasProfileChart'
 import { BiasComparisonBar } from '@/components/molecules/BiasComparisonBar'
 import { SuggestionsList } from '@/components/organisms/SuggestionsList'
+import { HotNowCard } from '@/components/organisms/HotNowCard'
 import { Skeleton } from '@/components/atoms/Skeleton'
 import { BIAS_LABELS } from '@/lib/types'
 
@@ -129,6 +130,9 @@ export default function DashboardPage() {
             Start reading stories to build your bias profile!
           </div>
         )}
+
+        {/* Hot Now (Phase 3 — engagement-driven) */}
+        <HotNowCard />
 
         {/* Suggestions */}
         <div className="space-y-2">

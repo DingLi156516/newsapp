@@ -52,6 +52,10 @@ jest.mock('@/lib/hooks/use-debounce', () => ({
   useDebounce: (value: string) => value,
 }))
 
+jest.mock('@/lib/hooks/use-hot-stories', () => ({
+  useHotStories: () => ({ hotStories: [], isLoading: false, isError: false }),
+}))
+
 jest.mock('@/lib/hooks/use-preferences', () => ({
   usePreferences: () => ({
     preferences: {
