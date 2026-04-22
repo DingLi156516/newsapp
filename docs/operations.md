@@ -1064,3 +1064,40 @@ npx supabase migration repair --status applied NNN --linked
 Replace `NNN` with the migration sequence number (e.g., `003`).
 
 > **Warning:** Do NOT use the MCP `apply_migration` tool for local migration files. It creates migrations on the remote with a different timestamp-based name, causing version mismatch between local files and the remote migration history. Always use `npx supabase db push --linked` instead.
+
+---
+
+## Owner Data Backfill (Wikidata)
+
+`media_owners` was hand-seeded with ≈20 entries in migration 048. Broader coverage comes from `scripts/seed-ownership.ts`, which queries Wikidata P127 ("owned by") for each active source and emits a reviewable CSV. A follow-up migration is written by hand from the approved CSV rows — the script never writes to the database directly (per the "No MCP migrations" policy).
+
+### Regenerating the backfill CSV
+
+```bash
+set -a && . ./.env.local && set +a
+mkdir -p scripts/out
+npx tsx scripts/seed-ownership.ts --dry-run --out scripts/out/ownership-backfill.csv
+```
+
+The script is CSV-only: it refuses to run without `--dry-run`. Output is sorted by confidence (`high` → `medium` → `low` → `skip`). Review each row before promoting it into a migration.
+
+### Prerequisite: `sources.wikidata_qid`
+
+The script reads `sources.wikidata_qid` to drive SPARQL lookups. **As of 2026-04-21 that column does not exist** in the `sources` schema (not present in `lib/supabase/types.ts` and not created by any migration). Running the script currently fails with:
+
+```
+Failed to fetch sources: column sources.wikidata_qid does not exist
+```
+
+Before any owner backfill can happen, a preparatory migration must:
+1. Add `wikidata_qid TEXT` to the `sources` table.
+2. Populate it per outlet (operator research; QIDs are small — e.g. NYT=`Q9684`, BBC News=`Q9531`).
+
+Until then `migration 052_ownership_backfill.sql` cannot be authored. The Part B CSV/migration commits for the 2026-04-21 owner-profile PR were intentionally skipped per the plan's gating logic; Part A (owner profile page + `/api/owners/by-slug/[slug]`) ships independently and operates on the existing 20 hand-seeded owners.
+
+### Authoring the migration (once the prerequisite lands)
+
+1. Run the dry-run command above.
+2. Open the CSV, review every row; keep only `action = 'insert'` or `'link'` with `confidence = 'high'` for the first pass.
+3. Create `supabase/migrations/052_ownership_backfill.sql` (or next available number) using migration 048 as a format reference: `INSERT INTO media_owners (...)` for new owners (always `owner_source = 'wikidata'`, `owner_verified_at = now()`), then `UPDATE sources SET owner_id = (SELECT id FROM media_owners WHERE slug = ?) WHERE slug = ?` for each link. Do not touch existing `owner_source = 'manual'` rows.
+4. Apply via `npx supabase db push --linked` and update `lib/supabase/types.ts` if any new enum values or columns were added.

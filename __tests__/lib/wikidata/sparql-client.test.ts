@@ -80,6 +80,40 @@ describe('SparqlClient', () => {
     await expect(client.query('SELECT 1')).rejects.toThrow(/throttled/i)
   })
 
+  it('throws on non-ok responses other than 429/503 without retrying', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response('Bad syntax', { status: 400, statusText: 'Bad Request' })
+    )
+    const client = new SparqlClient({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl: async () => undefined,
+      minIntervalMs: 0,
+      maxRetries: 3,
+    })
+
+    await expect(client.query('SELECT 1')).rejects.toThrow(/400 Bad Request/)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts in-flight requests after the per-request timeout', async () => {
+    const fetchImpl = vi.fn((_url: string, init: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'))
+        })
+      })
+    })
+    const client = new SparqlClient({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      sleepImpl: async () => undefined,
+      minIntervalMs: 0,
+      timeoutMs: 10,
+      maxRetries: 0,
+    })
+
+    await expect(client.query('SELECT 1')).rejects.toThrow(/aborted/i)
+  })
+
   it('rejects malformed responses', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ nope: true }), {
