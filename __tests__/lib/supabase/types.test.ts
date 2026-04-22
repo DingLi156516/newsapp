@@ -9,6 +9,8 @@ import type {
   DbArticleInsert,
   DbStory,
   DbStoryInsert,
+  DbStoryView,
+  DbStoryViewInsert,
   Database,
 } from '@/lib/supabase/types'
 
@@ -197,5 +199,43 @@ describe('Database type interfaces', () => {
     expect(sourceRow).toBeDefined()
     expect(articleRow).toBeDefined()
     expect(storyRow).toBeDefined()
+  })
+
+  it('DbStoryView has all required fields including bounded enums', () => {
+    const view: DbStoryView = {
+      id: 'sv1',
+      story_id: 'st1',
+      user_id: null,
+      session_id: '550e8400-e29b-41d4-a716-446655440000',
+      action: 'read_through',
+      dwell_bucket: 2,
+      referrer_kind: 'feed',
+      client: 'mobile',
+      created_at: '2026-04-22T00:00:00Z',
+    }
+    expect(view.action).toBe('read_through')
+    expect(view.dwell_bucket).toBe(2)
+    expect(view.referrer_kind).toBe('feed')
+    expect(view.client).toBe('mobile')
+    expect(view.user_id).toBeNull()
+  })
+
+  it('DbStoryViewInsert allows minimal anonymous event', () => {
+    const insert: DbStoryViewInsert = {
+      story_id: 'st1',
+      session_id: 'sess-uuid',
+      action: 'view',
+      client: 'web',
+    }
+    expect(insert.user_id).toBeUndefined()
+    expect(insert.dwell_bucket).toBeUndefined()
+    expect(insert.referrer_kind).toBeUndefined()
+  })
+
+  it('story_views table appears in Database map', () => {
+    type Tables = Database['public']['Tables']
+    type StoryViewRow = Tables['story_views']['Row']
+    const row: StoryViewRow = {} as DbStoryView
+    expect(row).toBeDefined()
   })
 })

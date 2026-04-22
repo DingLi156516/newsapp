@@ -275,6 +275,36 @@ export interface DbReadingHistoryInsert {
 }
 
 // ---------------------------------------------------------------------------
+// story_views table (migration 053 — engagement telemetry)
+// ---------------------------------------------------------------------------
+
+export type StoryViewAction = 'view' | 'dwell' | 'read_through' | 'share'
+export type StoryViewReferrerKind = 'feed' | 'for_you' | 'search' | 'direct' | 'external'
+export type StoryViewClient = 'web' | 'mobile'
+
+export interface DbStoryView {
+  id: string
+  story_id: string
+  user_id: string | null
+  session_id: string
+  action: StoryViewAction
+  dwell_bucket: number | null
+  referrer_kind: StoryViewReferrerKind | null
+  client: StoryViewClient
+  created_at: string
+}
+
+export interface DbStoryViewInsert {
+  story_id: string
+  user_id?: string | null
+  session_id: string
+  action: StoryViewAction
+  dwell_bucket?: number | null
+  referrer_kind?: StoryViewReferrerKind | null
+  client: StoryViewClient
+}
+
+// ---------------------------------------------------------------------------
 // user_preferences table
 // ---------------------------------------------------------------------------
 
@@ -563,6 +593,20 @@ export interface Database {
         Relationships: [
           {
             foreignKeyName: 'reading_history_story_id_fkey'
+            columns: ['story_id']
+            isOneToOne: false
+            referencedRelation: 'stories'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      story_views: {
+        Row: DbStoryView
+        Insert: DbStoryViewInsert
+        Update: Partial<DbStoryViewInsert>
+        Relationships: [
+          {
+            foreignKeyName: 'story_views_story_id_fkey'
             columns: ['story_id']
             isOneToOne: false
             referencedRelation: 'stories'
