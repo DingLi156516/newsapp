@@ -107,6 +107,7 @@ export function NexusCard({ article, onSave, isSaved, onClick, compact = false, 
                     url={`/story/${article.id}`}
                     title={article.headline}
                     size={compact ? 14 : 18}
+                    storyId={article.id}
                   />
                   <BookmarkButton
                     isSaved={isSaved}

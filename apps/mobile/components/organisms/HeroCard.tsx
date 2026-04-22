@@ -114,7 +114,7 @@ export function HeroCard({ article, onClick, onSave, isSaved, isRead = false, sh
               )}
               <FactualityBar level={article.factuality} />
               <View style={{ marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <ShareButton url={`/story/${article.id}`} title={article.headline} size={18} />
+                <ShareButton url={`/story/${article.id}`} title={article.headline} size={18} storyId={article.id} />
                 <BookmarkButton isSaved={isSaved} onPress={() => onSave(article.id)} />
               </View>
             </View>

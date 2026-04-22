@@ -1,0 +1,57 @@
+appId: host.exp.Exponent
+
+# Story telemetry flow — opens a story, scrolls to the bottom, navigates
+# back. Verifies the screen lifecycle the engagement-capture hook depends
+# on (mount → scroll past 80% → unmount). Network assertion (POST to
+# /api/events/story landing in story_views) is verified out-of-band via
+# admin SQL — Maestro cannot intercept network in-process.
+
+---
+
+- tapOn:
+    text: "Axiom News"
+    optional: true
+- tapOn:
+    id: "close-button"
+    optional: true
+- tapOn:
+    id: "back-button"
+    optional: true
+- tapOn:
+    text: "Home"
+    optional: true
+- waitForAnimationToEnd
+
+- assertVisible:
+    id: "axiom-header"
+
+- tapOn:
+    id: "hero-card"
+    optional: true
+- tapOn:
+    id: "story-card"
+    optional: true
+    index: 0
+
+- assertVisible:
+    id: "story-headline"
+    optional: true
+
+# Scroll to bottom in two passes — should cross the 80% threshold and
+# fire the read_through event before we navigate away.
+- scroll
+- scroll
+- scrollUntilVisible:
+    element:
+      text: "Sources"
+    direction: DOWN
+    optional: true
+
+- waitForAnimationToEnd
+
+- tapOn:
+    id: "back-button"
+    optional: true
+
+- assertVisible:
+    id: "axiom-header"

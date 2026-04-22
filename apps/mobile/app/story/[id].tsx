@@ -24,6 +24,7 @@ import { useStory } from '@/lib/hooks/use-story'
 import { useStoryTimeline } from '@/lib/hooks/use-story-timeline'
 import { useBookmarks } from '@/lib/hooks/use-bookmarks'
 import { useReadingHistory } from '@/lib/hooks/use-reading-history'
+import { useStoryTelemetry } from '@/lib/hooks/use-story-telemetry'
 import { useToast } from '@/lib/hooks/use-toast'
 import { TOPIC_LABELS, BIAS_LABELS, BIAS_COLOR } from '@/lib/shared/types'
 import { FONT, SPACING } from '@/lib/shared/design'
@@ -96,6 +97,18 @@ export default function StoryDetailScreen() {
     }
   }, [story, id, markAsRead])
 
+  // Fire engagement telemetry — view on mount, read_through at 80% scroll,
+  // dwell on unmount or backgrounded app. Disabled while the story is
+  // still loading so spinner time doesn't pollute Hot Now and trending
+  // engagement counts; also no-op when consent is denied.
+  useStoryTelemetry({
+    storyId: id ?? '',
+    scrollY,
+    contentHeight,
+    viewportHeight,
+    enabled: !isLoading && !!story,
+  })
+
   // Parallax style for hero image
   const heroParallaxStyle = useAnimatedStyle(() => ({
     transform: [
@@ -155,7 +168,7 @@ export default function StoryDetailScreen() {
             {story.headline}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <ShareButton url={`/story/${story.id}`} title={story.headline} size={16} />
+            <ShareButton url={`/story/${story.id}`} title={story.headline} size={16} storyId={story.id} />
             <BookmarkButton
               isSaved={isBookmarked(story.id)}
               onPress={() => toggleWithToast(story.id)}
@@ -180,7 +193,7 @@ export default function StoryDetailScreen() {
             <Text style={{ fontFamily: 'Inter', fontSize: 14, color: theme.text.secondary }}>Back</Text>
           </Pressable>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <ShareButton url={`/story/${story.id}`} title={story.headline} />
+            <ShareButton url={`/story/${story.id}`} title={story.headline} storyId={story.id} />
             <BookmarkButton
               isSaved={isBookmarked(story.id)}
               onPress={() => toggleWithToast(story.id)}

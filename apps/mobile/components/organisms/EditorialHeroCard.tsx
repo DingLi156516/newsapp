@@ -149,6 +149,7 @@ export function EditorialHeroCard({
                 url={`/story/${article.id}`}
                 title={article.headline}
                 size={18}
+                storyId={article.id}
               />
               <BookmarkButton
                 isSaved={isSaved}

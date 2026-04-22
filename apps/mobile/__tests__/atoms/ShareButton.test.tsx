@@ -2,7 +2,24 @@ import React from 'react'
 import { Share } from 'react-native'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native'
 
+jest.mock('@/lib/hooks/fetcher', () => ({
+  authFetch: jest.fn(() => Promise.resolve({ ok: true })),
+}))
+
+jest.mock('@/lib/hooks/use-session-id', () => ({
+  useSessionId: jest.fn(() => ({ sessionId: 'sess-1', ready: true })),
+}))
+
+jest.mock('@/lib/hooks/use-telemetry-consent', () => ({
+  useTelemetryConsent: jest.fn(() => ({ consent: true, ready: true })),
+}))
+
 import { ShareButton } from '@/components/atoms/ShareButton'
+import { authFetch } from '@/lib/hooks/fetcher'
+import { useTelemetryConsent } from '@/lib/hooks/use-telemetry-consent'
+
+const mockFetch = authFetch as jest.Mock
+const mockConsent = useTelemetryConsent as jest.Mock
 
 jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction', activityType: undefined })
 
@@ -71,5 +88,45 @@ describe('ShareButton', () => {
     const style = btn.props.style
     expect(style.minHeight).toBeGreaterThanOrEqual(44)
     expect(style.minWidth).toBeGreaterThanOrEqual(44)
+  })
+
+  it('emits a share telemetry event when storyId is provided', async () => {
+    mockFetch.mockClear()
+    render(<ShareButton url="/story/123" title="X" storyId="550e8400-e29b-41d4-a716-446655440000" />)
+    fireEvent.press(screen.getByTestId('share-button'))
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/events/story',
+        expect.objectContaining({ method: 'POST' })
+      )
+    })
+    const call = mockFetch.mock.calls[0]
+    expect(JSON.parse(call[1].body)).toMatchObject({
+      storyId: '550e8400-e29b-41d4-a716-446655440000',
+      action: 'share',
+      client: 'mobile',
+    })
+    expect(call[1].headers['x-session-id']).toBe('sess-1')
+  })
+
+  it('does not emit a share telemetry event when storyId is omitted', async () => {
+    mockFetch.mockClear()
+    render(<ShareButton url="https://example.com/story/1" title="X" />)
+    fireEvent.press(screen.getByTestId('share-button'))
+    await waitFor(() => {
+      expect(Share.share).toHaveBeenCalled()
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('does not emit a share telemetry event when consent is denied', async () => {
+    mockFetch.mockClear()
+    mockConsent.mockReturnValueOnce({ consent: false, ready: true })
+    render(<ShareButton url="/story/1" title="X" storyId="550e8400-e29b-41d4-a716-446655440000" />)
+    fireEvent.press(screen.getByTestId('share-button'))
+    await waitFor(() => {
+      expect(Share.share).toHaveBeenCalled()
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 })
