@@ -262,6 +262,16 @@ export interface SourceProfile {
   blindspotCount: number
 }
 
+export interface OwnerProfile {
+  owner: MediaOwner
+  sources: NewsSource[]
+  recentStories: SourceProfileStory[]
+  topicBreakdown: SourceTopicBreakdownItem[]
+  storyCount: number
+  blindspotCount: number
+  biasDistribution: SpectrumSegment[]
+}
+
 export interface SourceComparisonTopicCount {
   topic: Topic
   leftCount: number
