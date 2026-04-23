@@ -1163,9 +1163,10 @@ Confidence is downgraded one tier when the resolved property is weaker than P127
 
 Expect the dry-run against the 60 QIDs seeded in 055 to drop skip-row count substantially (baseline was 45 under P127-only). The CSV `notes` column surfaces which property matched (`"Resolved via P749 (parent organization)"`).
 
-Still pending:
-- Replace the two NULLed QIDs (`the-daily-beast`, `the-epoch-times`) with correct values from manual Wikidata lookup — landed in migration 057.
-- Author owners for the ~16 outlets deliberately omitted from 056 (jacobin, the-intercept, democracy-now, mother-jones, salon, the-american-prospect, forbes, daily-wire, washington-times, the-federalist, the-blaze, the-epoch-times, oann, reason, realclearpolitics, the-dispatch) — landed in migration 057 using the extended script's CSV as input.
+Migrations shipped on top of this:
+- **057** — Restore QIDs for `the-daily-beast` and `the-epoch-times` NULLed in 056, plus 5 new owners with verified QIDs (forbes → Forbes Media, mother-jones → Foundation for National Progress, the-intercept → First Look Institute, reason → Reason Foundation, washington-times → News World Communications). Coverage 38 → 43 of 54 active sources. Owners without a verified Wikidata QID (daily-wire, the-blaze, the-american-prospect) were deliberately excluded so the next dry-run doesn't treat them as permanent mismatches.
+
+Still deferred to a future migration (pending operator Wikidata verification): daily-wire, the-blaze, the-american-prospect, jacobin, democracy-now, salon, the-federalist, oann, realclearpolitics, the-dispatch, the-epoch-times (owner).
 
 ### Authoring a future migration (once the script produces usable CSV)
 
