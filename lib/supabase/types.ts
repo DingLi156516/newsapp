@@ -433,6 +433,28 @@ export interface DbPipelineMaintenanceAuditInsert {
 }
 
 // ---------------------------------------------------------------------------
+// pipeline_backlog_snapshots table (migration 059)
+// ---------------------------------------------------------------------------
+
+export interface DbPipelineBacklogSnapshot {
+  captured_at: string
+  unembedded_count: number
+  unclustered_count: number
+  pending_assembly_count: number
+  review_queue_count: number
+  stale_claim_count: number
+}
+
+export interface DbPipelineBacklogSnapshotInsert {
+  captured_at?: string
+  unembedded_count: number
+  unclustered_count: number
+  pending_assembly_count: number
+  review_queue_count: number
+  stale_claim_count?: number
+}
+
+// ---------------------------------------------------------------------------
 // admin_users table
 // ---------------------------------------------------------------------------
 
@@ -653,6 +675,12 @@ export interface Database {
         Row: DbPipelineMaintenanceAudit
         Insert: DbPipelineMaintenanceAuditInsert
         Update: Partial<DbPipelineMaintenanceAuditInsert>
+        Relationships: []
+      }
+      pipeline_backlog_snapshots: {
+        Row: DbPipelineBacklogSnapshot
+        Insert: DbPipelineBacklogSnapshotInsert
+        Update: Partial<DbPipelineBacklogSnapshotInsert>
         Relationships: []
       }
       tags: {

@@ -30,6 +30,7 @@ import {
   updateSourceHealth,
   persistExtractionFailures,
 } from '@/lib/ingestion/pipeline-helpers'
+import { noopStageEmitter, safeEmit, type StageEventEmitter } from '@/lib/pipeline/stage-events'
 
 const CONCURRENCY_DEFAULTS: Record<SourceType, number> = {
   rss: 5,
@@ -76,9 +77,54 @@ interface SourceFetchOutcome {
   readonly error: FeedError | null
 }
 
-async function fetchSource(source: IngestionSource): Promise<FetchResult> {
+async function fetchSource(
+  source: IngestionSource,
+  emitter: StageEventEmitter
+): Promise<FetchResult> {
   const fetcher = getFetcher(source.sourceType)
-  return fetcher.fetch(source)
+  const startedAt = Date.now()
+  await safeEmit(emitter, {
+    stage: 'ingest',
+    level: 'info',
+    eventType: 'source_fetch_start',
+    sourceId: source.sourceId,
+    provider: source.sourceType,
+    payload: { slug: source.slug, name: source.name },
+  })
+  try {
+    const result = await fetcher.fetch(source)
+    // Fetchers report normal failures by returning result.error rather than
+    // throwing (RSS parse errors, robots blocks, rate limits, etc.). Emit
+    // those at warn so they surface in the Top Errors panel; only true
+    // successes go to info.
+    await safeEmit(emitter, {
+      stage: 'ingest',
+      level: result.error ? 'warn' : 'info',
+      eventType: 'source_fetch_complete',
+      sourceId: source.sourceId,
+      provider: source.sourceType,
+      durationMs: Date.now() - startedAt,
+      payload: {
+        slug: source.slug,
+        items: result.items.length,
+        error: result.error?.error ?? null,
+        errorType: result.error?.errorType ?? null,
+      },
+    })
+    return result
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await safeEmit(emitter, {
+      stage: 'ingest',
+      level: 'warn',
+      eventType: 'source_fetch_complete',
+      sourceId: source.sourceId,
+      provider: source.sourceType,
+      durationMs: Date.now() - startedAt,
+      payload: { slug: source.slug, error: message },
+    })
+    throw err
+  }
 }
 
 function createEmptyBreakdown(): TypeBreakdown {
@@ -86,7 +132,8 @@ function createEmptyBreakdown(): TypeBreakdown {
 }
 
 export async function ingestAllSources(
-  client: SupabaseClient<Database>
+  client: SupabaseClient<Database>,
+  emitter: StageEventEmitter = noopStageEmitter
 ): Promise<IngestionResult> {
   registerAllFetchers(client)
 
@@ -118,7 +165,9 @@ export async function ingestAllSources(
     }
 
     const concurrency = getConcurrency(sourceType)
-    const results = await processInBatches(sources, concurrency, fetchSource)
+    const results = await processInBatches(sources, concurrency, (source) =>
+      fetchSource(source, emitter)
+    )
 
     for (let i = 0; i < results.length; i++) {
       const result = results[i]

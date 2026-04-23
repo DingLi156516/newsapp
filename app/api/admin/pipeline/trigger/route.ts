@@ -76,8 +76,9 @@ export async function POST(request: NextRequest) {
     const backlogBefore = await countPipelineBacklog(serviceClient)
 
     if (type === 'ingest' || type === 'full') {
+      const ingestEmitter = logger.makeStageEmitter(runId, generateClaimOwner())
       const ingestResult = await logger.logStep('ingest_feeds', () =>
-        ingestAllSources(serviceClient) as unknown as Promise<Record<string, unknown>>
+        ingestAllSources(serviceClient, ingestEmitter) as unknown as Promise<Record<string, unknown>>
       )
       ingestSummary = {
         ...ingestResult,

@@ -11,6 +11,7 @@ import { getSupabaseServiceClient } from '@/lib/supabase/server'
 import { ingestAllSources } from '@/lib/ingestion/ingest'
 import { PipelineLogger } from '@/lib/pipeline/logger'
 import { toPerMinute } from '@/lib/pipeline/telemetry-utils'
+import { generateClaimOwner } from '@/lib/pipeline/claim-utils'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -37,9 +38,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const logger = new PipelineLogger(client)
 
   try {
-    await logger.startRun('ingest', 'cron')
+    const runId = await logger.startRun('ingest', 'cron')
+    const claimOwner = generateClaimOwner()
+    const emitter = logger.makeStageEmitter(runId, claimOwner)
     const result = await logger.logStep('ingest_all_sources', () =>
-      ingestAllSources(client) as unknown as Promise<Record<string, unknown>>
+      ingestAllSources(client, emitter) as unknown as Promise<Record<string, unknown>>
     )
     const durationMs = logger.getSteps().find((step) => step.step === 'ingest_all_sources')?.duration_ms ?? 0
     const summary = {

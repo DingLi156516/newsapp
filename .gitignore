@@ -36,6 +36,7 @@ docs/superpowers/
 # claude code per-session state
 .claude/plans/
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # typescript build cache
 *.tsbuildinfo

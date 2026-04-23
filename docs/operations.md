@@ -1139,7 +1139,7 @@ After 055 landed, a dry-run of `scripts/seed-ownership.ts` against the 60 newly-
   - `the-daily-beast` → Q473677 = Cistercians (12th-century Catholic religious order)
   - `the-epoch-times` → Q1165602 = VIVAQUA (Belgian water utility)
 
-Rather than wait on a script rewrite, coverage was landed via `056_ownership_backfill.sql`: a hand-authored migration that (a) NULLs the two bad QIDs above and (b) inserts 18 new owners plus the corresponding source links (`owner_source = 'manual'`). Ownership coverage moved from 20 → 38 of 54 active sources.
+Rather than wait on a script rewrite, coverage was landed via `056_ownership_backfill.sql`: a hand-authored migration that (a) NULLs the two bad QIDs above and (b) inserts 18 new owners plus the corresponding source links (`owner_source = 'manual'`). The migration targets 18 source slugs, but 2 of them (`slate`, `propublica`) have no row in the `sources` table — the owners land as orphans (no-op UPDATE thanks to the `owner_id IS NULL` guard). Actual coverage moves from the pre-056 baseline to 34 of 51 seeded active sources.
 
 ### Property coverage: P127 + P749 + P123
 
@@ -1164,8 +1164,10 @@ Confidence is downgraded one tier when the resolved property is weaker than P127
 Expect the dry-run against the 60 QIDs seeded in 055 to drop skip-row count substantially (baseline was 45 under P127-only). The CSV `notes` column surfaces which property matched (`"Resolved via P749 (parent organization)"`).
 
 Migrations shipped on top of this:
-- **057** — Restore QIDs for `the-daily-beast` and `the-epoch-times` NULLed in 056, plus 5 new owners with verified QIDs (forbes → Forbes Media, mother-jones → Foundation for National Progress, the-intercept → First Look Institute, reason → Reason Foundation, washington-times → News World Communications). Coverage 38 → 43 of 54 active sources. Owners without a verified Wikidata QID (daily-wire, the-blaze, the-american-prospect) were deliberately excluded so the next dry-run doesn't treat them as permanent mismatches.
+- **057** — Restore QIDs for `the-daily-beast` and `the-epoch-times` NULLed in 056, plus 5 new owners with verified QIDs (forbes → Forbes Media, mother-jones → Foundation for National Progress, the-intercept → First Look Institute, reason → Reason Foundation, washington-times → News World Communications). 1 of the 5 (`mother-jones`) has no row in `sources`, so Foundation for National Progress lands as an orphan. Owners without a verified Wikidata QID (daily-wire, the-blaze, the-american-prospect) were deliberately excluded so the next dry-run doesn't treat them as permanent mismatches.
 - **058** — Populate `media_owners.parent_owner_id` for the two conglomerate chains currently represented in the DB (NBCUniversal → Comcast, Dow Jones → News Corp). Data-only; no UI surface yet — the column has existed since 048 but was never wired. Idempotent via `IS DISTINCT FROM` guards.
+
+**Final active-source coverage after 056 + 057: 37 of 51 seeded active sources.** The delta from the plan's "43 of 54" target is 3 orphan owners — `foundation-national-progress`, `graham-holdings`, `propublica-inc` — whose source rows (`mother-jones`, `slate`, `propublica`) were never seeded. Whether to seed those sources is a separate product question tracked outside this backfill thread.
 
 Still deferred to a future migration (pending operator Wikidata verification): daily-wire, the-blaze, the-american-prospect, jacobin, democracy-now, salon, the-federalist, oann, realclearpolitics, the-dispatch, the-epoch-times (owner).
 
