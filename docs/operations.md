@@ -1165,6 +1165,7 @@ Expect the dry-run against the 60 QIDs seeded in 055 to drop skip-row count subs
 
 Migrations shipped on top of this:
 - **057** — Restore QIDs for `the-daily-beast` and `the-epoch-times` NULLed in 056, plus 5 new owners with verified QIDs (forbes → Forbes Media, mother-jones → Foundation for National Progress, the-intercept → First Look Institute, reason → Reason Foundation, washington-times → News World Communications). Coverage 38 → 43 of 54 active sources. Owners without a verified Wikidata QID (daily-wire, the-blaze, the-american-prospect) were deliberately excluded so the next dry-run doesn't treat them as permanent mismatches.
+- **058** — Populate `media_owners.parent_owner_id` for the two conglomerate chains currently represented in the DB (NBCUniversal → Comcast, Dow Jones → News Corp). Data-only; no UI surface yet — the column has existed since 048 but was never wired. Idempotent via `IS DISTINCT FROM` guards.
 
 Still deferred to a future migration (pending operator Wikidata verification): daily-wire, the-blaze, the-american-prospect, jacobin, democracy-now, salon, the-federalist, oann, realclearpolitics, the-dispatch, the-epoch-times (owner).
 
