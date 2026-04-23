@@ -16,6 +16,7 @@ import { countPipelineBacklog } from '@/lib/pipeline/backlog'
 import { runProcessPipeline } from '@/lib/pipeline/process-runner'
 import { generateClaimOwner } from '@/lib/pipeline/claim-utils'
 import { fetchRecentStageDurations, STAGE_BUDGETS } from '@/lib/pipeline/batch-tuner'
+import { captureBacklogSnapshot } from '@/lib/pipeline/backlog-snapshot'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -66,6 +67,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       emitStageEvent: emitter,
     }, { timeBudgetMs: 280_000 })
     await logger.complete(summary as unknown as Record<string, unknown>)
+    await captureBacklogSnapshot(client)
 
     return NextResponse.json({
       success: true,

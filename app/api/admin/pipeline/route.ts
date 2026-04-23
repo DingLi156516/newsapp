@@ -27,13 +27,21 @@ export async function GET(request: NextRequest) {
 
   const limitParam = request.nextUrl.searchParams.get('limit')
   const limit = Math.min(Math.max(parseInt(limitParam ?? '20', 10) || 20, 1), 100)
+  // ?status=running lets the live banner find a long-stuck run without
+  // depending on it being inside the most-recent <limit> rows.
+  const statusParam = request.nextUrl.searchParams.get('status')
+  const status = statusParam === 'running' || statusParam === 'completed' || statusParam === 'failed'
+    ? statusParam
+    : null
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabase.from('pipeline_runs') as any)
+    let query: any = (supabase.from('pipeline_runs') as any)
       .select('*')
       .order('started_at', { ascending: false })
       .limit(limit)
+    if (status) query = query.eq('status', status)
+    const { data, error } = await query
 
     if (error) {
       throw new Error(`Failed to fetch pipeline runs: ${error.message}`)

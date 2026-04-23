@@ -13,10 +13,13 @@ import { useRequireAuth } from '@/lib/hooks/use-require-auth'
 import { useAdmin } from '@/lib/hooks/use-admin'
 import { UserMenu } from '@/components/organisms/UserMenu'
 import { PipelineControls } from '@/components/organisms/PipelineControls'
+import { PipelineActiveRunBanner } from '@/components/organisms/PipelineActiveRunBanner'
 import { PipelineSummaryStats } from '@/components/organisms/PipelineSummaryStats'
 import { PipelineRunHistory } from '@/components/organisms/PipelineRunHistory'
 import { SourceHealthTable } from '@/components/organisms/SourceHealthTable'
+import { PipelineJourneyLookup } from '@/components/organisms/PipelineJourneyLookup'
 import { PipelineEventsPanel } from '@/components/organisms/PipelineEventsPanel'
+import { PipelineTopErrorsPanel } from '@/components/organisms/PipelineTopErrorsPanel'
 import { PipelineDlqPanel } from '@/components/organisms/PipelineDlqPanel'
 import { PipelineMaintenancePanel } from '@/components/organisms/PipelineMaintenancePanel'
 import { Skeleton } from '@/components/atoms/Skeleton'
@@ -105,10 +108,13 @@ export default function AdminPipelinePage() {
         </div>
 
         <PipelineControls />
+        <PipelineActiveRunBanner />
         <PipelineSummaryStats />
         <PipelineRunHistory />
         <SourceHealthTable />
+        <PipelineJourneyLookup />
         <PipelineEventsPanel />
+        <PipelineTopErrorsPanel />
         <PipelineDlqPanel />
         <PipelineMaintenancePanel />
       </div>

@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Clock, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Clock, CheckCircle2, XCircle, Loader2, Maximize2 } from 'lucide-react'
 import { usePipelineRuns } from '@/lib/hooks/use-pipeline'
 import { Skeleton } from '@/components/atoms/Skeleton'
+import { PipelineRunDrawer } from '@/components/organisms/PipelineRunDrawer'
 import type { DbPipelineRun, DbPipelineStep } from '@/lib/supabase/types'
 
 const STATUS_CONFIG: Record<string, { icon: typeof CheckCircle2; color: string }> = {
@@ -109,7 +110,13 @@ function InlineRunMetrics({ run }: { readonly run: DbPipelineRun }) {
   )
 }
 
-function RunRow({ run }: { readonly run: DbPipelineRun }) {
+function RunRow({
+  run,
+  onOpenDrawer,
+}: {
+  readonly run: DbPipelineRun
+  readonly onOpenDrawer: (run: DbPipelineRun) => void
+}) {
   const [expanded, setExpanded] = useState(false)
   const config = STATUS_CONFIG[run.status] ?? STATUS_CONFIG.running
   const StatusIcon = config.icon
@@ -135,11 +142,14 @@ function RunRow({ run }: { readonly run: DbPipelineRun }) {
 
   return (
     <div className="glass-sm overflow-hidden">
-      <button
-        onClick={() => setExpanded((prev) => !prev)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/5 transition-colors"
-      >
-        <div className="flex items-center gap-3">
+      <div className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/5 transition-colors">
+        <button
+          type="button"
+          aria-label={expanded ? 'Collapse run summary' : 'Expand run summary'}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((prev) => !prev)}
+          className="flex items-center gap-3 flex-1 text-left"
+        >
           {expanded ? (
             <ChevronDown size={14} className="text-white/40" />
           ) : (
@@ -149,7 +159,7 @@ function RunRow({ run }: { readonly run: DbPipelineRun }) {
             {run.run_type}
           </span>
           <span className="text-xs text-white/50">{run.triggered_by}</span>
-        </div>
+        </button>
         <div className="flex items-center gap-4">
           <InlineRunMetrics run={run} />
           <div className={`flex items-center gap-1.5 ${config.color}`}>
@@ -161,8 +171,16 @@ function RunRow({ run }: { readonly run: DbPipelineRun }) {
             <span className="text-xs tabular-nums">{formatDuration(run.duration_ms)}</span>
           </div>
           <span className="text-xs text-white/40">{formatTime(run.started_at)}</span>
+          <button
+            type="button"
+            aria-label="Open run detail"
+            onClick={() => onOpenDrawer(run)}
+            className="text-white/40 hover:text-white/80 p-1"
+          >
+            <Maximize2 size={12} />
+          </button>
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-white/5 bg-white/[0.02] py-2">
@@ -241,6 +259,7 @@ function RunRow({ run }: { readonly run: DbPipelineRun }) {
 
 export function PipelineRunHistory() {
   const { runs, isLoading } = usePipelineRuns()
+  const [activeRun, setActiveRun] = useState<DbPipelineRun | null>(null)
 
   if (isLoading) {
     return (
@@ -269,9 +288,12 @@ export function PipelineRunHistory() {
       ) : (
         <div className="space-y-2">
           {runs.map((run) => (
-            <RunRow key={run.id} run={run} />
+            <RunRow key={run.id} run={run} onOpenDrawer={setActiveRun} />
           ))}
         </div>
+      )}
+      {activeRun && (
+        <PipelineRunDrawer run={activeRun} onClose={() => setActiveRun(null)} />
       )}
     </div>
   )
