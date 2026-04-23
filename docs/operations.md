@@ -1141,13 +1141,31 @@ After 055 landed, a dry-run of `scripts/seed-ownership.ts` against the 60 newly-
 
 Rather than wait on a script rewrite, coverage was landed via `056_ownership_backfill.sql`: a hand-authored migration that (a) NULLs the two bad QIDs above and (b) inserts 18 new owners plus the corresponding source links (`owner_source = 'manual'`). Ownership coverage moved from 20 → 38 of 54 active sources.
 
-### Follow-up: extend the Wikidata script to use P749 + P123
+### Property coverage: P127 + P749 + P123
 
-The 45-skip rate is the real blocker to automating this further. `scripts/seed-ownership.ts`'s `resolveOwner()` currently only chases `P127`; it should `UNION` in `P749` (parent organization) and `P123` (publisher), and `walkToConglomerate()` should follow the alternate chains when a direct P127 claim is absent. Once that lands, re-running the dry-run should resolve most of the 45 skipped outlets and produce a migration-promotable CSV.
+`resolveOwner()` chases three Wikidata ownership properties via a single UNION-backed SPARQL, in preference order:
 
-Also pending once the script improves:
-- Replace the two NULLed QIDs (`the-daily-beast`, `the-epoch-times`) with correct values from manual Wikidata lookup.
-- Re-author QIDs for the ~16 outlets deliberately omitted from 056 (jacobin, the-intercept, democracy-now, mother-jones, salon, the-american-prospect, forbes, daily-wire, washington-times, the-federalist, the-blaze, the-epoch-times, oann, reason, realclearpolitics, the-dispatch) after script improvement makes owner resolution reliable for them.
+| Property | Meaning | Why it matters |
+|----------|---------|----------------|
+| `P127`   | owned by | Strongest signal. Rarely set directly on news-outlet entities. |
+| `P749`   | parent organization | Most common for news outlets inside a corporate group (e.g. CNN → WarnerMedia). |
+| `P123`   | publisher | Fallback when neither of the above is set. |
+
+When the same owner is claimed via multiple properties, the resolver keeps the strongest one. When multiple distinct owners exist, it prefers the stronger-property tier first, then preferred-rank within that tier; it only emits `mismatch` when the top tier is truly tied.
+
+Confidence is downgraded one tier when the resolved property is weaker than P127:
+
+| Hops / Property | `P127` | `P749` | `P123` |
+|-----------------|--------|--------|--------|
+| 0 (direct)      | high   | medium | medium |
+| 1               | medium | low    | low    |
+| 2+              | low    | low    | low    |
+
+Expect the dry-run against the 60 QIDs seeded in 055 to drop skip-row count substantially (baseline was 45 under P127-only). The CSV `notes` column surfaces which property matched (`"Resolved via P749 (parent organization)"`).
+
+Still pending:
+- Replace the two NULLed QIDs (`the-daily-beast`, `the-epoch-times`) with correct values from manual Wikidata lookup — landed in migration 057.
+- Author owners for the ~16 outlets deliberately omitted from 056 (jacobin, the-intercept, democracy-now, mother-jones, salon, the-american-prospect, forbes, daily-wire, washington-times, the-federalist, the-blaze, the-epoch-times, oann, reason, realclearpolitics, the-dispatch) — landed in migration 057 using the extended script's CSV as input.
 
 ### Authoring a future migration (once the script produces usable CSV)
 

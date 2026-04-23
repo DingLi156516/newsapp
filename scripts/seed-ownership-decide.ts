@@ -19,6 +19,14 @@ export interface SourceRow {
   } | null
 }
 
+/**
+ * Wikidata ownership properties chased by the resolver, in preference order.
+ * P127 is an explicit "owned by" claim (strongest); P749 is "parent
+ * organization" (most common for news outlets inside a corporate group); P123
+ * is "publisher" (weakest but still useful when neither of the above exist).
+ */
+export type OwnershipProperty = 'P127' | 'P749' | 'P123'
+
 export interface ResolvedOwner {
   readonly qid: string
   readonly name: string
@@ -26,6 +34,70 @@ export interface ResolvedOwner {
   readonly inception: string | null
   readonly instanceOf: readonly string[]
   readonly hops: number
+  readonly property: OwnershipProperty
+}
+
+/**
+ * Derive base confidence from hop count + matched property. P127 is the
+ * strongest signal; P749/P123 downgrade one tier. Kept pure so it can be
+ * unit-tested independently of the SPARQL + Supabase side effects in the
+ * top-level script.
+ */
+export function deriveConfidence(
+  hops: number,
+  property: OwnershipProperty
+): Confidence {
+  if (property === 'P127') {
+    if (hops === 0) return 'high'
+    if (hops === 1) return 'medium'
+    return 'low'
+  }
+  // P749 / P123 — one tier weaker than the equivalent P127 hop.
+  if (hops === 0) return 'medium'
+  return 'low'
+}
+
+/**
+ * Ownership properties in strongest-first preference order. Used both to
+ * deduplicate owners that appear under multiple properties and to score
+ * candidate statements during selection.
+ */
+export const PROPERTY_STRENGTH: Record<OwnershipProperty, number> = {
+  P127: 3,
+  P749: 2,
+  P123: 1,
+}
+
+/**
+ * A single Wikidata ownership statement. Keeping (property, rank) coupled
+ * per-statement — rather than storing aggregated max/any flags per owner —
+ * is load-bearing for candidate selection: a group with "preferred P749 +
+ * normal P127" must not be scored as if its P127 claim were preferred.
+ */
+export interface Statement {
+  readonly property: OwnershipProperty
+  readonly rank: 'preferred' | 'normal'
+}
+
+/**
+ * Pick the strongest statement for an owner: preferred rank beats normal,
+ * with property strength breaking ties within a rank tier. Each returned
+ * statement corresponds to exactly one Wikidata claim — (property, rank)
+ * are never synthesized across different claims.
+ */
+export function bestStatement(statements: readonly Statement[]): Statement {
+  return [...statements].sort(compareStatements)[0]
+}
+
+/**
+ * Statement ordering: preferred-rank first, then strongest property.
+ * Returns <0 when `a` is stronger, >0 when `b` is stronger, 0 when tied.
+ */
+export function compareStatements(a: Statement, b: Statement): number {
+  const rankA = a.rank === 'preferred' ? 0 : 1
+  const rankB = b.rank === 'preferred' ? 0 : 1
+  if (rankA !== rankB) return rankA - rankB
+  return PROPERTY_STRENGTH[b.property] - PROPERTY_STRENGTH[a.property]
 }
 
 export type BackfillAction = 'insert' | 'link' | 'skip' | 'mismatch' | 'confirmed'
