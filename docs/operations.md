@@ -1125,23 +1125,33 @@ The script is CSV-only: it refuses to run without `--dry-run`. Output is sorted 
 
 ### Prerequisite: `sources.wikidata_qid`
 
-The script reads `sources.wikidata_qid` to drive SPARQL lookups. **As of 2026-04-21 that column does not exist** in the `sources` schema (not present in `lib/supabase/types.ts` and not created by any migration). Running the script currently fails with:
+The script reads `sources.wikidata_qid` to drive SPARQL lookups. The column was added and populated with 60 QIDs in `055_sources_wikidata_qid.sql`.
 
-```
-Failed to fetch sources: column sources.wikidata_qid does not exist
-```
+052 was originally reserved for `ownership_backfill.sql` but the file was never written — Phase 3 (`053_story_views.sql` + `054_trending_engagement_factor.sql`) shipped past it before the prereq landed. Since 053+054 are already in production, the 052 gap is permanent.
 
-Before any owner backfill can happen, a preparatory migration must:
-1. Add `wikidata_qid TEXT` to the `sources` table.
-2. Populate it per outlet (operator research; QIDs are small — e.g. NYT=`Q9684`, BBC News=`Q9531`).
+### Why 056 was hand-authored
 
-052 was originally reserved for `ownership_backfill.sql` but the file was never written — Phase 3 (`053_story_views.sql` + `054_trending_engagement_factor.sql`) shipped past it before the prereq landed. Since 053+054 are already in production, the 052 gap is permanent. The prereq column ships in `055_sources_wikidata_qid.sql`; the actual backfill should be authored as `056_ownership_backfill.sql` (or whatever is next).
+After 055 landed, a dry-run of `scripts/seed-ownership.ts` against the 60 newly-seeded QIDs produced effectively zero usable output:
 
-Part A (owner profile page + `/api/owners/by-slug/[slug]`) ships independently and operates on the existing 20 hand-seeded owners while the backfill is pending.
+- **45 skips** — "No P127 claim found on Wikidata". The script only queries property `P127` ("owned by"), but news outlets typically express ownership via `P749` ("parent organization") or `P123` ("publisher"). P127 is rarely present on a news-outlet Q-entity.
+- **2 mismatches** — both were owners already correctly linked in migration 048 (NYT, Guardian); the script flagged them because its SPARQL chain stops at different nodes.
+- **2 wrong inserts** — two of the QIDs in 055 turned out to be Q-id collisions against unrelated entities:
+  - `the-daily-beast` → Q473677 = Cistercians (12th-century Catholic religious order)
+  - `the-epoch-times` → Q1165602 = VIVAQUA (Belgian water utility)
 
-### Authoring the migration (once the prerequisite lands)
+Rather than wait on a script rewrite, coverage was landed via `056_ownership_backfill.sql`: a hand-authored migration that (a) NULLs the two bad QIDs above and (b) inserts 18 new owners plus the corresponding source links (`owner_source = 'manual'`). Ownership coverage moved from 20 → 38 of 54 active sources.
+
+### Follow-up: extend the Wikidata script to use P749 + P123
+
+The 45-skip rate is the real blocker to automating this further. `scripts/seed-ownership.ts`'s `resolveOwner()` currently only chases `P127`; it should `UNION` in `P749` (parent organization) and `P123` (publisher), and `walkToConglomerate()` should follow the alternate chains when a direct P127 claim is absent. Once that lands, re-running the dry-run should resolve most of the 45 skipped outlets and produce a migration-promotable CSV.
+
+Also pending once the script improves:
+- Replace the two NULLed QIDs (`the-daily-beast`, `the-epoch-times`) with correct values from manual Wikidata lookup.
+- Re-author QIDs for the ~16 outlets deliberately omitted from 056 (jacobin, the-intercept, democracy-now, mother-jones, salon, the-american-prospect, forbes, daily-wire, washington-times, the-federalist, the-blaze, the-epoch-times, oann, reason, realclearpolitics, the-dispatch) after script improvement makes owner resolution reliable for them.
+
+### Authoring a future migration (once the script produces usable CSV)
 
 1. Run the dry-run command above.
 2. Open the CSV, review every row; keep only `action = 'insert'` or `'link'` with `confidence = 'high'` for the first pass.
-3. Create `supabase/migrations/056_ownership_backfill.sql` (next available — 052 is a permanent gap, 053–055 are taken) using migration 048 as a format reference: `INSERT INTO media_owners (...)` for new owners (always `owner_source = 'wikidata'`, `owner_verified_at = now()`), then `UPDATE sources SET owner_id = (SELECT id FROM media_owners WHERE slug = ?) WHERE slug = ?` for each link. Do not touch existing `owner_source = 'manual'` rows.
+3. Create `supabase/migrations/NNN_ownership_backfill_wikidata.sql` using migration 048 as a format reference: `INSERT INTO media_owners (...)` for new owners (use `owner_source = 'wikidata'`, `owner_verified_at = now()`), then `UPDATE sources SET owner_id = (SELECT id FROM media_owners WHERE slug = ?) WHERE slug = ?` for each link. Do not touch existing `owner_source = 'manual'` rows.
 4. Apply via `npx supabase db push --linked` and update `lib/supabase/types.ts` if any new enum values or columns were added.
